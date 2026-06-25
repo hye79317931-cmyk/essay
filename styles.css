@@ -716,3 +716,32 @@
   -webkit-overflow-scrolling: touch !important;
   overscroll-behavior: contain !important;
 }
+
+/* === v14 해설/채점 필기 S펜 전용 + 캔버스 크기 보정 === */
+#scoreAnswerEditWrap,
+#scoreExplanationEditWrap {
+  position: relative !important;
+  overflow: auto !important;
+  -webkit-overflow-scrolling: touch !important;
+  touch-action: none !important;
+  overscroll-behavior: contain !important;
+}
+#scoreAnswerCanvas,
+#scoreExplanationCanvas {
+  position: absolute !important;
+  left: 0 !important;
+  top: 0 !important;
+  z-index: 20 !important;
+  touch-action: none !important;
+  pointer-events: auto !important;
+}
+#scoreExplanationEditWrap img,
+#explanationImageView {
+  display: block !important;
+  max-width: none !important;
+  object-fit: contain !important;
+}
+#scoreAnswerCanvas.is-panning,
+#scoreExplanationCanvas.is-panning {
+  cursor: grabbing;
+}
