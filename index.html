@@ -13,7 +13,7 @@
   <header class="app-header">
     <div>
       <h1>2차 서술형 답안연습</h1>
-      <p>PSAT 앱 기반 v6 · 형법 · 형사소송법 · 행정법 · 교정학 · 페이지 추가 · 페이지 넘김</p>
+      <p>PSAT 앱 기반 v8 · 형법 · 형사소송법 · 행정법 · 교정학 · 페이지 추가 · 페이지 넘김</p>
     </div>
     <button id="installBtn" class="install-btn hidden" type="button">홈화면 설치</button>
   </header>
@@ -102,17 +102,33 @@
   <section id="solveOverlay" class="overlay hidden">
     <div class="solve-shell">
       <aside class="solve-side"><div class="timer-box"><span>풀이시간</span><strong id="timerText">00:00</strong><small id="limitText"></small></div><button id="exitSolveBtn" class="side-btn" type="button">중단</button><button id="submitAnswerBtn" class="side-btn primary" type="button">제출</button><button id="penToolBtn" class="side-btn ink-active" type="button">펜</button><button id="eraserToolBtn" class="side-btn" type="button">지우개</button><button id="clearInkBtn" class="side-btn" type="button">필기삭제</button><label class="ink-size-label">굵기<input id="inkSizeInput" type="range" min="1" max="12" value="3" /></label><button id="prevQuestionPageBtn" class="side-btn" type="button">이전쪽</button><button id="nextQuestionPageBtn" class="side-btn" type="button">다음쪽</button><button id="fitBtn" class="side-btn" type="button">맞춤</button><button id="zoomInBtn" class="side-btn" type="button">확대</button><button id="zoomOutBtn" class="side-btn" type="button">축소</button></aside>
-      <div class="solve-main"><div class="solve-head"><div><h2 id="solveTitle">문제</h2><p id="solveMeta" class="meta"></p></div><div><span id="setBadge" class="badge"></span><span id="questionPageBadge" class="badge"></span></div></div><div class="solve-body"><div class="image-pane"><div id="questionImageScroller" class="image-scroller"><div id="imageCanvasWrap" class="image-canvas-wrap"><img id="questionImageView" alt="문제 이미지" /><canvas id="inkCanvas" aria-label="스타일러스 필기 레이어"></canvas></div></div></div><div class="answer-pane"><label id="answerLabel">내 답안</label><textarea id="answerText" placeholder="여기에 답안을 작성하세요."></textarea></div></div></div>
+      <div class="solve-main"><div class="solve-head"><div><h2 id="solveTitle">문제</h2><p id="solveMeta" class="meta"></p></div><div><span id="setBadge" class="badge"></span><span id="questionPageBadge" class="badge"></span></div></div><div class="solve-body"><div class="image-pane"><div id="questionImageScroller" class="image-scroller"><div id="imageCanvasWrap" class="image-canvas-wrap"><img id="questionImageView" alt="문제 이미지" /><canvas id="inkCanvas" aria-label="스타일러스 필기 레이어"></canvas></div></div></div><div class="answer-pane answer-dual-pane">
+            <div class="answer-topbar">
+              <label id="answerLabel">내 답안</label>
+              <button id="keyboardToggleBtn" class="secondary small" type="button">키보드 입력</button>
+            </div>
+            <div id="handwritingWrap" class="handwriting-wrap">
+              <canvas id="answerInkCanvas" aria-label="답안 손글씨 입력"></canvas>
+              <div class="answer-pad-hint">S펜으로 여기에 답안을 작성하세요</div>
+            </div>
+            <textarea id="answerText" class="hidden" placeholder="여기에 키보드로 답안을 작성하세요."></textarea>
+            <div class="answer-bottom-tools">
+              <button id="answerPenBtn" class="secondary small ink-active" type="button">답안펜</button>
+              <button id="answerEraserBtn" class="secondary small" type="button">답안지우개</button>
+              <button id="clearAnswerInkBtn" class="secondary small" type="button">답안필기삭제</button>
+              <label class="answer-size-label">답안 굵기<input id="answerInkSizeInput" type="range" min="1" max="14" value="3" /></label>
+            </div>
+          </div></div></div>
     </div>
   </section>
 
   <section id="scoreOverlay" class="overlay hidden">
     <div class="score-shell"><div class="score-head"><div><h2>자가채점</h2><p id="scoreMeta" class="meta"></p></div><button id="backToAnswerBtn" class="secondary" type="button">답안 수정</button></div>
-      <div class="score-grid"><section class="score-box"><h3>내 답안</h3><pre id="ownAnswerView"></pre></section><section class="score-box"><div class="score-title-row"><h3>해설 / 모범답안</h3><span id="explanationPageBadge" class="badge"></span></div><div class="row wrap small-gap"><button id="prevExplanationPageBtn" class="secondary small" type="button">이전 해설</button><button id="nextExplanationPageBtn" class="secondary small" type="button">다음 해설</button></div><img id="explanationImageView" class="explanation-image hidden" alt="해설 이미지" /><pre id="modelTextView"></pre></section></div>
+      <div class="score-grid"><section class="score-box"><h3>내 답안</h3><pre id="ownAnswerView"></pre><img id="ownAnswerInkView" class="answer-ink-preview hidden" alt="손글씨 답안" /></section><section class="score-box"><div class="score-title-row"><h3>해설 / 모범답안</h3><span id="explanationPageBadge" class="badge"></span></div><div class="row wrap small-gap"><button id="prevExplanationPageBtn" class="secondary small" type="button">이전 해설</button><button id="nextExplanationPageBtn" class="secondary small" type="button">다음 해설</button></div><img id="explanationImageView" class="explanation-image hidden" alt="해설 이미지" /><pre id="modelTextView"></pre></section></div>
       <section class="card score-card"><h3>채점포인트</h3><div id="pointChecklist" class="checklist"></div><div class="grid four"><label>점수<input id="attemptScoreInput" type="number" min="0" step="0.5" /></label><label>난이도<select id="difficultyResultInput"><option value="중">중</option><option value="상">상</option><option value="하">하</option></select></label><label>복습필요<select id="needReviewInput"><option value="true">예</option><option value="false">아니오</option></select></label><label>완성도<select id="completionInput"><option value="목차만">목차만</option><option value="불완전">불완전</option><option value="완성">완성</option></select></label></div><label>채점 메모<textarea id="memoInput" rows="3" placeholder="누락 쟁점, 다음 복습 포인트"></textarea></label><div class="row wrap"><button id="saveAttemptBtn" type="button">기록 저장</button><button id="saveAndNextBtn" class="secondary" type="button">저장 후 다음</button><button id="finishBtn" class="secondary" type="button">저장 후 끝내기</button></div></section>
     </div>
   </section>
   <div id="toast" class="toast hidden"></div>
-  <script src="app.js?v=6"></script>
+  <script src="app.js?v=8"></script>
 </body>
 </html>

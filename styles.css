@@ -57,3 +57,96 @@
   line-height: 1.5;
   margin: 12px;
 }
+
+/* === v8 문제 이미지/답안 손글씨 수정 === */
+.image-canvas-wrap {
+  position: relative;
+  display: inline-block;
+  line-height: 0;
+}
+#questionImageView {
+  width: auto;
+  height: auto;
+}
+#inkCanvas {
+  pointer-events: auto;
+}
+.answer-dual-pane {
+  gap: 8px;
+}
+.answer-topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+.handwriting-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: white;
+  overflow: hidden;
+}
+#answerInkCanvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: pan-x pan-y;
+  background:
+    linear-gradient(#eef2f7 1px, transparent 1px) 0 28px/100% 32px,
+    #fff;
+}
+.answer-pad-hint {
+  position: absolute;
+  left: 18px;
+  top: 18px;
+  color: #94a3b8;
+  font-size: 1rem;
+  pointer-events: none;
+}
+.handwriting-wrap.has-ink .answer-pad-hint {
+  display: none;
+}
+.answer-bottom-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.answer-size-label {
+  color: #344054;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: .78rem;
+  font-weight: 900;
+}
+.answer-size-label input {
+  width: 92px;
+  padding: 0;
+  accent-color: #38bdf8;
+}
+#answerText:not(.hidden) {
+  flex: 1;
+  min-height: 0;
+}
+.answer-ink-preview {
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: white;
+  margin-top: 10px;
+}
+.empty-image-note {
+  padding: 18px;
+  background: white;
+  border: 2px dashed #cbd5e1;
+  border-radius: 16px;
+  color: #64748b;
+  font-weight: 900;
+  line-height: 1.5;
+  margin: 12px;
+}
