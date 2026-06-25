@@ -610,3 +610,88 @@
 @media (max-width: 860px) {
   .v11-shell { grid-template-rows: 48dvh 10px calc(52dvh - 10px) !important; }
 }
+
+/* === v12 해설폭/상단/펜크기/문제손가락슬라이드 수정 === */
+.score-shell {
+  padding: 6px !important;
+}
+.score-head {
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 80 !important;
+  margin-bottom: 6px !important;
+  padding: 6px 8px !important;
+  border-radius: 12px !important;
+  min-height: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+}
+.score-head h2 {
+  font-size: .98rem !important;
+  margin: 0 !important;
+  white-space: nowrap !important;
+}
+.score-head .meta,
+#scoreMeta {
+  font-size: .72rem !important;
+  margin: 0 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  max-width: 54vw !important;
+}
+.score-head button {
+  padding: 6px 10px !important;
+  font-size: .72rem !important;
+  border-radius: 999px !important;
+}
+.score-box {
+  padding: 8px !important;
+  border-radius: 14px !important;
+}
+.score-box h3 {
+  font-size: .95rem !important;
+  margin-bottom: 6px !important;
+}
+.score-title-row {
+  gap: 6px !important;
+}
+#scoreExplanationEditWrap {
+  width: 100% !important;
+  max-width: 100% !important;
+  overflow: auto !important;
+  -webkit-overflow-scrolling: touch !important;
+}
+#scoreExplanationEditWrap img,
+#explanationImageView {
+  width: 100% !important;
+  max-width: 100% !important;
+  height: auto !important;
+  display: block !important;
+  object-fit: contain !important;
+}
+#scoreExplanationCanvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+#scoreAnswerCanvas,
+#scoreExplanationCanvas {
+  touch-action: none !important;
+}
+.score-grid {
+  gap: 8px !important;
+}
+@media (max-width: 820px) {
+  .score-grid { grid-template-columns: 1fr !important; }
+  .score-head {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    gap: 6px !important;
+  }
+}
+#inkCanvas {
+  touch-action: none !important;
+}
+.v11-scroller, .v10-scroller, .image-scroller {
+  overscroll-behavior: contain !important;
+}
