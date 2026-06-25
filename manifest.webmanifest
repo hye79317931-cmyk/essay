@@ -2,12 +2,12 @@
   "name": "2차 서술형 답안연습",
   "short_name": "2차답안",
   "id": "/essay/",
-  "start_url": "./?v=3",
+  "start_url": "./?v=5",
   "scope": "./",
   "display": "standalone",
   "background_color": "#f5f7fb",
   "theme_color": "#111827",
-  "description": "PSAT 앱 기반 2차 서술형 답안연습 앱",
+  "description": "PSAT 앱 기반 2차 서술형 답안연습",
   "icons": [
     {
       "src": "icon-192.png",
@@ -21,5 +21,9 @@
       "type": "image/png",
       "purpose": "any maskable"
     }
+  ],
+  "display_override": [
+    "standalone",
+    "minimal-ui"
   ]
 }
