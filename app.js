@@ -1,4 +1,4 @@
-const ESSAY_APP_VERSION = "v9";
+const ESSAY_APP_VERSION = "v10";
 console.log("Essay app", ESSAY_APP_VERSION);
 const DB_NAME = "essayExamDB_v2";
 const DB_VERSION = 1;
@@ -227,6 +227,43 @@ async function pasteImageFromClipboardEvent(event, explicitTarget=""){
   return true;
 }
 
+
+async function requestClipboardPermission(kind){
+  const target = kind === "model" ? "model" : "question";
+  setPasteTarget(target);
+  const zone = target === "question" ? $("questionPaste") : $("modelPaste");
+  if (zone) {
+    zone.focus();
+    zone.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  if (!navigator.clipboard || !navigator.clipboard.read) {
+    toast("이 Chrome에서는 이미지 클립보드 권한을 지원하지 않아. 사이트 설정 확인이 필요해.");
+    return;
+  }
+
+  try {
+    if (navigator.permissions && navigator.permissions.query) {
+      try {
+        const status = await navigator.permissions.query({ name: "clipboard-read" });
+        if (status.state === "denied") {
+          toast("이미 차단된 상태야. 주소창 왼쪽 아이콘 → 권한 → 클립보드 허용으로 바꿔줘.");
+          return;
+        }
+      } catch (_) {
+        // Some mobile browsers do not expose clipboard-read through Permissions API.
+      }
+    }
+
+    // This is the browser permission trigger. The user must tap Allow in the browser prompt.
+    await navigator.clipboard.read();
+    toast("클립보드 권한 확인 완료. 이제 스샷 붙여넣기를 눌러줘.");
+  } catch (err) {
+    console.warn("Clipboard permission request failed:", err);
+    toast("권한 요청이 차단됐어. 주소창 왼쪽 아이콘 → 사이트 설정 → 클립보드 허용으로 바꿔줘.");
+  }
+}
+
 function setupPasteZone(zoneId,fileId,previewIdOrKind,maybeKind){
   const kind=maybeKind || previewIdOrKind;
   const zone=$(zoneId), fileInput=$(fileId);
@@ -355,7 +392,7 @@ function setupEvents(){
   setupTabs(); setupInstallButton();
   ["practiceSubject","practiceSession","practiceMode","practiceCount","listSubject","listSession","listSearch","listSort","reviewSubject","reviewSession","reviewType","reviewSort"].forEach(id=>{ $(id).addEventListener("input",renderAll); $(id).addEventListener("change",renderAll); });
   setupPasteZone("questionPaste","questionFile","question"); setupPasteZone("modelPaste","modelFile","model");
-  bindEventIfExists("pasteQuestionBtn","click",()=>pasteImageFromClipboard("question")); bindEventIfExists("pasteModelBtn","click",()=>pasteImageFromClipboard("model")); bindEventIfExists("addModelBtn","click",()=>$("modelFile")?.click());
+  bindEventIfExists("pasteQuestionBtn","click",()=>pasteImageFromClipboard("question")); bindEventIfExists("clipPermQuestionBtn","click",()=>requestClipboardPermission("question")); bindEventIfExists("pasteModelBtn","click",()=>pasteImageFromClipboard("model")); bindEventIfExists("clipPermModelBtn","click",()=>requestClipboardPermission("model")); bindEventIfExists("addModelBtn","click",()=>$("modelFile")?.click());
   bindEventIfExists("clearQuestionBtn","click",()=>{ questionImages=[]; renderImagePages(); }); bindEventIfExists("clearModelBtn","click",()=>{ modelImages=[]; renderImagePages(); });
   $("problemForm").addEventListener("submit",async e=>{ e.preventDefault(); await saveProblem(false); }); $("saveNextEditBtn").addEventListener("click",async()=>saveProblem(true)); $("resetFormBtn").addEventListener("click",async()=>resetForm(true)); $("toggleModelTextBtn").addEventListener("click",()=>$("modelTextWrap").classList.toggle("hidden"));
   $("startRandomBtn").addEventListener("click",()=>startRandom(false)); $("startReviewRandomBtn").addEventListener("click",()=>startRandom(true)); $("continueDraftBtn").addEventListener("click",continueDraft);
@@ -371,5 +408,5 @@ function setupEvents(){
   $("essayQuestionImage").addEventListener("load",fitZoom);
 }
 
-async function init(){ db=await openDB(); await loadData(); await restoreFormPrefs(); setupEvents(); renderAll(); if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js?v=9").catch(()=>{}); }
+async function init(){ db=await openDB(); await loadData(); await restoreFormPrefs(); setupEvents(); renderAll(); if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js?v=10").catch(()=>{}); }
 init().catch(err=>{ console.error(err); alert("앱 초기화 실패: "+err.message); });
