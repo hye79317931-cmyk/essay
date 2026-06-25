@@ -1,4 +1,4 @@
-const ESSAY_APP_VERSION = "v5";
+const ESSAY_APP_VERSION = "v6";
 console.log("Essay app", ESSAY_APP_VERSION);
 const DB_NAME = "essayExamDB_v2";
 const DB_VERSION = 1;
@@ -9,6 +9,15 @@ let db, problems = [], attempts = [];
 let questionImageData = "", modelImageData = "";
 let activeSession = null, timerHandle = null, zoom = 1, currentAttemptSnapshot = null;
 const $ = (id) => document.getElementById(id);
+
+function bindEventIfExists(id, eventName, handler) {
+  const el = $(id);
+  if (!el) {
+    console.warn("Missing element:", id);
+    return;
+  }
+  el.addEventListener(eventName, handler);
+}
 
 function uuid(){ return (crypto.randomUUID && crypto.randomUUID()) || `id_${Date.now()}_${Math.random().toString(16).slice(2)}`; }
 function nowIso(){ return new Date().toISOString(); }
@@ -297,21 +306,21 @@ function setupEvents(){
   setupTabs(); setupInstallButton();
   ["practiceSubject","practiceSession","practiceMode","practiceCount","listSubject","listSession","listSearch","listSort","reviewSubject","reviewSession","reviewType","reviewSort"].forEach(id=>{ $(id).addEventListener("input",renderAll); $(id).addEventListener("change",renderAll); });
   setupPasteZone("questionPaste","questionFile","question"); setupPasteZone("modelPaste","modelFile","model");
-  $("pasteQuestionBtn").addEventListener("click",()=>pasteImageFromClipboard("question")); $("pasteModelBtn").addEventListener("click",()=>pasteImageFromClipboard("model")); $("addModelBtn").addEventListener("click",()=>$("modelFile").click());
-  $("clearQuestionBtn").addEventListener("click",()=>{ questionImages=[]; renderImagePages(); }); $("clearModelBtn").addEventListener("click",()=>{ modelImages=[]; renderImagePages(); });
+  bindEventIfExists("pasteQuestionBtn","click",()=>pasteImageFromClipboard("question")); bindEventIfExists("pasteModelBtn","click",()=>pasteImageFromClipboard("model")); bindEventIfExists("addModelBtn","click",()=>$("modelFile")?.click());
+  bindEventIfExists("clearQuestionBtn","click",()=>{ questionImages=[]; renderImagePages(); }); bindEventIfExists("clearModelBtn","click",()=>{ modelImages=[]; renderImagePages(); });
   $("problemForm").addEventListener("submit",async e=>{ e.preventDefault(); await saveProblem(false); }); $("saveNextEditBtn").addEventListener("click",async()=>saveProblem(true)); $("resetFormBtn").addEventListener("click",async()=>resetForm(true)); $("toggleModelTextBtn").addEventListener("click",()=>$("modelTextWrap").classList.toggle("hidden"));
   $("startRandomBtn").addEventListener("click",()=>startRandom(false)); $("startReviewRandomBtn").addEventListener("click",()=>startRandom(true)); $("continueDraftBtn").addEventListener("click",continueDraft);
   document.querySelectorAll("[data-quick-subject]").forEach(b=>b.addEventListener("click",()=>{ $("practiceSubject").value=b.dataset.quickSubject; startRandom(false); }));
   $("answerText").addEventListener("input",()=>{ if(!activeSession)return; activeSession.answerText=$("answerText").value; saveActiveDraft(); });
   $("pauseBtn").addEventListener("click",pausePractice); $("submitBtn").addEventListener("click",submitPractice);
-  $("prevPageBtn").addEventListener("click",()=>showQuestionPage(questionPageIndex-1)); $("nextPageBtn").addEventListener("click",()=>showQuestionPage(questionPageIndex+1));
+  bindEventIfExists("prevPageBtn","click",()=>showQuestionPage(questionPageIndex-1)); bindEventIfExists("nextPageBtn","click",()=>showQuestionPage(questionPageIndex+1));
   $("zoomFitBtn").addEventListener("click",fitZoom); $("zoomInBtn").addEventListener("click",()=>{ zoom=Math.min(3,zoom+0.15); applyZoom(); }); $("zoomOutBtn").addEventListener("click",()=>{ zoom=Math.max(0.2,zoom-0.15); applyZoom(); });
-  $("prevModelPageBtn").addEventListener("click",()=>showModelPage(modelPageIndex-1)); $("nextModelPageBtn").addEventListener("click",()=>showModelPage(modelPageIndex+1));
+  bindEventIfExists("prevModelPageBtn","click",()=>showModelPage(modelPageIndex-1)); bindEventIfExists("nextModelPageBtn","click",()=>showModelPage(modelPageIndex+1));
   $("closeScoreBtn").addEventListener("click",()=>{ $("scoreOverlay").classList.add("hidden"); if(activeSession){ activeSession.questionStart=Date.now(); clearInterval(timerHandle); timerHandle=setInterval(updateTimer,500); $("practiceOverlay").classList.remove("hidden"); } });
   $("saveAttemptBtn").addEventListener("click",saveAttempt); $("nextEssayBtn").addEventListener("click",saveAttemptAndNext); $("finishEssayBtn").addEventListener("click",async()=>{ await saveAttempt(); finishPractice(); });
   $("exportBtn").addEventListener("click",exportBackup); $("importInput").addEventListener("change",async()=>{ try{ await importBackup($("importInput").files?.[0]); }catch(e){ console.error(e); toast("복원 실패"); } $("importInput").value=""; }); $("wipeBtn").addEventListener("click",wipeAll);
   $("essayQuestionImage").addEventListener("load",fitZoom);
 }
 
-async function init(){ db=await openDB(); await loadData(); await restoreFormPrefs(); setupEvents(); renderAll(); if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js?v=5").catch(()=>{}); }
+async function init(){ db=await openDB(); await loadData(); await restoreFormPrefs(); setupEvents(); renderAll(); if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js?v=6").catch(()=>{}); }
 init().catch(err=>{ console.error(err); alert("앱 초기화 실패: "+err.message); });
