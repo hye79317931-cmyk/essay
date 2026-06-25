@@ -27,3 +27,33 @@
   width: 100%;
   accent-color: #38bdf8;
 }
+
+.page-item.selected-page {
+  border-color: #0284c7;
+  background: #ecfeff;
+  box-shadow: 0 0 0 3px rgba(14,165,233,.15);
+}
+.blank-thumb {
+  width: 95px;
+  height: 125px;
+  border: 2px dashed #94a3b8;
+  border-radius: 12px;
+  background: #f1f5f9;
+  display: grid;
+  place-items: center;
+  color: #64748b;
+  font-weight: 900;
+  text-align: center;
+  font-size: .8rem;
+  line-height: 1.3;
+}
+.empty-image-note {
+  padding: 18px;
+  background: white;
+  border: 2px dashed #cbd5e1;
+  border-radius: 16px;
+  color: #64748b;
+  font-weight: 900;
+  line-height: 1.5;
+  margin: 12px;
+}

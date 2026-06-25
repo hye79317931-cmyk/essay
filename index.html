@@ -13,7 +13,7 @@
   <header class="app-header">
     <div>
       <h1>2차 서술형 답안연습</h1>
-      <p>PSAT 앱 기반 v5 · 형법 · 형사소송법 · 행정법 · 교정학 · 페이지 추가 · 페이지 넘김</p>
+      <p>PSAT 앱 기반 v6 · 형법 · 형사소송법 · 행정법 · 교정학 · 페이지 추가 · 페이지 넘김</p>
     </div>
     <button id="installBtn" class="install-btn hidden" type="button">홈화면 설치</button>
   </header>
@@ -71,8 +71,8 @@
               <strong>문제 스크린샷</strong><span>PSAT 앱처럼 스크린샷 후 여기를 누르고 “문제 스샷 붙여넣기”를 누르면 문제 페이지로 추가됩니다.</span>
             </div>
             <label class="file-label">문제 이미지 파일로 선택<input id="questionFileInput" type="file" accept="image/*" multiple /></label>
-            <div class="row wrap small-gap"><button id="pasteQuestionBtn" class="secondary" type="button">문제 스샷 붙여넣기</button><button id="addQuestionFileBtn" class="secondary" type="button">문제 페이지 추가</button><button id="clearQuestionBtn" class="secondary" type="button">문제 이미지 비우기</button></div>
-            <p class="hint">문제 이미지는 여러 페이지 추가 가능. 아래에서 순서 변경/삭제 가능.</p>
+            <div class="row wrap small-gap"><button id="pasteQuestionBtn" class="secondary" type="button">문제 스샷 붙여넣기</button><button id="addQuestionFileBtn" class="secondary" type="button">문제 빈 페이지 추가</button><button id="clearQuestionBtn" class="secondary" type="button">문제 이미지 비우기</button></div>
+            <p class="hint">문제 빈 페이지 추가 → 해당 페이지 선택 → 스샷 붙여넣기 순서로 넣어. 아래에서 순서 변경/삭제 가능.</p>
             <div id="questionPageList" class="page-list"></div>
           </section>
 
@@ -82,8 +82,8 @@
               <strong>해설 스크린샷</strong><span>PSAT 앱처럼 스크린샷 후 여기를 누르고 “해설 스샷 붙여넣기”를 누르면 해설 페이지로 추가됩니다.</span>
             </div>
             <label class="file-label">해설 이미지 파일로 선택<input id="explanationFileInput" type="file" accept="image/*" multiple /></label>
-            <div class="row wrap small-gap"><button id="pasteExplanationBtn" class="secondary" type="button">해설 스샷 붙여넣기</button><button id="addExplanationFileBtn" class="secondary" type="button">해설 페이지 추가</button><button id="clearExplanationBtn" class="secondary" type="button">해설 이미지 비우기</button></div>
-            <p class="hint">해설도 여러 페이지 추가 가능. 채점 화면에서 페이지 넘김 가능.</p>
+            <div class="row wrap small-gap"><button id="pasteExplanationBtn" class="secondary" type="button">해설 스샷 붙여넣기</button><button id="addExplanationFileBtn" class="secondary" type="button">해설 빈 페이지 추가</button><button id="clearExplanationBtn" class="secondary" type="button">해설 이미지 비우기</button></div>
+            <p class="hint">해설 빈 페이지 추가 → 해당 페이지 선택 → 스샷 붙여넣기 순서로 넣어. 채점 화면에서 페이지 넘김 가능.</p>
             <div id="explanationPageList" class="page-list"></div>
           </section>
 
@@ -113,6 +113,6 @@
     </div>
   </section>
   <div id="toast" class="toast hidden"></div>
-  <script src="app.js?v=5"></script>
+  <script src="app.js?v=6"></script>
 </body>
 </html>
