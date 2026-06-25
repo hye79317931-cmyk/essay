@@ -1,0 +1,9 @@
+{
+  "name": "2차 서술형 답안연습",
+  "short_name": "2차답안",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f5f7fb",
+  "theme_color": "#111827",
+  "description": "형법, 형사소송법, 행정법, 교정학 서술형 답안 연습 앱"
+}
