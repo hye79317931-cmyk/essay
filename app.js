@@ -1,4 +1,4 @@
-const ESSAY_APP_VERSION = "v8";
+const ESSAY_APP_VERSION = "v9";
 console.log("Essay app", ESSAY_APP_VERSION);
 const DB_NAME = "essayExamDB_v2";
 const DB_VERSION = 1;
@@ -51,6 +51,15 @@ function showView(viewId){ document.querySelectorAll(".tab").forEach(b=>b.classL
 function setupTabs(){ document.querySelectorAll(".tab").forEach(btn=>btn.addEventListener("click",()=>showView(btn.dataset.view))); }
 
 async function restoreFormPrefs(){ $("subjectInput").value=await getSetting("lastSubject","형법"); $("sessionInput").value=await getSetting("lastSession",""); $("imageModeInput").value=await getSetting("lastImageMode","clear"); }
+
+
+function setPasteTarget(target){
+  activePasteTarget = target || "question";
+  const q = $("questionPaste");
+  const m = $("modelPaste");
+  if (q) q.classList.toggle("active-paste", activePasteTarget === "question");
+  if (m) m.classList.toggle("active-paste", activePasteTarget === "model");
+}
 
 function imageToDataUrl(file,mode){ return new Promise((resolve,reject)=>{ if(mode==="original"){ const r=new FileReader(); r.onload=()=>resolve(r.result); r.onerror=()=>reject(r.error); r.readAsDataURL(file); return; } const img=new Image(), r=new FileReader(); r.onload=()=>{ img.onload=()=>{ const maxDim=mode==="small"?1500:2400, scale=Math.min(1,maxDim/Math.max(img.width,img.height)), w=Math.max(1,Math.round(img.width*scale)), h=Math.max(1,Math.round(img.height*scale)); const c=document.createElement("canvas"); c.width=w; c.height=h; const ctx=c.getContext("2d"); ctx.fillStyle="white"; ctx.fillRect(0,0,w,h); ctx.drawImage(img,0,0,w,h); resolve(c.toDataURL("image/jpeg",mode==="small"?0.72:0.88)); }; img.onerror=reject; img.src=r.result; }; r.onerror=()=>reject(r.error); r.readAsDataURL(file); }); }
 function setupPasteZone(zoneId,fileId,previewId,kind){ const zone=$(zoneId), fileInput=$(fileId), preview=$(previewId); async function setImage(file){ if(!file)return; try{ const dataUrl=await imageToDataUrl(file,$("imageModeInput").value||"clear"); if(kind==="question")questionImageData=dataUrl; else modelImageData=dataUrl; preview.src=dataUrl; preview.classList.remove("hidden"); toast(`${kind==="question"?"문제":"모범답안"} 이미지 등록`); }catch(e){ console.error(e); toast("이미지를 처리하지 못했어"); } } zone.addEventListener("click",e=>{ if(e.target.tagName!=="INPUT")zone.focus(); }); zone.addEventListener("paste",async e=>{ const item=[...(e.clipboardData?.items||[])].find(i=>i.type.startsWith("image/")); if(!item)return; e.preventDefault(); await setImage(item.getAsFile()); }); fileInput.addEventListener("change",async()=>{ await setImage(fileInput.files?.[0]); fileInput.value=""; }); }
@@ -127,7 +136,8 @@ function setupInstallButton() {
   });
 }
 
-function setupEvents(){ setupTabs(); ["practiceSubject","practiceSession","practiceMode","practiceCount","listSubject","listSession","listSearch","listSort","reviewSubject","reviewSession","reviewType","reviewSort"].forEach(id=>{ $(id).addEventListener("input",renderAll); $(id).addEventListener("change",renderAll); }); setupPasteZone("questionPaste","questionFile","questionPreview","question"); setupPasteZone("modelPaste","modelFile","modelPreview","model"); $("problemForm").addEventListener("submit",async e=>{ e.preventDefault(); await saveProblem(false); }); $("saveNextEditBtn").addEventListener("click",async()=>saveProblem(true)); $("resetFormBtn").addEventListener("click",async()=>resetForm(true)); $("toggleModelTextBtn").addEventListener("click",()=>$("modelTextWrap").classList.toggle("hidden")); $("startRandomBtn").addEventListener("click",()=>startRandom(false)); $("startReviewRandomBtn").addEventListener("click",()=>startRandom(true)); $("continueDraftBtn").addEventListener("click",continueDraft); document.querySelectorAll("[data-quick-subject]").forEach(b=>b.addEventListener("click",()=>{ $("practiceSubject").value=b.dataset.quickSubject; startRandom(false); })); $("answerText").addEventListener("input",()=>{ if(!activeSession)return; activeSession.answerText=$("answerText").value; saveActiveDraft(); }); $("pauseBtn").addEventListener("click",pausePractice); $("submitBtn").addEventListener("click",submitPractice); $("zoomFitBtn").addEventListener("click",fitZoom); $("zoomInBtn").addEventListener("click",()=>{ zoom=Math.min(3,zoom+0.15); applyZoom(); }); $("zoomOutBtn").addEventListener("click",()=>{ zoom=Math.max(0.2,zoom-0.15); applyZoom(); }); $("closeScoreBtn").addEventListener("click",()=>{ $("scoreOverlay").classList.add("hidden"); if(activeSession){ activeSession.questionStart=Date.now(); clearInterval(timerHandle); timerHandle=setInterval(updateTimer,500); $("practiceOverlay").classList.remove("hidden"); } }); $("saveAttemptBtn").addEventListener("click",saveAttempt); $("nextEssayBtn").addEventListener("click",saveAttemptAndNext); $("finishEssayBtn").addEventListener("click",async()=>{ await saveAttempt(); finishPractice(); }); $("exportBtn").addEventListener("click",exportBackup); $("importInput").addEventListener("change",async()=>{ try{ await importBackup($("importInput").files?.[0]); }catch(e){ console.error(e); toast("복원 실패"); } $("importInput").value=""; }); $("wipeBtn").addEventListener("click",wipeAll); $("essayQuestionImage").addEventListener("load",fitZoom); }
+function setupEvents(){
+  document.addEventListener("paste", pasteImageFromClipboardEvent); setupTabs(); ["practiceSubject","practiceSession","practiceMode","practiceCount","listSubject","listSession","listSearch","listSort","reviewSubject","reviewSession","reviewType","reviewSort"].forEach(id=>{ $(id).addEventListener("input",renderAll); $(id).addEventListener("change",renderAll); }); setupPasteZone("questionPaste","questionFile","questionPreview","question"); setupPasteZone("modelPaste","modelFile","modelPreview","model"); $("problemForm").addEventListener("submit",async e=>{ e.preventDefault(); await saveProblem(false); }); $("saveNextEditBtn").addEventListener("click",async()=>saveProblem(true)); $("resetFormBtn").addEventListener("click",async()=>resetForm(true)); $("toggleModelTextBtn").addEventListener("click",()=>$("modelTextWrap").classList.toggle("hidden")); $("startRandomBtn").addEventListener("click",()=>startRandom(false)); $("startReviewRandomBtn").addEventListener("click",()=>startRandom(true)); $("continueDraftBtn").addEventListener("click",continueDraft); document.querySelectorAll("[data-quick-subject]").forEach(b=>b.addEventListener("click",()=>{ $("practiceSubject").value=b.dataset.quickSubject; startRandom(false); })); $("answerText").addEventListener("input",()=>{ if(!activeSession)return; activeSession.answerText=$("answerText").value; saveActiveDraft(); }); $("pauseBtn").addEventListener("click",pausePractice); $("submitBtn").addEventListener("click",submitPractice); $("zoomFitBtn").addEventListener("click",fitZoom); $("zoomInBtn").addEventListener("click",()=>{ zoom=Math.min(3,zoom+0.15); applyZoom(); }); $("zoomOutBtn").addEventListener("click",()=>{ zoom=Math.max(0.2,zoom-0.15); applyZoom(); }); $("closeScoreBtn").addEventListener("click",()=>{ $("scoreOverlay").classList.add("hidden"); if(activeSession){ activeSession.questionStart=Date.now(); clearInterval(timerHandle); timerHandle=setInterval(updateTimer,500); $("practiceOverlay").classList.remove("hidden"); } }); $("saveAttemptBtn").addEventListener("click",saveAttempt); $("nextEssayBtn").addEventListener("click",saveAttemptAndNext); $("finishEssayBtn").addEventListener("click",async()=>{ await saveAttempt(); finishPractice(); }); $("exportBtn").addEventListener("click",exportBackup); $("importInput").addEventListener("change",async()=>{ try{ await importBackup($("importInput").files?.[0]); }catch(e){ console.error(e); toast("복원 실패"); } $("importInput").value=""; }); $("wipeBtn").addEventListener("click",wipeAll); $("essayQuestionImage").addEventListener("load",fitZoom); }
 
 
 
@@ -168,50 +178,70 @@ async function addImageFiles(files, kind){
 }
 
 async function pasteImageFromClipboard(kind){
-  const zone = kind === "question" ? $("questionPaste") : $("modelPaste");
-  const input = kind === "question" ? $("questionFile") : $("modelFile");
+  const target = kind === "model" ? "model" : "question";
+  setPasteTarget(target);
+  const zone = target === "question" ? $("questionPaste") : $("modelPaste");
   if (zone) {
     zone.focus();
     zone.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
-  if (navigator.clipboard && navigator.clipboard.read) {
-    try {
-      const items = await navigator.clipboard.read();
-      const files = [];
-      for (const item of items) {
-        const type = item.types.find((t) => t.startsWith("image/"));
-        if (!type) continue;
-        const blob = await item.getType(type);
-        files.push(new File([blob], `${kind}_${Date.now()}.png`, { type }));
-      }
-      if (files.length) {
-        await addImageFiles(files, kind);
-        return;
-      }
-      toast("클립보드에 이미지가 없어. 스크린샷 파일을 선택해줘.");
-    } catch (err) {
-      console.warn("Clipboard image read failed:", err);
-      toast("모바일 권한이 막히면 파일 선택창으로 넣으면 돼.");
-    }
-  } else {
-    toast("이 브라우저는 버튼 붙여넣기를 지원하지 않아. 파일 선택창으로 넣어줘.");
+  if (!navigator.clipboard || !navigator.clipboard.read) {
+    toast("이 브라우저는 버튼 붙여넣기를 지원하지 않아. 영역 클릭 후 Ctrl+V를 눌러줘.");
+    return;
   }
 
-  if (input) input.click();
+  try {
+    const items = await navigator.clipboard.read();
+    const files = [];
+    for (const item of items) {
+      const type = item.types.find((t) => t.startsWith("image/"));
+      if (!type) continue;
+      const blob = await item.getType(type);
+      files.push(new File([blob], `${target}_${Date.now()}.png`, { type }));
+    }
+    if (files.length) {
+      await addImageFiles(files, target);
+      setPasteTarget(target);
+      return;
+    }
+    toast("클립보드에 이미지가 없어");
+  } catch (err) {
+    console.warn("Clipboard image read failed:", err);
+    toast("붙여넣기 권한이 막혔어. 영역 클릭 후 다시 버튼을 누르거나 Ctrl+V를 눌러줘.");
+  }
+}
+
+async function pasteImageFromClipboardEvent(event, explicitTarget=""){
+  if (event.defaultPrevented) return false;
+  const items = event.clipboardData?.items ? Array.from(event.clipboardData.items) : [];
+  const files = items
+    .filter((entry) => entry.type && entry.type.startsWith("image/"))
+    .map((entry) => entry.getAsFile())
+    .filter(Boolean);
+  if (!files.length) return false;
+  event.preventDefault();
+  const target = explicitTarget || event.target.closest?.("[data-paste-target]")?.dataset?.pasteTarget || activePasteTarget || "question";
+  await addImageFiles(files, target === "model" ? "model" : "question");
+  setPasteTarget(target === "model" ? "model" : "question");
+  return true;
 }
 
 function setupPasteZone(zoneId,fileId,previewIdOrKind,maybeKind){
   const kind=maybeKind || previewIdOrKind;
   const zone=$(zoneId), fileInput=$(fileId);
-  zone.addEventListener("click",e=>{ if(e.target.tagName!=="INPUT") zone.focus(); });
-  zone.addEventListener("paste",async e=>{
-    const images=[...(e.clipboardData?.items||[])].filter(i=>i.type.startsWith("image/")).map(i=>i.getAsFile()).filter(Boolean);
-    if(!images.length) return;
-    e.preventDefault();
-    await addImageFiles(images, kind);
+  if (!zone || !fileInput) return;
+  zone.addEventListener("click",e=>{
+    setPasteTarget(kind);
+    if(e.target.tagName!=="INPUT") zone.focus();
   });
-  fileInput.addEventListener("change",async()=>{ await addImageFiles(fileInput.files, kind); fileInput.value=""; });
+  zone.addEventListener("focus",()=>setPasteTarget(kind));
+  zone.addEventListener("paste",async e=>pasteImageFromClipboardEvent(e, kind));
+  fileInput.addEventListener("change",async()=>{
+    await addImageFiles(fileInput.files, kind);
+    fileInput.value="";
+    setPasteTarget(kind);
+  });
 }
 
 function moveImage(kind,idx,dir){
@@ -321,6 +351,7 @@ function saveActiveDraft(){ if(!activeSession)return; activeSession.answerText=$
 function renderAll(){ renderPracticeList(); renderList(); renderReview(); renderStats(); renderContinueButton(); renderImagePages(); }
 
 function setupEvents(){
+  document.addEventListener("paste", pasteImageFromClipboardEvent);
   setupTabs(); setupInstallButton();
   ["practiceSubject","practiceSession","practiceMode","practiceCount","listSubject","listSession","listSearch","listSort","reviewSubject","reviewSession","reviewType","reviewSort"].forEach(id=>{ $(id).addEventListener("input",renderAll); $(id).addEventListener("change",renderAll); });
   setupPasteZone("questionPaste","questionFile","question"); setupPasteZone("modelPaste","modelFile","model");
@@ -340,5 +371,5 @@ function setupEvents(){
   $("essayQuestionImage").addEventListener("load",fitZoom);
 }
 
-async function init(){ db=await openDB(); await loadData(); await restoreFormPrefs(); setupEvents(); renderAll(); if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js?v=8").catch(()=>{}); }
+async function init(){ db=await openDB(); await loadData(); await restoreFormPrefs(); setupEvents(); renderAll(); if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js?v=9").catch(()=>{}); }
 init().catch(err=>{ console.error(err); alert("앱 초기화 실패: "+err.message); });

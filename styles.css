@@ -325,3 +325,9 @@ pre { white-space: pre-wrap; word-break: break-word; margin: 0; font-family: inh
 .page-badge { margin-top: 5px; }
 .model-page-controls { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
 button.small { padding: 7px 9px; font-size: .82rem; border-radius: 10px; }
+
+.paste-zone.active-paste {
+  border-color: #0891b2;
+  background: #ecfeff;
+  box-shadow: 0 0 0 3px rgba(14, 165, 233, .16);
+}
