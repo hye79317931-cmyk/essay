@@ -1,4 +1,4 @@
-const ESSAY_APP_VERSION = "v10";
+const ESSAY_APP_VERSION = "v11";
 console.log("Essay app", ESSAY_APP_VERSION);
 const DB_NAME = "essayExamDB_v2";
 const DB_VERSION = 1;
@@ -180,11 +180,6 @@ async function addImageFiles(files, kind){
 async function pasteImageFromClipboard(kind){
   const target = kind === "model" ? "model" : "question";
   setPasteTarget(target);
-  const zone = target === "question" ? $("questionPaste") : $("modelPaste");
-  if (zone) {
-    zone.focus();
-    zone.scrollIntoView({ behavior: "smooth", block: "center" });
-  }
 
   if (!navigator.clipboard || !navigator.clipboard.read) {
     toast("이 브라우저는 버튼 붙여넣기를 지원하지 않아. 영역 클릭 후 Ctrl+V를 눌러줘.");
@@ -192,23 +187,28 @@ async function pasteImageFromClipboard(kind){
   }
 
   try {
+    // PSAT 앱과 같은 방식: 버튼 클릭 직후 바로 클립보드를 읽는다.
     const items = await navigator.clipboard.read();
     const files = [];
+
     for (const item of items) {
       const type = item.types.find((t) => t.startsWith("image/"));
       if (!type) continue;
       const blob = await item.getType(type);
-      files.push(new File([blob], `${target}_${Date.now()}.png`, { type }));
+      files.push(new File([blob], `${target}_${Date.now()}_${files.length}.png`, { type }));
     }
+
     if (files.length) {
       await addImageFiles(files, target);
       setPasteTarget(target);
       return;
     }
-    toast("클립보드에 이미지가 없어");
+
+    toast("클립보드에 이미지가 없어. 스크린샷 직후 다시 눌러줘.");
   } catch (err) {
     console.warn("Clipboard image read failed:", err);
-    toast("붙여넣기 권한이 막혔어. 영역 클릭 후 다시 버튼을 누르거나 Ctrl+V를 눌러줘.");
+    const name = err && err.name ? ` (${err.name})` : "";
+    toast(`Chrome이 클립보드 접근을 거절했어${name}. 사이트 권한을 초기화한 뒤 다시 눌러줘.`);
   }
 }
 
@@ -392,7 +392,7 @@ function setupEvents(){
   setupTabs(); setupInstallButton();
   ["practiceSubject","practiceSession","practiceMode","practiceCount","listSubject","listSession","listSearch","listSort","reviewSubject","reviewSession","reviewType","reviewSort"].forEach(id=>{ $(id).addEventListener("input",renderAll); $(id).addEventListener("change",renderAll); });
   setupPasteZone("questionPaste","questionFile","question"); setupPasteZone("modelPaste","modelFile","model");
-  bindEventIfExists("pasteQuestionBtn","click",()=>pasteImageFromClipboard("question")); bindEventIfExists("clipPermQuestionBtn","click",()=>requestClipboardPermission("question")); bindEventIfExists("pasteModelBtn","click",()=>pasteImageFromClipboard("model")); bindEventIfExists("clipPermModelBtn","click",()=>requestClipboardPermission("model")); bindEventIfExists("addModelBtn","click",()=>$("modelFile")?.click());
+  bindEventIfExists("pasteQuestionBtn","click",()=>pasteImageFromClipboard("question")); bindEventIfExists("pasteModelBtn","click",()=>pasteImageFromClipboard("model")); bindEventIfExists("addModelBtn","click",()=>$("modelFile")?.click());
   bindEventIfExists("clearQuestionBtn","click",()=>{ questionImages=[]; renderImagePages(); }); bindEventIfExists("clearModelBtn","click",()=>{ modelImages=[]; renderImagePages(); });
   $("problemForm").addEventListener("submit",async e=>{ e.preventDefault(); await saveProblem(false); }); $("saveNextEditBtn").addEventListener("click",async()=>saveProblem(true)); $("resetFormBtn").addEventListener("click",async()=>resetForm(true)); $("toggleModelTextBtn").addEventListener("click",()=>$("modelTextWrap").classList.toggle("hidden"));
   $("startRandomBtn").addEventListener("click",()=>startRandom(false)); $("startReviewRandomBtn").addEventListener("click",()=>startRandom(true)); $("continueDraftBtn").addEventListener("click",continueDraft);
@@ -408,5 +408,39 @@ function setupEvents(){
   $("essayQuestionImage").addEventListener("load",fitZoom);
 }
 
-async function init(){ db=await openDB(); await loadData(); await restoreFormPrefs(); setupEvents(); renderAll(); if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js?v=10").catch(()=>{}); }
+
+async function importSharedImagesIfAny(){
+  if (!("caches" in window)) return;
+  const params = new URLSearchParams(location.search);
+  if (!params.has("incomingShare")) return;
+
+  try {
+    const cache = await caches.open("essay-shared-images-v11");
+    const indexResp = await cache.match("./shared-images-index.json");
+    if (!indexResp) return;
+
+    const urls = await indexResp.json();
+    const files = [];
+    for (const url of urls) {
+      const resp = await cache.match(url);
+      if (!resp) continue;
+      const blob = await resp.blob();
+      files.push(new File([blob], `shared_${Date.now()}_${files.length}.png`, { type: blob.type || "image/png" }));
+      await cache.delete(url);
+    }
+    await cache.delete("./shared-images-index.json");
+
+    if (files.length) {
+      showView("addView");
+      setPasteTarget("question");
+      await addImageFiles(files, "question");
+      toast(`공유받은 스크린샷 ${files.length}장을 문제 이미지로 추가했어.`);
+    }
+  } catch (err) {
+    console.warn("Shared image import failed:", err);
+    toast("공유받은 이미지를 가져오지 못했어.");
+  }
+}
+
+async function init(){ db=await openDB(); await loadData(); await restoreFormPrefs(); setupEvents(); renderAll(); if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js?v=11").catch(()=>{}); }
 init().catch(err=>{ console.error(err); alert("앱 초기화 실패: "+err.message); });

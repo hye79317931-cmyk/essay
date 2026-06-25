@@ -2,7 +2,7 @@
   "name": "2차 서술형 답안연습",
   "short_name": "2차답안",
   "id": "/essay/",
-  "start_url": "./?source=pwa",
+  "start_url": "./?source=pwa&v=11",
   "scope": "./",
   "display": "standalone",
   "display_override": [
@@ -25,5 +25,22 @@
       "type": "image/png",
       "purpose": "any maskable"
     }
-  ]
+  ],
+  "share_target": {
+    "action": "./?share-target=1",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "files": [
+        {
+          "name": "images",
+          "accept": [
+            "image/*"
+          ]
+        }
+      ]
+    }
+  }
 }
