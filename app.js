@@ -1,4 +1,4 @@
-const ESSAY_APP_VERSION = "v6";
+const ESSAY_APP_VERSION = "v8";
 console.log("Essay app", ESSAY_APP_VERSION);
 const DB_NAME = "essayExamDB_v2";
 const DB_VERSION = 1;
@@ -168,19 +168,37 @@ async function addImageFiles(files, kind){
 }
 
 async function pasteImageFromClipboard(kind){
-  try{
-    if(!navigator.clipboard?.read){ toast("이 브라우저는 버튼 붙여넣기를 제한해. 박스를 클릭한 뒤 Ctrl+V를 써줘."); return; }
-    const items=await navigator.clipboard.read();
-    for(const item of items){
-      const type=item.types.find(t=>t.startsWith("image/"));
-      if(type){
-        const blob=await item.getType(type);
-        await addImageFiles([new File([blob], `${kind}.png`, {type})], kind);
+  const zone = kind === "question" ? $("questionPaste") : $("modelPaste");
+  const input = kind === "question" ? $("questionFile") : $("modelFile");
+  if (zone) {
+    zone.focus();
+    zone.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  if (navigator.clipboard && navigator.clipboard.read) {
+    try {
+      const items = await navigator.clipboard.read();
+      const files = [];
+      for (const item of items) {
+        const type = item.types.find((t) => t.startsWith("image/"));
+        if (!type) continue;
+        const blob = await item.getType(type);
+        files.push(new File([blob], `${kind}_${Date.now()}.png`, { type }));
+      }
+      if (files.length) {
+        await addImageFiles(files, kind);
         return;
       }
+      toast("클립보드에 이미지가 없어. 스크린샷 파일을 선택해줘.");
+    } catch (err) {
+      console.warn("Clipboard image read failed:", err);
+      toast("모바일 권한이 막히면 파일 선택창으로 넣으면 돼.");
     }
-    toast("클립보드에 이미지가 없어");
-  }catch(e){ console.error(e); toast("붙여넣기 권한이 막혔어. 박스 클릭 후 Ctrl+V를 써줘."); }
+  } else {
+    toast("이 브라우저는 버튼 붙여넣기를 지원하지 않아. 파일 선택창으로 넣어줘.");
+  }
+
+  if (input) input.click();
 }
 
 function setupPasteZone(zoneId,fileId,previewIdOrKind,maybeKind){
@@ -322,5 +340,5 @@ function setupEvents(){
   $("essayQuestionImage").addEventListener("load",fitZoom);
 }
 
-async function init(){ db=await openDB(); await loadData(); await restoreFormPrefs(); setupEvents(); renderAll(); if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js?v=6").catch(()=>{}); }
+async function init(){ db=await openDB(); await loadData(); await restoreFormPrefs(); setupEvents(); renderAll(); if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js?v=8").catch(()=>{}); }
 init().catch(err=>{ console.error(err); alert("앱 초기화 실패: "+err.message); });
