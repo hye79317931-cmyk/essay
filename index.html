@@ -4,10 +4,10 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#111827" />
-  <title>2차 서술형 답안연습</title>
-  <link rel="manifest" href="manifest.webmanifest" />
+  <title>2차 서술형 답안연습 v5</title>
+  <link rel="manifest" href="manifest.webmanifest?v=5" />
   <link rel="apple-touch-icon" href="assets/icon-192.png" />
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?v=5" />
 </head>
 <body>
   <header class="app-header">
@@ -15,7 +15,7 @@
       <h1>2차 서술형 답안연습</h1>
       <p>형법 · 형사소송법 · 행정법 · 교정학 / 목차연습 · 실전답안 · 자가채점 · 복습</p>
     </div>
-    <button id="installBtn" class="install-btn hidden" type="button">홈화면 설치</button>
+    <button id="installBtn" class="install-btn" type="button">홈화면 설치</button>
   </header>
 
   <nav class="tabs" aria-label="주요 메뉴">
@@ -119,27 +119,39 @@
               </select>
             </label>
           </div>
+          <section class="sub-card">
+            <h3>문제 스크린샷</h3>
+            <div id="questionPaste" class="paste-zone" tabindex="0">
+              <strong>여기를 클릭하고 Ctrl+V 하면 문제 이미지로 들어갑니다.</strong>
+              <span>PC에서는 캡처 후 Ctrl+V가 제일 빠릅니다. 모바일은 브라우저 제한 때문에 파일 선택 방식이 더 안정적입니다.</span>
+            </div>
+            <label class="file-label">문제 이미지 파일로 선택
+              <input id="questionFile" type="file" accept="image/*" multiple />
+            </label>
+            <div class="row wrap">
+              <button id="pasteQuestionBtn" class="secondary" type="button">문제 스샷 붙여넣기</button>
+              <button id="clearQuestionBtn" class="secondary" type="button">문제 이미지 비우기</button>
+            </div>
+            <div id="questionPages" class="page-list"></div>
+          </section>
 
-          <div class="paste-grid">
-            <div>
-              <label>문제 스크린샷</label>
-              <div id="questionPaste" class="paste-zone" tabindex="0">
-                <strong>문제 이미지 붙여넣기</strong>
-                <span>클릭 후 Ctrl+V 또는 파일 선택</span>
-                <input id="questionFile" type="file" accept="image/*" />
-              </div>
-              <img id="questionPreview" class="preview hidden" alt="문제 이미지 미리보기" />
+          <section class="sub-card">
+            <h3>해설 / 모범답안 스크린샷</h3>
+            <p class="hint">해설은 필요한 만큼 추가할 수 있어. 추가한 해설은 제출 후 채점 화면에서 한 페이지씩 넘겨볼 수 있어.</p>
+            <div id="modelPaste" class="paste-zone" tabindex="0">
+              <strong>여기를 클릭하고 Ctrl+V 하면 해설 이미지로 추가됩니다.</strong>
+              <span>해설 여러 장이면 계속 붙여넣거나 “해설 이미지 추가”를 사용하세요.</span>
             </div>
-            <div>
-              <label>모범답안/해설 스크린샷</label>
-              <div id="modelPaste" class="paste-zone" tabindex="0">
-                <strong>모범답안 이미지 붙여넣기</strong>
-                <span>클릭 후 Ctrl+V 또는 파일 선택</span>
-                <input id="modelFile" type="file" accept="image/*" />
-              </div>
-              <img id="modelPreview" class="preview hidden" alt="모범답안 이미지 미리보기" />
+            <label class="file-label">해설 이미지 파일로 선택
+              <input id="modelFile" type="file" accept="image/*" multiple />
+            </label>
+            <div class="row wrap">
+              <button id="pasteModelBtn" class="secondary" type="button">해설 스샷 붙여넣기</button>
+              <button id="addModelBtn" class="secondary" type="button">해설 이미지 추가</button>
+              <button id="clearModelBtn" class="secondary" type="button">해설 이미지 비우기</button>
             </div>
-          </div>
+            <div id="modelPages" class="page-list"></div>
+          </section>
 
           <label>채점포인트
             <textarea id="pointsInput" rows="7" placeholder="한 줄에 하나씩 입력&#10;예: 쟁점 제시&#10;예: 관련 조문&#10;예: 학설/판례&#10;예: 사안포섭&#10;예: 결론"></textarea>
@@ -271,6 +283,7 @@
             <p id="essayMeta" class="meta"></p>
           </div>
           <div id="essayProgress" class="badge"></div>
+          <div id="pageBadge" class="badge page-badge"></div>
         </div>
 
         <div class="essay-work">
@@ -305,6 +318,11 @@
         </div>
         <div class="score-box">
           <h3>모범답안/해설</h3>
+          <div class="model-page-controls">
+            <button id="prevModelPageBtn" class="secondary small" type="button">이전 해설</button>
+            <span id="modelPageBadge" class="badge"></span>
+            <button id="nextModelPageBtn" class="secondary small" type="button">다음 해설</button>
+          </div>
           <img id="scoreModelImage" class="model-img hidden" alt="모범답안 이미지" />
           <pre id="scoreModelText"></pre>
         </div>
@@ -352,6 +370,6 @@
   </section>
 
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
-  <script src="app.js"></script>
+  <script src="app.js?v=5"></script>
 </body>
 </html>

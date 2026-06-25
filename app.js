@@ -1,3 +1,5 @@
+const ESSAY_APP_VERSION = "v5";
+console.log("Essay app", ESSAY_APP_VERSION);
 const DB_NAME = "essayExamDB_v2";
 const DB_VERSION = 1;
 const STORES = { problems: "problems", attempts: "attempts", settings: "settings" };
@@ -118,5 +120,198 @@ function setupInstallButton() {
 
 function setupEvents(){ setupTabs(); ["practiceSubject","practiceSession","practiceMode","practiceCount","listSubject","listSession","listSearch","listSort","reviewSubject","reviewSession","reviewType","reviewSort"].forEach(id=>{ $(id).addEventListener("input",renderAll); $(id).addEventListener("change",renderAll); }); setupPasteZone("questionPaste","questionFile","questionPreview","question"); setupPasteZone("modelPaste","modelFile","modelPreview","model"); $("problemForm").addEventListener("submit",async e=>{ e.preventDefault(); await saveProblem(false); }); $("saveNextEditBtn").addEventListener("click",async()=>saveProblem(true)); $("resetFormBtn").addEventListener("click",async()=>resetForm(true)); $("toggleModelTextBtn").addEventListener("click",()=>$("modelTextWrap").classList.toggle("hidden")); $("startRandomBtn").addEventListener("click",()=>startRandom(false)); $("startReviewRandomBtn").addEventListener("click",()=>startRandom(true)); $("continueDraftBtn").addEventListener("click",continueDraft); document.querySelectorAll("[data-quick-subject]").forEach(b=>b.addEventListener("click",()=>{ $("practiceSubject").value=b.dataset.quickSubject; startRandom(false); })); $("answerText").addEventListener("input",()=>{ if(!activeSession)return; activeSession.answerText=$("answerText").value; saveActiveDraft(); }); $("pauseBtn").addEventListener("click",pausePractice); $("submitBtn").addEventListener("click",submitPractice); $("zoomFitBtn").addEventListener("click",fitZoom); $("zoomInBtn").addEventListener("click",()=>{ zoom=Math.min(3,zoom+0.15); applyZoom(); }); $("zoomOutBtn").addEventListener("click",()=>{ zoom=Math.max(0.2,zoom-0.15); applyZoom(); }); $("closeScoreBtn").addEventListener("click",()=>{ $("scoreOverlay").classList.add("hidden"); if(activeSession){ activeSession.questionStart=Date.now(); clearInterval(timerHandle); timerHandle=setInterval(updateTimer,500); $("practiceOverlay").classList.remove("hidden"); } }); $("saveAttemptBtn").addEventListener("click",saveAttempt); $("nextEssayBtn").addEventListener("click",saveAttemptAndNext); $("finishEssayBtn").addEventListener("click",async()=>{ await saveAttempt(); finishPractice(); }); $("exportBtn").addEventListener("click",exportBackup); $("importInput").addEventListener("change",async()=>{ try{ await importBackup($("importInput").files?.[0]); }catch(e){ console.error(e); toast("복원 실패"); } $("importInput").value=""; }); $("wipeBtn").addEventListener("click",wipeAll); $("essayQuestionImage").addEventListener("load",fitZoom); }
 
-async function init(){ db=await openDB(); await loadData(); await restoreFormPrefs(); setupEvents(); setupInstallButton(); renderAll(); if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js?v=3").catch(()=>{}); }
+
+
+// ===== v4 overrides: multi-page screenshot registration and page navigation =====
+let questionImages = [];
+let modelImages = [];
+let questionPageIndex = 0;
+let modelPageIndex = 0;
+
+function normalizeProblem(p){
+  if(!p) return p;
+  const q = Array.isArray(p.questionImages) ? p.questionImages : (p.questionImage ? [p.questionImage] : []);
+  const m = Array.isArray(p.modelImages) ? p.modelImages : (p.modelImage ? [p.modelImage] : []);
+  return {...p, questionImages:q, modelImages:m};
+}
+
+async function loadData(){
+  problems=(await getAll(STORES.problems)).map(normalizeProblem).sort((a,b)=>(a.order??0)-(b.order??0)||a.createdAt.localeCompare(b.createdAt));
+  attempts=(await getAll(STORES.attempts)).sort((a,b)=>(b.completedAt||"").localeCompare(a.completedAt||""));
+}
+
+function metaOf(p){
+  p=normalizeProblem(p);
+  const count=problemAttempts(p.id).length, last=lastAttempt(p.id);
+  return `${p.subject||"-"} · ${p.session||"연도/회차 없음"} · ${p.maxScore||0}점 · 제한 ${p.timeLimitMin||0}분 · 문제 ${p.questionImages?.length||0}쪽 · 해설 ${p.modelImages?.length||0}쪽 · 기록 ${count}회${last?" · 최근 "+fmtTime(last.elapsedMs):""}`;
+}
+
+async function addImageFiles(files, kind){
+  const arr=[...(files||[])].filter(f=>f && f.type && f.type.startsWith("image/"));
+  if(!arr.length){ toast("이미지 파일이 없어"); return; }
+  for(const file of arr){
+    const dataUrl=await imageToDataUrl(file,$("imageModeInput").value||"clear");
+    if(kind==="question") questionImages.push(dataUrl);
+    else modelImages.push(dataUrl);
+  }
+  renderImagePages();
+  toast(`${kind==="question"?"문제":"해설"} 이미지 ${arr.length}장 추가`);
+}
+
+async function pasteImageFromClipboard(kind){
+  try{
+    if(!navigator.clipboard?.read){ toast("이 브라우저는 버튼 붙여넣기를 제한해. 박스를 클릭한 뒤 Ctrl+V를 써줘."); return; }
+    const items=await navigator.clipboard.read();
+    for(const item of items){
+      const type=item.types.find(t=>t.startsWith("image/"));
+      if(type){
+        const blob=await item.getType(type);
+        await addImageFiles([new File([blob], `${kind}.png`, {type})], kind);
+        return;
+      }
+    }
+    toast("클립보드에 이미지가 없어");
+  }catch(e){ console.error(e); toast("붙여넣기 권한이 막혔어. 박스 클릭 후 Ctrl+V를 써줘."); }
+}
+
+function setupPasteZone(zoneId,fileId,previewIdOrKind,maybeKind){
+  const kind=maybeKind || previewIdOrKind;
+  const zone=$(zoneId), fileInput=$(fileId);
+  zone.addEventListener("click",e=>{ if(e.target.tagName!=="INPUT") zone.focus(); });
+  zone.addEventListener("paste",async e=>{
+    const images=[...(e.clipboardData?.items||[])].filter(i=>i.type.startsWith("image/")).map(i=>i.getAsFile()).filter(Boolean);
+    if(!images.length) return;
+    e.preventDefault();
+    await addImageFiles(images, kind);
+  });
+  fileInput.addEventListener("change",async()=>{ await addImageFiles(fileInput.files, kind); fileInput.value=""; });
+}
+
+function moveImage(kind,idx,dir){
+  const arr=kind==="question"?questionImages:modelImages;
+  const ni=idx+dir;
+  if(ni<0||ni>=arr.length) return;
+  [arr[idx],arr[ni]]=[arr[ni],arr[idx]];
+  renderImagePages();
+}
+function removeImage(kind,idx){
+  const arr=kind==="question"?questionImages:modelImages;
+  arr.splice(idx,1);
+  renderImagePages();
+}
+function renderImagePages(){
+  if($("questionPages")) renderPageList("questionPages", questionImages, "question");
+  if($("modelPages")) renderPageList("modelPages", modelImages, "model");
+}
+function renderPageList(containerId, arr, kind){
+  const box=$(containerId); box.innerHTML="";
+  if(!arr.length){ box.innerHTML=`<p class="hint">아직 이미지가 없어.</p>`; return; }
+  arr.forEach((src,idx)=>{
+    const div=document.createElement("div");
+    div.className="page-item";
+    div.innerHTML=`<img src="${src}" alt="${kind} ${idx+1}쪽" /><div><strong>${idx+1}쪽</strong><div class="page-actions"></div></div>`;
+    const actions=div.querySelector(".page-actions");
+    actions.append(btn("위",()=>moveImage(kind,idx,-1),"secondary small"));
+    actions.append(btn("아래",()=>moveImage(kind,idx,1),"secondary small"));
+    actions.append(btn("삭제",()=>removeImage(kind,idx),"danger small"));
+    box.append(div);
+  });
+}
+
+async function saveProblem(goNextEdit=false){
+  const editingId=$("editingId").value||"", existing=editingId?problems.find(p=>p.id===editingId):null;
+  if(!questionImages.length && !existing?.questionImages?.length){ toast("문제 이미지를 넣어줘"); return; }
+  const subject=$("subjectInput").value, session=$("sessionInput").value.trim(), imageMode=$("imageModeInput").value;
+  const problem={
+    id:editingId||uuid(), subject, session, title:$("titleInput").value.trim(),
+    questionImages:questionImages.length?questionImages:(existing?.questionImages||[]),
+    modelImages:modelImages.length?modelImages:(existing?.modelImages||[]),
+    pointsText:$("pointsInput").value.trim(), points:pointsFromText($("pointsInput").value), modelText:$("modelTextInput").value.trim(),
+    maxScore:Number($("maxScoreInput").value||0), timeLimitMin:Number($("timeLimitInput").value||0),
+    order:existing?.order??Date.now(), createdAt:existing?.createdAt||nowIso(), updatedAt:nowIso()
+  };
+  await put(STORES.problems,problem); await setSetting("lastSubject",subject); await setSetting("lastSession",session); await setSetting("lastImageMode",imageMode);
+  await loadData(); toast(editingId?"수정 저장 완료":"문제 저장 완료");
+  if(goNextEdit&&editingId){ const sorted=[...problems].sort((a,b)=>(a.order??0)-(b.order??0)); const idx=sorted.findIndex(p=>p.id===editingId); if(idx>=0&&idx<sorted.length-1){ fillForm(sorted[idx+1]); return; } }
+  if(editingId) fillForm(problem); else resetForm(false);
+  renderAll();
+}
+
+function fillForm(p){
+  p=normalizeProblem(p);
+  $("formTitle").textContent="문제 수정"; $("editingId").value=p.id; $("subjectInput").value=p.subject||"형법"; $("sessionInput").value=p.session||""; $("titleInput").value=p.title||"";
+  $("maxScoreInput").value=p.maxScore||20; $("timeLimitInput").value=p.timeLimitMin||30; $("pointsInput").value=p.pointsText||(p.points||[]).join("\n"); $("modelTextInput").value=p.modelText||"";
+  $("modelTextWrap").classList.toggle("hidden",!p.modelText); questionImages=[...(p.questionImages||[])]; modelImages=[...(p.modelImages||[])]; renderImagePages();
+  $("saveNextEditBtn").classList.remove("hidden"); showView("addView"); window.scrollTo(0,0);
+}
+
+async function resetForm(restorePrefs=true){
+  $("formTitle").textContent="2차 문제 등록"; $("problemForm").reset(); $("editingId").value=""; $("maxScoreInput").value=20; $("timeLimitInput").value=30;
+  questionImages=[]; modelImages=[]; renderImagePages(); $("modelTextWrap").classList.add("hidden"); $("saveNextEditBtn").classList.add("hidden"); if(restorePrefs) await restoreFormPrefs();
+}
+
+function problemCard(p,opts={}){
+  p=normalizeProblem(p);
+  const last=lastAttempt(p.id), avg=avgElapsed(p.id); const checked=last&&Array.isArray(last.checkedPoints)?last.checkedPoints.filter(Boolean).length:null, total=(p.points?.length||pointsFromText(p.pointsText).length);
+  const div=document.createElement("div"); div.className="problem-card";
+  div.innerHTML=`<h3>${escapeHtml(titleOf(p))}</h3><p class="meta">${escapeHtml(metaOf(p))}</p><div class="stat-line"><span class="badge">${escapeHtml(p.subject||"-")}</span><span class="badge">${escapeHtml(p.session||"회차 없음")}</span><span class="badge">문제 ${p.questionImages.length}쪽</span><span class="badge">해설 ${p.modelImages.length}쪽</span>${last?`<span class="badge">최근 ${fmtTime(last.elapsedMs)}</span>`:""}${avg?`<span class="badge">평균 ${fmtTime(avg)}</span>`:""}${last?.score!=null&&last.score!==""?`<span class="badge">최근 ${last.score}/${p.maxScore||last.maxScore||""}</span>`:""}${checked!=null?`<span class="badge">포인트 ${checked}/${total}</span>`:""}</div><div class="card-actions"></div>`;
+  const actions=div.querySelector(".card-actions");
+  if(opts.practice) actions.append(btn("풀기",()=>startPractice([p.id],$("practiceMode").value||"outline")));
+  if(opts.review){ actions.append(btn("다시 풀기",()=>startPractice([p.id],"outline",{review:true}))); actions.append(btn("기록 보기",()=>showHistory(p.id),"secondary")); }
+  if(opts.list){ actions.append(btn("수정",()=>fillForm(p),"secondary")); actions.append(btn("복제",async()=>{ const copy={...p,id:uuid(),title:`${p.title||titleOf(p)} 복사본`,createdAt:nowIso(),updatedAt:nowIso(),order:Date.now()}; await put(STORES.problems,copy); await loadData(); renderAll(); toast("복제 완료"); },"secondary")); actions.append(btn("삭제",async()=>{ if(!confirm("이 문제와 풀이기록을 삭제할까?"))return; await del(STORES.problems,p.id); for(const a of problemAttempts(p.id))await del(STORES.attempts,a.id); await loadData(); renderAll(); toast("삭제 완료"); },"danger small")); }
+  return div;
+}
+
+function currentProblem(){ return normalizeProblem(problems.find(x=>x.id===activeSession?.currentProblemId)); }
+function openPracticeProblem(){
+  const p=currentProblem(); if(!p)return finishPractice();
+  activeSession.questionStart=Date.now(); questionPageIndex=activeSession.pageIndex||0;
+  $("practiceOverlay").classList.remove("hidden"); $("essayTitle").textContent=titleOf(p); $("essayMeta").textContent=metaOf(p);
+  $("essayProgress").textContent=`${activeSession.index+1}/${activeSession.ids.length} · ${activeSession.mode==="outline"?"목차연습":"실전답안"}`;
+  $("answerLabel").textContent=activeSession.mode==="outline"?"내 목차/쟁점":"내 답안"; $("answerText").value=activeSession.answerText||"";
+  showQuestionPage(questionPageIndex); updateTimer(); clearInterval(timerHandle); timerHandle=setInterval(updateTimer,500);
+}
+function showQuestionPage(idx){
+  const p=currentProblem(); if(!p)return; const pages=p.questionImages||[];
+  questionPageIndex=Math.max(0,Math.min(idx,Math.max(0,pages.length-1))); if(activeSession) activeSession.pageIndex=questionPageIndex;
+  $("essayQuestionImage").src=pages[questionPageIndex]||""; $("pageBadge").textContent=pages.length?`문제 ${questionPageIndex+1}/${pages.length}쪽`:"문제 없음";
+  saveActiveDraft(); fitZoom();
+}
+function submitPractice(){
+  if(!activeSession)return; activeSession.elapsedBase=elapsedNow(); activeSession.answerText=$("answerText").value; clearInterval(timerHandle); timerHandle=null;
+  const p=currentProblem(); if(!p)return; modelPageIndex=0; $("scoreOverlay").classList.remove("hidden"); $("scoreMeta").textContent=`${titleOf(p)} · 풀이시간 ${fmtTime(activeSession.elapsedBase)}`;
+  $("ownAnswerView").textContent=activeSession.answerText||"(작성한 답안 없음)"; showModelPage(0); $("scoreModelText").textContent=p.modelText||"";
+  $("scoreInput").value=""; $("scoreInput").max=p.maxScore||""; $("ratingInput").value="중"; $("reviewNeededInput").value="true"; $("completionInput").value=activeSession.mode==="outline"?"목차만":"완성"; $("scoreNoteInput").value="";
+  renderChecklist(p); renderTimeCompare(p);
+}
+function showModelPage(idx){
+  const p=currentProblem(); if(!p)return; const pages=p.modelImages||[]; modelPageIndex=Math.max(0,Math.min(idx,Math.max(0,pages.length-1)));
+  if(pages.length){ $("scoreModelImage").src=pages[modelPageIndex]; $("scoreModelImage").classList.remove("hidden"); $("modelPageBadge").textContent=`해설 ${modelPageIndex+1}/${pages.length}쪽`; }
+  else { $("scoreModelImage").classList.add("hidden"); $("modelPageBadge").textContent="해설 이미지 없음"; }
+}
+function saveActiveDraft(){ if(!activeSession)return; activeSession.answerText=$("answerText")?.value??activeSession.answerText??""; activeSession.pageIndex=questionPageIndex; localStorage.setItem("essayActiveSession",JSON.stringify(activeSession)); renderContinueButton(); }
+
+function renderAll(){ renderPracticeList(); renderList(); renderReview(); renderStats(); renderContinueButton(); renderImagePages(); }
+
+function setupEvents(){
+  setupTabs(); setupInstallButton();
+  ["practiceSubject","practiceSession","practiceMode","practiceCount","listSubject","listSession","listSearch","listSort","reviewSubject","reviewSession","reviewType","reviewSort"].forEach(id=>{ $(id).addEventListener("input",renderAll); $(id).addEventListener("change",renderAll); });
+  setupPasteZone("questionPaste","questionFile","question"); setupPasteZone("modelPaste","modelFile","model");
+  $("pasteQuestionBtn").addEventListener("click",()=>pasteImageFromClipboard("question")); $("pasteModelBtn").addEventListener("click",()=>pasteImageFromClipboard("model")); $("addModelBtn").addEventListener("click",()=>$("modelFile").click());
+  $("clearQuestionBtn").addEventListener("click",()=>{ questionImages=[]; renderImagePages(); }); $("clearModelBtn").addEventListener("click",()=>{ modelImages=[]; renderImagePages(); });
+  $("problemForm").addEventListener("submit",async e=>{ e.preventDefault(); await saveProblem(false); }); $("saveNextEditBtn").addEventListener("click",async()=>saveProblem(true)); $("resetFormBtn").addEventListener("click",async()=>resetForm(true)); $("toggleModelTextBtn").addEventListener("click",()=>$("modelTextWrap").classList.toggle("hidden"));
+  $("startRandomBtn").addEventListener("click",()=>startRandom(false)); $("startReviewRandomBtn").addEventListener("click",()=>startRandom(true)); $("continueDraftBtn").addEventListener("click",continueDraft);
+  document.querySelectorAll("[data-quick-subject]").forEach(b=>b.addEventListener("click",()=>{ $("practiceSubject").value=b.dataset.quickSubject; startRandom(false); }));
+  $("answerText").addEventListener("input",()=>{ if(!activeSession)return; activeSession.answerText=$("answerText").value; saveActiveDraft(); });
+  $("pauseBtn").addEventListener("click",pausePractice); $("submitBtn").addEventListener("click",submitPractice);
+  $("prevPageBtn").addEventListener("click",()=>showQuestionPage(questionPageIndex-1)); $("nextPageBtn").addEventListener("click",()=>showQuestionPage(questionPageIndex+1));
+  $("zoomFitBtn").addEventListener("click",fitZoom); $("zoomInBtn").addEventListener("click",()=>{ zoom=Math.min(3,zoom+0.15); applyZoom(); }); $("zoomOutBtn").addEventListener("click",()=>{ zoom=Math.max(0.2,zoom-0.15); applyZoom(); });
+  $("prevModelPageBtn").addEventListener("click",()=>showModelPage(modelPageIndex-1)); $("nextModelPageBtn").addEventListener("click",()=>showModelPage(modelPageIndex+1));
+  $("closeScoreBtn").addEventListener("click",()=>{ $("scoreOverlay").classList.add("hidden"); if(activeSession){ activeSession.questionStart=Date.now(); clearInterval(timerHandle); timerHandle=setInterval(updateTimer,500); $("practiceOverlay").classList.remove("hidden"); } });
+  $("saveAttemptBtn").addEventListener("click",saveAttempt); $("nextEssayBtn").addEventListener("click",saveAttemptAndNext); $("finishEssayBtn").addEventListener("click",async()=>{ await saveAttempt(); finishPractice(); });
+  $("exportBtn").addEventListener("click",exportBackup); $("importInput").addEventListener("change",async()=>{ try{ await importBackup($("importInput").files?.[0]); }catch(e){ console.error(e); toast("복원 실패"); } $("importInput").value=""; }); $("wipeBtn").addEventListener("click",wipeAll);
+  $("essayQuestionImage").addEventListener("load",fitZoom);
+}
+
+async function init(){ db=await openDB(); await loadData(); await restoreFormPrefs(); setupEvents(); renderAll(); if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js?v=5").catch(()=>{}); }
 init().catch(err=>{ console.error(err); alert("앱 초기화 실패: "+err.message); });
