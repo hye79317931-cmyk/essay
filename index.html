@@ -13,7 +13,7 @@
   <header class="app-header">
     <div>
       <h1>2차 서술형 답안연습</h1>
-      <p>PSAT 앱 기반 v9 · 형법 · 형사소송법 · 행정법 · 교정학 · 페이지 추가 · 페이지 넘김</p>
+      <p>PSAT 앱 기반 v10 · 형법 · 형사소송법 · 행정법 · 교정학 · 페이지 추가 · 페이지 넘김</p>
     </div>
     <button id="installBtn" class="install-btn hidden" type="button">홈화면 설치</button>
   </header>
@@ -100,25 +100,70 @@
   </main>
 
   <section id="solveOverlay" class="overlay hidden">
-    <div class="solve-shell">
-      <aside class="solve-side"><div class="timer-box"><span>풀이시간</span><strong id="timerText">00:00</strong><small id="limitText"></small></div><button id="exitSolveBtn" class="side-btn" type="button">중단</button><button id="submitAnswerBtn" class="side-btn primary" type="button">제출</button><button id="penToolBtn" class="side-btn ink-active" type="button">펜</button><button id="eraserToolBtn" class="side-btn" type="button">지우개</button><button id="clearInkBtn" class="side-btn" type="button">필기삭제</button><label class="ink-size-label">굵기<input id="inkSizeInput" type="range" min="1" max="12" value="3" /></label><button id="prevQuestionPageBtn" class="side-btn" type="button">이전쪽</button><button id="nextQuestionPageBtn" class="side-btn" type="button">다음쪽</button><button id="fitBtn" class="side-btn" type="button">맞춤</button><button id="zoomInBtn" class="side-btn" type="button">확대</button><button id="zoomOutBtn" class="side-btn" type="button">축소</button></aside>
-      <div class="solve-main"><div class="solve-head"><div><h2 id="solveTitle">문제</h2><p id="solveMeta" class="meta"></p></div><div><span id="setBadge" class="badge"></span><span id="questionPageBadge" class="badge"></span></div></div><div class="solve-body"><div class="image-pane"><div id="questionImageScroller" class="image-scroller"><div id="imageCanvasWrap" class="image-canvas-wrap"><img id="questionImageView" alt="문제 이미지" /><canvas id="inkCanvas" aria-label="스타일러스 필기 레이어"></canvas></div></div></div><div class="answer-pane answer-dual-pane">
-            <div class="answer-topbar">
-              <label id="answerLabel">내 답안</label>
-              <button id="keyboardToggleBtn" class="secondary small" type="button">키보드 입력</button>
+    <div class="solve-shell v10-shell">
+      <div class="solve-hidden-meta">
+        <h2 id="solveTitle">문제</h2>
+        <p id="solveMeta" class="meta"></p>
+      </div>
+
+      <div class="problem-zone">
+        <div class="floating-controls">
+          <div class="timer-box compact-timer">
+            <span>시간</span>
+            <strong id="timerText">00:00</strong>
+            <small id="limitText"></small>
+          </div>
+          <button id="exitSolveBtn" class="float-btn" type="button">중단</button>
+          <button id="submitAnswerBtn" class="float-btn primary" type="button">제출</button>
+          <button id="prevQuestionPageBtn" class="float-btn" type="button">이전쪽</button>
+          <button id="nextQuestionPageBtn" class="float-btn" type="button">다음쪽</button>
+          <button id="fitBtn" class="float-btn" type="button">맞춤</button>
+          <button id="zoomInBtn" class="float-btn" type="button">확대</button>
+          <button id="zoomOutBtn" class="float-btn" type="button">축소</button>
+          <span id="setBadge" class="badge control-badge"></span>
+          <span id="questionPageBadge" class="badge control-badge"></span>
+        </div>
+
+        <div class="image-pane v10-image-pane">
+          <div id="questionImageScroller" class="image-scroller v10-scroller">
+            <div id="imageCanvasWrap" class="image-canvas-wrap">
+              <img id="questionImageView" alt="문제 이미지" />
+              <canvas id="inkCanvas" aria-label="문제 필기 레이어"></canvas>
             </div>
-            <div id="handwritingWrap" class="handwriting-wrap">
-              <canvas id="answerInkCanvas" aria-label="답안 손글씨 입력"></canvas>
-              <div class="answer-pad-hint">S펜으로 여기에 답안을 작성하세요</div>
-            </div>
-            <textarea id="answerText" class="hidden" placeholder="여기에 키보드로 답안을 작성하세요."></textarea>
-            <div class="answer-bottom-tools">
-              <button id="answerPenBtn" class="secondary small ink-active" type="button">답안펜</button>
-              <button id="answerEraserBtn" class="secondary small" type="button">답안지우개</button>
-              <button id="clearAnswerInkBtn" class="secondary small" type="button">답안필기삭제</button>
-              <label class="answer-size-label">답안 굵기<input id="answerInkSizeInput" type="range" min="1" max="14" value="3" /></label>
-            </div>
-          </div></div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="answer-pane answer-dual-pane v10-answer-pane">
+        <div class="answer-topbar">
+          <label id="answerLabel">내 답안</label>
+          <div class="answer-page-mini">
+            <button id="prevAnswerPageBtn" class="secondary small" type="button">이전답안</button>
+            <span id="answerPageBadge" class="badge">답안 1/1쪽</span>
+            <button id="nextAnswerPageBtn" class="secondary small" type="button">다음답안</button>
+            <button id="addAnswerPageBtn" class="secondary small" type="button">답안쪽 추가</button>
+            <button id="keyboardToggleBtn" class="secondary small" type="button">키보드 입력</button>
+          </div>
+        </div>
+
+        <div id="handwritingWrap" class="handwriting-wrap">
+          <canvas id="answerInkCanvas" aria-label="답안 손글씨 입력"></canvas>
+          <div class="answer-pad-hint">S펜 또는 손가락으로 답안을 작성하세요</div>
+        </div>
+        <textarea id="answerText" class="hidden" placeholder="여기에 키보드로 답안을 작성하세요."></textarea>
+
+        <div class="answer-bottom-tools v10-bottom-tools">
+          <button id="answerPenBtn" class="secondary small ink-active" type="button">답안펜</button>
+          <button id="answerEraserBtn" class="secondary small" type="button">답안지우개</button>
+          <button id="clearAnswerInkBtn" class="secondary small" type="button">답안필기삭제</button>
+          <label class="answer-size-label">답안굵기<input id="answerInkSizeInput" type="range" min="1" max="14" value="3" /></label>
+
+          <button id="penToolBtn" class="secondary small ink-active" type="button">문제펜</button>
+          <button id="eraserToolBtn" class="secondary small" type="button">문제지우개</button>
+          <button id="clearInkBtn" class="secondary small" type="button">문제필기삭제</button>
+          <label class="answer-size-label">문제굵기<input id="inkSizeInput" type="range" min="1" max="12" value="3" /></label>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -129,6 +174,6 @@
     </div>
   </section>
   <div id="toast" class="toast hidden"></div>
-  <script src="app.js?v=9"></script>
+  <script src="app.js?v=10"></script>
 </body>
 </html>
