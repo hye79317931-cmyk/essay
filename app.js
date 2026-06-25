@@ -86,7 +86,37 @@ async function exportBackup(){ const settings=await getAll(STORES.settings); con
 async function importBackup(file){ if(!file)return; const data=JSON.parse(await file.text()); if(!Array.isArray(data.problems))throw new Error("Invalid backup"); if(!confirm("현재 데이터에 백업 데이터를 합쳐서 복원할까? 같은 ID는 덮어쓰기 돼."))return; for(const p of data.problems)await put(STORES.problems,p); for(const a of(data.attempts||[]))await put(STORES.attempts,a); for(const s of(data.settings||[]))if(s.key)await put(STORES.settings,s); await loadData(); renderAll(); toast("복원 완료"); }
 async function wipeAll(){ if(!confirm("모든 문제와 풀이기록을 삭제할까? 백업 없으면 복구할 수 없어."))return; await clearStore(STORES.problems); await clearStore(STORES.attempts); await clearStore(STORES.settings); localStorage.removeItem("essayActiveSession_v2"); await loadData(); await restoreFormPrefs(); renderAll(); toast("전체 삭제 완료"); }
 
+
+let deferredInstallPrompt = null;
+function setupInstallButton() {
+  const installBtn = $("installBtn");
+  if (!installBtn) return;
+
+  window.addEventListener("beforeinstallprompt", (event) => {
+    event.preventDefault();
+    deferredInstallPrompt = event;
+    installBtn.classList.remove("hidden");
+  });
+
+  installBtn.addEventListener("click", async () => {
+    if (!deferredInstallPrompt) {
+      toast("Chrome 메뉴에서 홈 화면에 추가를 눌러줘");
+      return;
+    }
+    deferredInstallPrompt.prompt();
+    await deferredInstallPrompt.userChoice.catch(() => null);
+    deferredInstallPrompt = null;
+    installBtn.classList.add("hidden");
+  });
+
+  window.addEventListener("appinstalled", () => {
+    deferredInstallPrompt = null;
+    installBtn.classList.add("hidden");
+    toast("앱 설치 완료");
+  });
+}
+
 function setupEvents(){ setupTabs(); ["practiceSubject","practiceSession","practiceMode","practiceCount","listSubject","listSession","listSearch","listSort","reviewSubject","reviewSession","reviewType","reviewSort"].forEach(id=>{ $(id).addEventListener("input",renderAll); $(id).addEventListener("change",renderAll); }); setupPasteZone("questionPaste","questionFile","questionPreview","question"); setupPasteZone("modelPaste","modelFile","modelPreview","model"); $("problemForm").addEventListener("submit",async e=>{ e.preventDefault(); await saveProblem(false); }); $("saveNextEditBtn").addEventListener("click",async()=>saveProblem(true)); $("resetFormBtn").addEventListener("click",async()=>resetForm(true)); $("toggleModelTextBtn").addEventListener("click",()=>$("modelTextWrap").classList.toggle("hidden")); $("startRandomBtn").addEventListener("click",()=>startRandom(false)); $("startReviewRandomBtn").addEventListener("click",()=>startRandom(true)); $("continueDraftBtn").addEventListener("click",continueDraft); document.querySelectorAll("[data-quick-subject]").forEach(b=>b.addEventListener("click",()=>{ $("practiceSubject").value=b.dataset.quickSubject; startRandom(false); })); $("answerText").addEventListener("input",()=>{ if(!activeSession)return; activeSession.answerText=$("answerText").value; saveActiveDraft(); }); $("pauseBtn").addEventListener("click",pausePractice); $("submitBtn").addEventListener("click",submitPractice); $("zoomFitBtn").addEventListener("click",fitZoom); $("zoomInBtn").addEventListener("click",()=>{ zoom=Math.min(3,zoom+0.15); applyZoom(); }); $("zoomOutBtn").addEventListener("click",()=>{ zoom=Math.max(0.2,zoom-0.15); applyZoom(); }); $("closeScoreBtn").addEventListener("click",()=>{ $("scoreOverlay").classList.add("hidden"); if(activeSession){ activeSession.questionStart=Date.now(); clearInterval(timerHandle); timerHandle=setInterval(updateTimer,500); $("practiceOverlay").classList.remove("hidden"); } }); $("saveAttemptBtn").addEventListener("click",saveAttempt); $("nextEssayBtn").addEventListener("click",saveAttemptAndNext); $("finishEssayBtn").addEventListener("click",async()=>{ await saveAttempt(); finishPractice(); }); $("exportBtn").addEventListener("click",exportBackup); $("importInput").addEventListener("change",async()=>{ try{ await importBackup($("importInput").files?.[0]); }catch(e){ console.error(e); toast("복원 실패"); } $("importInput").value=""; }); $("wipeBtn").addEventListener("click",wipeAll); $("essayQuestionImage").addEventListener("load",fitZoom); }
 
-async function init(){ db=await openDB(); await loadData(); await restoreFormPrefs(); setupEvents(); renderAll(); if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(()=>{}); }
+async function init(){ db=await openDB(); await loadData(); await restoreFormPrefs(); setupEvents(); setupInstallButton(); renderAll(); if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js?v=3").catch(()=>{}); }
 init().catch(err=>{ console.error(err); alert("앱 초기화 실패: "+err.message); });
