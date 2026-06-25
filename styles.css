@@ -695,3 +695,24 @@
 .v11-scroller, .v10-scroller, .image-scroller {
   overscroll-behavior: contain !important;
 }
+
+/* === v13 손가락 이동 / 스타일러스 전용 필기 === */
+#inkCanvas {
+  touch-action: none !important;
+  cursor: grab;
+}
+#inkCanvas.is-panning {
+  cursor: grabbing;
+}
+#answerInkCanvas,
+#scoreAnswerCanvas,
+#scoreExplanationCanvas {
+  touch-action: pan-x pan-y !important;
+}
+.v11-scroller,
+.v10-scroller,
+.image-scroller {
+  overflow: auto !important;
+  -webkit-overflow-scrolling: touch !important;
+  overscroll-behavior: contain !important;
+}
