@@ -374,3 +374,239 @@
     grid-template-rows: 48dvh 52dvh !important;
   }
 }
+
+/* === v11 review edit + split resize === */
+.v11-shell {
+  height: 100dvh !important;
+  display: grid !important;
+  grid-template-rows: 48dvh 10px calc(52dvh - 10px) !important;
+  grid-template-columns: 1fr !important;
+  background: #f8fafc !important;
+  color: #111827 !important;
+  position: relative !important;
+}
+.solve-hidden-meta { display: none !important; }
+.problem-zone {
+  position: relative !important;
+  min-height: 0 !important;
+  background: #e5e7eb !important;
+  overflow: hidden !important;
+}
+.split-handle {
+  height: 10px !important;
+  background: linear-gradient(90deg, transparent, rgba(14,165,233,.5), transparent) !important;
+  border-top: 1px solid #cbd5e1 !important;
+  border-bottom: 1px solid #cbd5e1 !important;
+  touch-action: none !important;
+  cursor: row-resize !important;
+  position: relative !important;
+  z-index: 60 !important;
+}
+.split-handle::after {
+  content: "↕" !important;
+  position: absolute !important;
+  left: 50% !important;
+  top: 50% !important;
+  transform: translate(-50%, -50%) !important;
+  font-size: 11px !important;
+  color: #0369a1 !important;
+  font-weight: 900 !important;
+}
+.floating-controls {
+  position: absolute !important;
+  left: 6px !important;
+  right: 6px !important;
+  top: 6px !important;
+  z-index: 40 !important;
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  gap: 4px !important;
+  pointer-events: none !important;
+}
+.floating-controls > * { pointer-events: auto !important; }
+.float-btn {
+  border: 0 !important;
+  border-radius: 999px !important;
+  padding: 6px 8px !important;
+  background: rgba(255,255,255,.78) !important;
+  color: #111827 !important;
+  font-size: .72rem !important;
+  font-weight: 900 !important;
+  box-shadow: 0 2px 8px rgba(15,23,42,.15) !important;
+}
+.float-btn.primary { background: rgba(56,189,248,.9) !important; color: #082f49 !important; }
+.compact-timer {
+  background: rgba(15,23,42,.42) !important;
+  color: #fff !important;
+  border: 1px solid rgba(255,255,255,.2) !important;
+  border-radius: 14px !important;
+  padding: 4px 7px !important;
+  width: auto !important;
+  min-width: 56px !important;
+  box-shadow: 0 2px 8px rgba(0,0,0,.18) !important;
+}
+.compact-timer span { display: none !important; }
+.compact-timer strong { display: block !important; font-size: .82rem !important; line-height: 1.05 !important; margin: 0 !important; }
+.compact-timer small { display: block !important; color: rgba(255,255,255,.85) !important; font-size: .58rem !important; line-height: 1.05 !important; }
+.control-badge {
+  background: rgba(238,242,255,.86) !important;
+  color: #3730a3 !important;
+  font-size: .66rem !important;
+  padding: 4px 7px !important;
+}
+.v11-image-pane {
+  height: 100% !important;
+  min-height: 0 !important;
+  border: 0 !important;
+  padding-bottom: 35px !important;
+}
+.v11-scroller {
+  height: 100% !important;
+  width: 100% !important;
+  overflow: auto !important;
+  display: block !important;
+  justify-content: initial !important;
+  align-items: initial !important;
+  padding: 0 !important;
+  background: #e5e7eb !important;
+  -webkit-overflow-scrolling: touch !important;
+  touch-action: pan-x pan-y !important;
+}
+.problem-bottom-tools {
+  position: absolute !important;
+  left: 6px !important;
+  right: 6px !important;
+  bottom: 4px !important;
+  z-index: 45 !important;
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  gap: 4px !important;
+  background: rgba(255,255,255,.72) !important;
+  backdrop-filter: blur(4px) !important;
+  border-radius: 999px !important;
+  padding: 4px !important;
+}
+.problem-bottom-tools .small,
+.v11-bottom-tools .small,
+.answer-page-mini .small,
+.score-box .small {
+  padding: 6px 8px !important;
+  font-size: .68rem !important;
+  border-radius: 999px !important;
+}
+.mini-size-label {
+  display: flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  font-size: .65rem !important;
+  font-weight: 900 !important;
+  color: #334155 !important;
+}
+.mini-size-label input {
+  width: 70px !important;
+  padding: 0 !important;
+  accent-color: #38bdf8 !important;
+}
+.image-canvas-wrap {
+  position: relative !important;
+  display: block !important;
+  line-height: 0 !important;
+  margin: 0 !important;
+  transform-origin: top left !important;
+}
+#questionImageView {
+  display: block !important;
+  max-width: none !important;
+  height: auto !important;
+  transform-origin: top left !important;
+}
+#inkCanvas {
+  position: absolute !important;
+  left: 0 !important;
+  top: 0 !important;
+  z-index: 3 !important;
+  touch-action: pan-x pan-y !important;
+}
+.v11-answer-pane {
+  min-height: 0 !important;
+  height: 100% !important;
+  padding: 8px !important;
+  background: #fff !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+.answer-topbar {
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  gap: 8px !important;
+  margin-bottom: 5px !important;
+}
+.answer-page-mini {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 4px !important;
+  justify-content: flex-end !important;
+  align-items: center !important;
+}
+.handwriting-wrap {
+  flex: 1 !important;
+  min-height: 0 !important;
+  border: 1px solid #d7dce6 !important;
+  border-radius: 14px !important;
+  overflow: hidden !important;
+  background: white !important;
+  position: relative !important;
+  touch-action: none !important;
+}
+#answerInkCanvas {
+  width: 100% !important;
+  height: 100% !important;
+  display: block !important;
+  touch-action: none !important;
+  background:
+    linear-gradient(#eef2f7 1px, transparent 1px) 0 28px/100% 32px,
+    #fff !important;
+}
+#answerText:not(.hidden) { flex: 1 !important; min-height: 0 !important; }
+.v11-bottom-tools {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 4px !important;
+  align-items: center !important;
+  padding-top: 5px !important;
+}
+.review-ink-wrap {
+  position: relative !important;
+  min-height: 180px !important;
+  border: 1px solid #d7dce6 !important;
+  border-radius: 14px !important;
+  overflow: auto !important;
+  background: #fff !important;
+  margin-top: 8px !important;
+}
+#scoreAnswerCanvas,
+#scoreExplanationCanvas {
+  position: absolute !important;
+  left: 0 !important;
+  top: 0 !important;
+  z-index: 5 !important;
+  touch-action: none !important;
+}
+#scoreAnswerEditWrap pre {
+  min-height: 180px !important;
+  padding: 10px !important;
+}
+#scoreExplanationEditWrap {
+  min-height: 220px !important;
+}
+#scoreExplanationEditWrap img {
+  display: block !important;
+  max-width: none !important;
+  margin: 0 !important;
+}
+@media (max-width: 860px) {
+  .v11-shell { grid-template-rows: 48dvh 10px calc(52dvh - 10px) !important; }
+}
