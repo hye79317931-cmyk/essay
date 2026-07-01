@@ -13,7 +13,7 @@
   <header class="app-header">
     <div>
       <h1>2차 서술형 답안연습</h1>
-      <p>PSAT 앱 기반 v15 · 형법 · 형사소송법 · 행정법 · 교정학 · 페이지 추가 · 페이지 넘김</p>
+      <p>PSAT 앱 기반 v16 · 형법 · 형사소송법 · 행정법 · 교정학 · 페이지 추가 · 페이지 넘김</p>
     </div>
     <button id="installBtn" class="install-btn hidden" type="button">홈화면 설치</button>
   </header>
@@ -141,7 +141,7 @@
         </div>
       </div>
 
-      <div id="splitHandle" class="split-handle phone-drag-handle" role="separator" aria-label="문제와 답안 영역 크기 조절"><div class="drag-dots">•••</div><div class="drag-pill"></div></div>
+      <div id="splitHandle" class="split-handle phone-drag-handle v16-resize-handle" role="separator" aria-label="문제와 답안 영역 크기 조절"><div class="drag-dots">•••</div><div class="drag-pill"></div></div>
 
       <div class="answer-pane answer-dual-pane v11-answer-pane" id="answerZone">
         <div class="answer-topbar">
@@ -190,11 +190,7 @@
             <img id="ownAnswerInkView" class="answer-ink-preview hidden" alt="손글씨 답안" />
             <canvas id="scoreAnswerCanvas" aria-label="채점 화면 내 답안 필기 수정"></canvas>
           </div>
-        </section><section class="score-box"><div class="score-title-row"><h3>해설 / 모범답안</h3><span id="explanationPageBadge" class="badge"></span></div><div class="row wrap small-gap"><button id="prevExplanationPageBtn" class="secondary small" type="button">이전</button><button id="nextExplanationPageBtn" class="secondary small" type="button">다음</button></div><div class="row wrap small-gap">
-            <button id="scoreExpPenBtn" class="secondary small ink-active" type="button">펜</button>
-            <button id="scoreExpEraserBtn" class="secondary small" type="button">지우개</button>
-            <button id="clearScoreExpInkBtn" class="secondary small" type="button">필기삭제</button><label class="mini-size-label">굵기<input id="scoreExpSizeInput" type="range" min="1" max="20" value="4" /></label>
-          </div>
+        </section><section class="score-box"><div class="score-title-row"><h3>해설 / 모범답안</h3><span id="explanationPageBadge" class="badge"></span></div><div id="scoreExplanationOneLine" class="score-one-line-tools"><button id="prevExplanationPageBtn" class="secondary small" type="button">이전</button><button id="nextExplanationPageBtn" class="secondary small" type="button">다음</button><button id="scoreExpPenBtn" class="secondary small ink-active" type="button">펜</button><button id="scoreExpEraserBtn" class="secondary small" type="button">지우개</button><button id="clearScoreExpInkBtn" class="secondary small" type="button">필기삭제</button><label class="mini-size-label">굵기<input id="scoreExpSizeInput" type="range" min="1" max="20" value="4" /></label></div>
           <div id="scoreExplanationEditWrap" class="review-ink-wrap">
             <img id="explanationImageView" class="explanation-image hidden" alt="해설 이미지" />
             <canvas id="scoreExplanationCanvas" aria-label="해설 필기 수정"></canvas>
@@ -203,6 +199,6 @@
     </div>
   </section>
   <div id="toast" class="toast hidden"></div>
-  <script src="app.js?v=15"></script>
+  <script src="app.js?v=16"></script>
 </body>
 </html>
