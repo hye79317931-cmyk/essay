@@ -868,3 +868,127 @@
   color: #64748b;
   font-size: .74rem;
 }
+
+/* === v22 문제등록/문제풀기 옆 순번 표시 === */
+.page-item {
+  position: relative !important;
+  padding-left: 48px !important;
+}
+.reg-side-no {
+  position: absolute !important;
+  left: 10px !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  width: 30px !important;
+  height: 30px !important;
+  border-radius: 999px !important;
+  display: grid !important;
+  place-items: center !important;
+  font-weight: 950 !important;
+  font-size: .82rem !important;
+  background: #0f172a !important;
+  color: #fff !important;
+  border: 2px solid rgba(56,189,248,.75) !important;
+  box-shadow: 0 2px 8px rgba(15,23,42,.18) !important;
+  z-index: 2 !important;
+}
+.page-item.selected-page .reg-side-no {
+  background: #0284c7 !important;
+  border-color: #0ea5e9 !important;
+}
+.solve-side-no {
+  position: absolute !important;
+  left: 6px !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  z-index: 50 !important;
+  writing-mode: vertical-rl !important;
+  text-orientation: mixed !important;
+  padding: 10px 5px !important;
+  border-radius: 999px !important;
+  background: rgba(15,23,42,.82) !important;
+  color: #fff !important;
+  border: 1px solid rgba(255,255,255,.35) !important;
+  font-weight: 950 !important;
+  font-size: .78rem !important;
+  letter-spacing: .02em !important;
+  pointer-events: none !important;
+  box-shadow: 0 4px 18px rgba(0,0,0,.22) !important;
+}
+.solve-set-side-no {
+  position: absolute !important;
+  right: 6px !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  z-index: 50 !important;
+  writing-mode: vertical-rl !important;
+  text-orientation: mixed !important;
+  padding: 10px 5px !important;
+  border-radius: 999px !important;
+  background: rgba(2,132,199,.84) !important;
+  color: #fff !important;
+  border: 1px solid rgba(255,255,255,.35) !important;
+  font-weight: 950 !important;
+  font-size: .78rem !important;
+  letter-spacing: .02em !important;
+  pointer-events: none !important;
+  box-shadow: 0 4px 18px rgba(0,0,0,.22) !important;
+}
+.problem-zone {
+  position: relative !important;
+}
+
+/* === v23 문제풀기 목록 순번 표시 === */
+.problem-card {
+  position: relative !important;
+}
+.solve-list-card-number {
+  position: absolute !important;
+  left: 10px !important;
+  top: 12px !important;
+  width: 32px !important;
+  height: 32px !important;
+  border-radius: 999px !important;
+  display: grid !important;
+  place-items: center !important;
+  background: #0284c7 !important;
+  color: #fff !important;
+  font-weight: 950 !important;
+  font-size: .86rem !important;
+  border: 2px solid rgba(255,255,255,.9) !important;
+  box-shadow: 0 3px 10px rgba(15,23,42,.22) !important;
+  z-index: 5 !important;
+}
+.problem-card.has-solve-number {
+  padding-left: 52px !important;
+}
+.solve-order-big-badge {
+  position: absolute !important;
+  left: 8px !important;
+  bottom: 8px !important;
+  z-index: 80 !important;
+  display: flex !important;
+  gap: 5px !important;
+  align-items: center !important;
+  max-width: calc(100% - 16px) !important;
+  overflow-x: auto !important;
+  scrollbar-width: none !important;
+  pointer-events: none !important;
+}
+.solve-order-big-badge::-webkit-scrollbar {
+  display: none !important;
+}
+.solve-order-big-badge span {
+  flex: 0 0 auto !important;
+  padding: 7px 10px !important;
+  border-radius: 999px !important;
+  background: rgba(2,132,199,.9) !important;
+  color: #fff !important;
+  border: 1px solid rgba(255,255,255,.45) !important;
+  font-weight: 950 !important;
+  font-size: .78rem !important;
+  box-shadow: 0 4px 14px rgba(0,0,0,.22) !important;
+}
+.solve-order-big-badge span:nth-child(2) {
+  background: rgba(15,23,42,.86) !important;
+}
