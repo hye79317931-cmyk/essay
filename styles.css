@@ -852,3 +852,13 @@
   min-height: 0 !important;
   height: 100% !important;
 }
+
+/* === v20 문제등록 선택 페이지 유지 표시 === */
+.page-item.selected-page {
+  outline: 3px solid #38bdf8 !important;
+  background: #eff6ff !important;
+  box-shadow: 0 0 0 4px rgba(56,189,248,.18) !important;
+}
+.page-item.selected-page strong {
+  color: #075985 !important;
+}
