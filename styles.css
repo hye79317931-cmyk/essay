@@ -820,3 +820,35 @@
   transform:scale(.96)!important;
   background:#dbeafe!important;
 }
+
+/* === v19 중간바 완전 제거: 고정 2분할 === */
+.v11-shell,
+.v10-shell,
+.solve-shell,
+#solveShell {
+  display: grid !important;
+  grid-template-rows: 48dvh 52dvh !important;
+  grid-template-columns: 1fr !important;
+}
+#splitHandle,
+.split-handle,
+.phone-drag-handle,
+.v16-resize-handle,
+.v17-resize-bar {
+  display: none !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  max-height: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: 0 !important;
+}
+.problem-zone {
+  min-height: 0 !important;
+}
+.v11-answer-pane,
+.v10-answer-pane,
+.answer-pane {
+  min-height: 0 !important;
+  height: 100% !important;
+}
