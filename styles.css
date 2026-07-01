@@ -771,3 +771,52 @@
 .mini-size-label,.answer-size-label,.score-one-line-tools .mini-size-label,.score-box .mini-size-label{flex:0 0 auto!important;font-size:.56rem!important;gap:2px!important;white-space:nowrap!important;letter-spacing:-.05em!important}
 .mini-size-label input,.answer-size-label input,.score-one-line-tools .mini-size-label input,.score-box .mini-size-label input{width:48px!important}
 .score-one-line-tools{margin:2px 0 5px 0!important}
+
+/* === v17: 드래그 실패 대비 버튼식 크기조절 === */
+.v11-shell,.v10-shell,.solve-shell{
+  grid-template-rows:48dvh 46px calc(52dvh - 46px)!important;
+}
+.v17-resize-bar,
+.v16-resize-handle,
+.phone-drag-handle,
+.split-handle{
+  height:46px!important;
+  min-height:46px!important;
+  max-height:46px!important;
+  background:rgba(15,23,42,.94)!important;
+  border-radius:18px 18px 0 0!important;
+  display:flex!important;
+  flex-direction:row!important;
+  align-items:center!important;
+  justify-content:center!important;
+  gap:5px!important;
+  padding:5px 6px!important;
+  touch-action:manipulation!important;
+  user-select:none!important;
+  -webkit-user-select:none!important;
+  z-index:999!important;
+}
+.v17-resize-bar .drag-dots{display:none!important}
+.v17-pill{
+  width:42px!important;
+  height:7px!important;
+  border-radius:999px!important;
+  background:#3b82f6!important;
+  flex:0 0 auto!important;
+}
+.resize-mini-btn{
+  border:0!important;
+  border-radius:999px!important;
+  padding:7px 9px!important;
+  font-size:.66rem!important;
+  line-height:1!important;
+  font-weight:900!important;
+  background:rgba(255,255,255,.92)!important;
+  color:#111827!important;
+  box-shadow:0 2px 8px rgba(15,23,42,.18)!important;
+  flex:0 0 auto!important;
+}
+.resize-mini-btn:active{
+  transform:scale(.96)!important;
+  background:#dbeafe!important;
+}
