@@ -862,3 +862,9 @@
 .page-item.selected-page strong {
   color: #075985 !important;
 }
+
+/* === v21 마지막 설정 유지 강조 === */
+.pref-note {
+  color: #64748b;
+  font-size: .74rem;
+}
