@@ -7,13 +7,13 @@
   <title>2차 서술형 답안연습</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icon-192.png" />
-  <link rel="stylesheet" href="styles.css?v=1" />
+  <link rel="stylesheet" href="styles.css?v=25" />
 </head>
 <body>
   <header class="app-header">
     <div>
       <h1>2차 서술형 답안연습</h1>
-      <p>PSAT 앱 기반 v24 · 형법 · 형사소송법 · 행정법 · 교정학 · 페이지 추가 · 페이지 넘김</p>
+      <p>PSAT 앱 기반 v25 · 형법 · 형사소송법 · 행정법 · 교정학 · 페이지 추가 · 페이지 넘김</p>
     </div>
     <button id="installBtn" class="install-btn hidden" type="button">홈화면 설치</button>
   </header>
@@ -31,6 +31,15 @@
       <section class="card">
         <h2>문제풀기</h2>
         <div class="grid four">
+          <label>출제 범위
+            <select id="solveScope">
+              <option value="all">전체 랜덤</option>
+              <option value="review">복습필요 문제만</option>
+              <option value="slow">오래 걸린 문제만</option>
+              <option value="unseen">안 푼 문제만</option>
+              <option value="solved">푼 문제만</option>
+            </select>
+          </label>
           <label>대분류
             <select id="solveSubject">
               <option value="">전체</option><option value="형법">형법</option><option value="형사소송법">형사소송법</option><option value="행정법">행정법</option><option value="교정학">교정학</option>
@@ -41,7 +50,7 @@
           <label>랜덤 문제 수<select id="randomCount"><option value="1">1문제</option><option value="3">3문제</option><option value="5">5문제</option><option value="10">10문제</option></select></label>
         </div>
         <div class="row wrap">
-          <button id="randomStartBtn" type="button">조건 랜덤 시작</button>
+          <button id="randomStartBtn" type="button">랜덤 시작</button>
           <button id="reviewRandomStartBtn" class="secondary" type="button">복습필요 랜덤</button>
           <button id="continueBtn" class="secondary hidden" type="button">이어풀기</button>
         </div>
@@ -196,6 +205,6 @@
     </div>
   </section>
   <div id="toast" class="toast hidden"></div>
-  <script src="app.js?v=24"></script>
+  <script src="app.js?v=25"></script>
 </body>
 </html>
