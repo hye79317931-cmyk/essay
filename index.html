@@ -7,13 +7,13 @@
   <title>2차 서술형 답안연습</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icon-192.png" />
-  <link rel="stylesheet" href="styles.css?v=25" />
+  <link rel="stylesheet" href="styles.css?v=26" />
 </head>
 <body>
   <header class="app-header">
     <div>
       <h1>2차 서술형 답안연습</h1>
-      <p>PSAT 앱 기반 v25 · 형법 · 형사소송법 · 행정법 · 교정학 · 페이지 추가 · 페이지 넘김</p>
+      <p>PSAT 앱 기반 v26 · 형법 · 형사소송법 · 행정법 · 교정학 · 페이지 추가 · 페이지 넘김</p>
     </div>
     <button id="installBtn" class="install-btn hidden" type="button">홈화면 설치</button>
   </header>
@@ -200,11 +200,14 @@
           <div id="scoreExplanationEditWrap" class="review-ink-wrap">
             <img id="explanationImageView" class="explanation-image hidden" alt="해설 이미지" />
             <canvas id="scoreExplanationCanvas" aria-label="해설 필기 수정"></canvas>
-          </div><pre id="modelTextView"></pre></section></div>
+          </div><div id="scoreModelTextEditWrap" class="review-ink-wrap score-model-text-wrap">
+            <pre id="modelTextView"></pre>
+            <canvas id="scoreModelTextCanvas" aria-label="텍스트 해설 필기"></canvas>
+          </div></section></div>
       <section class="card score-card"><h3>채점포인트</h3><div id="pointChecklist" class="checklist"></div><div class="grid four"><label>점수<input id="attemptScoreInput" type="number" min="0" step="0.5" /></label><label>난이도<select id="difficultyResultInput"><option value="중">중</option><option value="상">상</option><option value="하">하</option></select></label><label>복습필요<select id="needReviewInput"><option value="true">예</option><option value="false">아니오</option></select></label><label>완성도<select id="completionInput"><option value="목차만">목차만</option><option value="불완전">불완전</option><option value="완성">완성</option></select></label></div><label>채점 메모<textarea id="memoInput" rows="3" placeholder="누락 쟁점, 다음 복습 포인트"></textarea></label><div class="row wrap"><button id="saveAttemptBtn" type="button">기록 저장</button><button id="saveAndNextBtn" class="secondary" type="button">저장 후 다음</button><button id="finishBtn" class="secondary" type="button">저장 후 끝내기</button></div></section>
     </div>
   </section>
   <div id="toast" class="toast hidden"></div>
-  <script src="app.js?v=25"></script>
+  <script src="app.js?v=26"></script>
 </body>
 </html>

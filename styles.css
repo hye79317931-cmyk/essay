@@ -1060,3 +1060,53 @@
   background: rgba(14,165,233,.12) !important;
   color: #075985 !important;
 }
+
+/* === v26 텍스트 해설 스타일러스 필기 === */
+#scoreModelTextEditWrap {
+  position: relative !important;
+  overflow: auto !important;
+  -webkit-overflow-scrolling: touch !important;
+  touch-action: none !important;
+  overscroll-behavior: contain !important;
+  background: #fff !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 14px !important;
+  margin-top: 10px !important;
+  min-height: 220px !important;
+  max-height: 58vh !important;
+}
+
+#modelTextView {
+  position: relative !important;
+  z-index: 1 !important;
+  display: block !important;
+  width: 100% !important;
+  min-height: 220px !important;
+  margin: 0 !important;
+  padding: 14px !important;
+  white-space: pre-wrap !important;
+  word-break: break-word !important;
+  line-height: 1.65 !important;
+  background: #fff !important;
+  color: #111827 !important;
+  pointer-events: none !important;
+}
+
+#scoreModelTextCanvas {
+  position: absolute !important;
+  left: 0 !important;
+  top: 0 !important;
+  z-index: 30 !important;
+  max-width: none !important;
+  transform: none !important;
+  pointer-events: auto !important;
+  touch-action: none !important;
+}
+
+#scoreModelTextCanvas.is-panning {
+  cursor: grabbing !important;
+}
+
+#scoreModelTextEditWrap.text-empty-v26 {
+  display: none !important;
+}
