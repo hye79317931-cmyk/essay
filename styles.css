@@ -1110,3 +1110,97 @@
 #scoreModelTextEditWrap.text-empty-v26 {
   display: none !important;
 }
+
+/* === v27 텍스트 전용 해설 배치 + 새 문제 답안필기 초기화 === */
+#scoreExplanationEditWrap.v27-no-image {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  max-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  overflow: hidden !important;
+}
+
+#scoreModelTextEditWrap.v27-text-only {
+  margin-top: 0 !important;
+  max-height: 70vh !important;
+}
+
+.v27-hidden-explanation-control {
+  display: none !important;
+}
+
+#scoreNoExplanationV27 {
+  margin: 10px 0 0 !important;
+  padding: 14px !important;
+  border: 1px dashed var(--line) !important;
+  border-radius: 12px !important;
+  background: var(--soft) !important;
+  color: var(--muted) !important;
+}
+
+/* === v28 답안 제출 후 내 답안 수정필기 안정화 === */
+#scoreAnswerEditWrap {
+  position: relative !important;
+  width: 100% !important;
+  min-height: 260px !important;
+  max-height: 58vh !important;
+  overflow: auto !important;
+  -webkit-overflow-scrolling: touch !important;
+  overscroll-behavior: contain !important;
+  touch-action: none !important;
+  background: #fff !important;
+}
+
+#ownAnswerView {
+  position: relative !important;
+  z-index: 1 !important;
+  display: block !important;
+  box-sizing: border-box !important;
+  width: 100% !important;
+  min-height: 240px !important;
+  margin: 0 !important;
+  padding: 14px !important;
+  white-space: pre-wrap !important;
+  word-break: break-word !important;
+  line-height: 1.65 !important;
+  pointer-events: none !important;
+  background: transparent !important;
+}
+
+#ownAnswerInkView {
+  position: relative !important;
+  z-index: 2 !important;
+  display: block !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  height: auto !important;
+  margin: 0 !important;
+  pointer-events: none !important;
+  user-select: none !important;
+  -webkit-user-drag: none !important;
+}
+
+#ownAnswerInkView.hidden {
+  display: none !important;
+}
+
+#scoreAnswerCanvas {
+  position: absolute !important;
+  left: 0 !important;
+  top: 0 !important;
+  z-index: 60 !important;
+  max-width: none !important;
+  transform: none !important;
+  pointer-events: auto !important;
+  touch-action: none !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+#scoreAnswerCanvas.is-panning {
+  cursor: grabbing !important;
+}
