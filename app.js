@@ -1,4 +1,4 @@
-const APP_VERSION="essay-psat-base-v31";const DB_NAME="essayPsatBaseDB_v1";const DB_VERSION=1;const STORE_PROBLEMS="problems";const STORE_ATTEMPTS="attempts";const $=id=>document.getElementById(id);const $$=sel=>Array.from(document.querySelectorAll(sel));let db;const state={problems:[],attempts:[],questionPages:[],explanationPages:[],selectedQuestionPage:-1,selectedExplanationPage:-1,activePasteTarget:"question",solve:null,timer:null,qPage:0,expPage:0,zoom:1,installPrompt:null};function uuid(){return crypto.randomUUID&&crypto.randomUUID()||`id_${Date.now()}_${Math.random().toString(16).slice(2)}`}function nowIso(){return new Date().toISOString()}function toast(msg){const t=$("toast");t.textContent=msg;t.classList.remove("hidden");clearTimeout(toast._t);toast._t=setTimeout(()=>t.classList.add("hidden"),2300)}function esc(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]))}function fmtTime(ms){ms=Math.max(0,Math.floor(ms||0));const sec=Math.floor(ms/1000),h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s=sec%60;return h?`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`:`${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`}function pointsFromText(text){return String(text||"").split(/\n+/).map(x=>x.trim()).filter(Boolean)}function openDB(){return new Promise((resolve,reject)=>{const req=indexedDB.open(DB_NAME,DB_VERSION);req.onupgradeneeded=()=>{const d=req.result;if(!d.objectStoreNames.contains(STORE_PROBLEMS))d.createObjectStore(STORE_PROBLEMS,{keyPath:"id"});if(!d.objectStoreNames.contains(STORE_ATTEMPTS))d.createObjectStore(STORE_ATTEMPTS,{keyPath:"id"})};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error)})}function store(name,mode="readonly"){return db.transaction(name,mode).objectStore(name)}function getAll(name){return new Promise((resolve,reject)=>{const req=store(name).getAll();req.onsuccess=()=>resolve(req.result||[]);req.onerror=()=>reject(req.error)})}function put(name,value){return new Promise((resolve,reject)=>{const req=store(name,"readwrite").put(value);req.onsuccess=()=>resolve(value);req.onerror=()=>reject(req.error)})}function del(name,key){return new Promise((resolve,reject)=>{const req=store(name,"readwrite").delete(key);req.onsuccess=()=>resolve();req.onerror=()=>reject(req.error)})}function clearStore(name){return new Promise((resolve,reject)=>{const req=store(name,"readwrite").clear();req.onsuccess=()=>resolve();req.onerror=()=>reject(req.error)})}async function loadData(){state.problems=(await getAll(STORE_PROBLEMS)).sort((a,b)=>(a.order||0)-(b.order||0));state.attempts=(await getAll(STORE_ATTEMPTS)).sort((a,b)=>String(b.completedAt).localeCompare(String(a.completedAt)))}function setPasteTarget(target){state.activePasteTarget=target;$("questionPasteZone")?.classList.toggle("active-paste",target==="question");$("explanationPasteZone")?.classList.toggle("active-paste",target==="explanation")}function dataUrlBytes(dataUrl){const comma=dataUrl.indexOf(",");const base64=comma>=0?dataUrl.slice(comma+1):dataUrl;return Math.round(base64.length*.75)}function formatBytes(bytes){if(!bytes)return"0B";const u=["B","KB","MB"];let v=bytes,i=0;while(v>=1024&&i<u.length-1){v/=1024;i++}return`${v.toFixed(i?1:0)}${u[i]}`}function imageBlobToDataUrl(blob){return new Promise((resolve,reject)=>{const mode=$("qualityInput").value||"sharp";if(mode==="original"){const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=()=>reject(r.error);r.readAsDataURL(blob);return}const reader=new FileReader();reader.onload=()=>{const img=new Image();img.onload=()=>{const maxDim=mode==="bulk"?1500:2400,scale=Math.min(1,maxDim/Math.max(img.width,img.height)),w=Math.max(1,Math.round(img.width*scale)),h=Math.max(1,Math.round(img.height*scale)),canvas=document.createElement("canvas");canvas.width=w;canvas.height=h;const ctx=canvas.getContext("2d");ctx.fillStyle="white";ctx.fillRect(0,0,w,h);ctx.drawImage(img,0,0,w,h);resolve(canvas.toDataURL("image/jpeg",mode==="bulk"?.72:.88))};img.onerror=reject;img.src=reader.result};reader.onerror=()=>reject(reader.error);reader.readAsDataURL(blob)})}async function addImageFiles(files,target){const arr=Array.from(files||[]).filter(file=>file&&file.type&&file.type.startsWith("image/"));if(!arr.length){toast("이미지 파일이 없어");return}let added=0,size=0;for(const file of arr){const data=await imageBlobToDataUrl(file);if(target==="explanation")state.explanationPages.push(data);else state.questionPages.push(data);size+=dataUrlBytes(data);added++}renderPageLists();setPasteTarget(target);toast(`${target==="explanation"?"해설":"문제"} 이미지 ${added}장 추가 · ${formatBytes(size)}`)}async function pasteImageFromClipboardEvent(event,explicitTarget=""){const items=event.clipboardData?.items?Array.from(event.clipboardData.items):[];const files=items.filter(entry=>entry.type&&entry.type.startsWith("image/")).map(entry=>entry.getAsFile()).filter(Boolean);if(!files.length)return false;event.preventDefault();const target=explicitTarget||event.target.closest?.("[data-paste-target]")?.dataset?.pasteTarget||state.activePasteTarget||"question";toast("스크린샷 처리 중...");await addImageFiles(files,target);return true}async function pasteImageWithClipboardApi(target){setPasteTarget(target);if(!navigator.clipboard||!navigator.clipboard.read){toast("이 브라우저는 버튼 붙여넣기를 지원하지 않아. 영역 클릭 후 Ctrl+V를 눌러줘.");return}try{const items=await navigator.clipboard.read();const files=[];for(const item of items){const type=item.types.find(t=>t.startsWith("image/"));if(!type)continue;const blob=await item.getType(type);files.push(new File([blob],`${target}_${Date.now()}_${files.length}.png`,{type}))}if(!files.length){toast("클립보드에 이미지가 없어");return}toast("스크린샷 처리 중...");await addImageFiles(files,target)}catch(err){console.warn(err);toast("붙여넣기 권한이 막혔어. 영역 클릭 후 Ctrl+V를 눌러줘.")}}function setupPasteZone(zoneId,inputId,target){const zone=$(zoneId),input=$(inputId);zone.addEventListener("click",()=>{setPasteTarget(target);zone.focus()});zone.addEventListener("focus",()=>setPasteTarget(target));zone.addEventListener("paste",event=>pasteImageFromClipboardEvent(event,target));input.addEventListener("change",async()=>{await addImageFiles(input.files,target);input.value=""})}function makeButton(text,fn,cls=""){const b=document.createElement("button");b.type="button";b.textContent=text;if(cls)b.className=cls;b.addEventListener("click",fn);return b}function movePage(target,index,dir){const arr=target==="explanation"?state.explanationPages:state.questionPages,next=index+dir;if(next<0||next>=arr.length)return;[arr[index],arr[next]]=[arr[next],arr[index]];renderPageLists()}function deletePage(target,index){const arr=target==="explanation"?state.explanationPages:state.questionPages;arr.splice(index,1);renderPageLists()}function renderPageList(id,arr,target){const box=$(id);box.innerHTML="";if(!arr.length){box.innerHTML='<p class="hint">아직 이미지가 없어.</p>';return}arr.forEach((src,index)=>{const div=document.createElement("div");div.className="page-item";div.innerHTML=`<img src="${src}" alt="${index+1}쪽" /><div><strong>${index+1}쪽</strong><p class="hint">${target==="explanation"?"해설":"문제"} 페이지</p><div class="page-actions"></div></div>`;const actions=div.querySelector(".page-actions");actions.append(makeButton("위",()=>movePage(target,index,-1),"secondary small"));actions.append(makeButton("아래",()=>movePage(target,index,1),"secondary small"));actions.append(makeButton("삭제",()=>deletePage(target,index),"danger small"));box.append(div)})}function renderPageLists(){renderPageList("questionPageList",state.questionPages,"question");renderPageList("explanationPageList",state.explanationPages,"explanation")}function titleOf(p){return p.title||`${p.session?p.session+" ":""}${p.subject||""} 문제`}function attemptsOf(id){return state.attempts.filter(a=>a.problemId===id)}function lastAttempt(id){return attemptsOf(id).sort((a,b)=>String(b.completedAt).localeCompare(String(a.completedAt)))[0]}function metaOf(p){const last=lastAttempt(p.id);return`${p.subject||"-"} · ${p.session||"회차 없음"} · 문제 ${realPages(p.questionPages||[]).length}쪽 · 해설 ${realPages(p.explanationPages||[]).length}쪽 · ${p.maxScore||0}점 · 제한 ${p.timeLimit||0}분 · 기록 ${attemptsOf(p.id).length}회${last?" · 최근 "+fmtTime(last.elapsedMs):""}`}function filterProblems({subject="",session="",search=""}={}){const s=session.trim().toLowerCase(),q=search.trim().toLowerCase();return state.problems.filter(p=>{if(subject&&p.subject!==subject)return false;if(s&&!String(p.session||"").toLowerCase().includes(s))return false;if(q){const blob=[p.title,p.session,p.subject,p.pointsText,p.modelText].join(" ").toLowerCase();if(!blob.includes(q))return false}return true})}function showView(id){$$(".tab").forEach(b=>b.classList.toggle("active",b.dataset.view===id));$$(".view").forEach(v=>v.classList.toggle("active",v.id===id));renderAll()}function problemCard(p,opts={}){const last=lastAttempt(p.id),div=document.createElement("div");div.className="problem-card";div.innerHTML=`<h3>${esc(titleOf(p))}</h3><p class="meta">${esc(metaOf(p))}</p><div class="badges"><span class="badge">${esc(p.subject||"-")}</span><span class="badge">${esc(p.session||"회차 없음")}</span><span class="badge">문제 ${realPages(p.questionPages||[]).length}쪽</span><span class="badge">해설 ${realPages(p.explanationPages||[]).length}쪽</span>${last?`<span class="badge">최근점수 ${last.score??"-"}</span>`:""}</div><div class="card-actions"></div>`;const actions=div.querySelector(".card-actions");if(opts.solve)actions.append(makeButton("풀기",()=>startSolve([p.id],$("solveMode").value||"outline")));if(opts.review)actions.append(makeButton("다시 풀기",()=>startSolve([p.id],"outline")));if(opts.list){actions.append(makeButton("수정",()=>fillForm(p),"secondary"));actions.append(makeButton("복제",async()=>{const copy={...p,id:uuid(),title:`${titleOf(p)} 복사본`,createdAt:nowIso(),updatedAt:nowIso(),order:Date.now()};await put(STORE_PROBLEMS,copy);await loadData();renderAll();toast("복제 완료")},"secondary"));actions.append(makeButton("삭제",async()=>{if(!confirm("이 문제와 풀이기록을 삭제할까?"))return;await del(STORE_PROBLEMS,p.id);for(const a of attemptsOf(p.id))await del(STORE_ATTEMPTS,a.id);await loadData();renderAll();toast("삭제 완료")},"danger small"))}return div}function renderSolveList(){const list=$("solveList"),arr=filterProblems({subject:$("solveSubject").value,session:$("solveSession").value});list.innerHTML="";if(!arr.length){list.innerHTML='<p class="hint">조건에 맞는 문제가 없어.</p>';return}arr.forEach(p=>list.append(problemCard(p,{solve:true})))}function renderList(){const list=$("problemList"),arr=filterProblems({subject:$("listSubject").value,session:$("listSession").value,search:$("listSearch").value});list.innerHTML="";if(!arr.length){list.innerHTML='<p class="hint">등록된 문제가 없어.</p>';return}arr.forEach((p,i)=>{const card=problemCard(p,{list:true});card.querySelector("h3").textContent=`${i+1}. ${titleOf(p)}`;list.append(card)})}function renderReview(){const list=$("reviewList");let arr=filterProblems({subject:$("reviewSubject").value,session:$("reviewSession").value});if($("reviewType").value==="needed")arr=arr.filter(p=>String(lastAttempt(p.id)?.needReview)==="true");else arr=arr.filter(p=>attemptsOf(p.id).length);list.innerHTML="";if(!arr.length){list.innerHTML='<p class="hint">복습 대상이 없어.</p>';return}arr.forEach(p=>list.append(problemCard(p,{review:true})))}function renderStats(){const done=new Set(state.attempts.map(a=>a.problemId)).size,review=state.problems.filter(p=>String(lastAttempt(p.id)?.needReview)==="true").length;$("statsGrid").innerHTML=`<div class="stat-card">등록 문제<strong>${state.problems.length}</strong></div><div class="stat-card">풀이 완료<strong>${done}</strong></div><div class="stat-card">풀이 기록<strong>${state.attempts.length}</strong></div><div class="stat-card">복습 필요<strong>${review}</strong></div>`}function renderContinue(){$("continueBtn").classList.toggle("hidden",!localStorage.getItem("essayPsatBaseDraft"))}function renderAll(){renderSolveList();renderList();renderReview();renderStats();renderContinue();renderPageLists()}async function saveProblem(event){event.preventDefault();const id=$("editId").value||uuid(),existing=state.problems.find(p=>p.id===id);if(!realPages(state.questionPages).length){toast("문제 이미지를 최소 1쪽 넣어줘");return}const problem={id,subject:$("subjectInput").value,session:$("sessionInput").value.trim(),title:$("titleInput").value.trim(),maxScore:Number($("scoreInput").value||0),timeLimit:Number($("timeInput").value||0),questionPages:realPages(state.questionPages),explanationPages:realPages(state.explanationPages),pointsText:$("pointsInput").value.trim(),points:pointsFromText($("pointsInput").value),modelText:$("modelTextInput").value.trim(),order:existing?.order??Date.now(),createdAt:existing?.createdAt||nowIso(),updatedAt:nowIso()};await put(STORE_PROBLEMS,problem);await loadData();toast($("editId").value?"수정 저장 완료":"저장 완료");resetForm();renderAll()}function fillForm(p){$("formTitle").textContent="문제 수정";$("editId").value=p.id;$("subjectInput").value=p.subject||"형법";$("sessionInput").value=p.session||"";$("titleInput").value=p.title||"";$("scoreInput").value=p.maxScore||20;$("timeInput").value=p.timeLimit||30;$("pointsInput").value=p.pointsText||(p.points||[]).join("\n");$("modelTextInput").value=p.modelText||"";state.questionPages=[...(p.questionPages||[])];state.explanationPages=[...(p.explanationPages||[])];renderPageLists();showView("addView");window.scrollTo(0,0)}function resetForm(){$("formTitle").textContent="문제 등록";$("problemForm").reset();$("editId").value="";$("scoreInput").value=20;$("timeInput").value=30;$("qualityInput").value="sharp";state.questionPages=[];state.explanationPages=[];setPasteTarget("question");renderPageLists()}function chooseRandom(arr,n){return[...arr].sort(()=>Math.random()-.5).slice(0,Math.min(n,arr.length))}function startRandom(reviewOnly=false){let arr=filterProblems({subject:$("solveSubject").value,session:$("solveSession").value});if(reviewOnly)arr=arr.filter(p=>String(lastAttempt(p.id)?.needReview)==="true");if(!arr.length){toast(reviewOnly?"복습필요 문제가 없어":"조건에 맞는 문제가 없어");return}const picks=chooseRandom(arr,Number($("randomCount").value||1));startSolve(picks.map(p=>p.id),$("solveMode").value||"outline")}function currentProblem(){return state.problems.find(p=>p.id===state.solve?.ids[state.solve.index])}function startSolve(ids,mode){state.solve={ids,index:0,mode,startedAt:Date.now(),startedProblemAt:Date.now(),elapsedBase:0,answer:""};state.qPage=0;localStorage.setItem("essayPsatBaseDraft",JSON.stringify(state.solve));openCurrentProblem()}function openCurrentProblem(){const p=currentProblem();if(!p){finishSolve(false);return}state.qPage=0;$("solveOverlay").classList.remove("hidden");$("solveTitle").textContent=titleOf(p);$("solveMeta").textContent=metaOf(p);$("setBadge").textContent=`${state.solve.index+1}/${state.solve.ids.length} · ${state.solve.mode==="outline"?"목차연습":"실전답안"}`;$("answerLabel").textContent=state.solve.mode==="outline"?"내 목차/쟁점":"내 답안";$("answerText").value=state.solve.answer||"";showQuestionPage(0);clearInterval(state.timer);state.timer=setInterval(updateTimer,500);updateTimer()}function showQuestionPage(index){const p=currentProblem(),pages=realPages(p?.questionPages||[]);state.qPage=Math.max(0,Math.min(index,pages.length-1));$("questionImageView").src=pages[state.qPage]||"";$("questionPageBadge").textContent=pages.length?`문제 ${state.qPage+1}/${pages.length}쪽`:"문제 없음";fitImage();saveDraft()}function elapsedNow(){return state.solve?(state.solve.elapsedBase||0)+Date.now()-state.solve.startedProblemAt:0}function updateTimer(){const p=currentProblem(),elapsed=elapsedNow();$("timerText").textContent=fmtTime(elapsed);const limit=Number(p?.timeLimit||0)*6e4;$("limitText").textContent=limit?elapsed<=limit?`남은 ${fmtTime(limit-elapsed)}`:`초과 ${fmtTime(elapsed-limit)}`:""}function saveDraft(){if(!state.solve)return;state.solve.answer=$("answerText")?.value??state.solve.answer;localStorage.setItem("essayPsatBaseDraft",JSON.stringify(state.solve));renderContinue()}function pauseSolve(){if(!state.solve)return;state.solve.elapsedBase=elapsedNow();state.solve.answer=$("answerText").value;clearInterval(state.timer);state.timer=null;saveDraft();$("solveOverlay").classList.add("hidden");toast("이어풀기 저장 완료")}function continueSolve(){try{const saved=JSON.parse(localStorage.getItem("essayPsatBaseDraft")||"null");if(!saved||!saved.ids?.length){toast("이어풀 문제가 없어");return}state.solve=saved;state.solve.startedProblemAt=Date.now();openCurrentProblem()}catch{toast("이어풀 문제가 없어")}}function submitAnswer(){if(!state.solve)return;state.solve.elapsedBase=elapsedNow();state.solve.answer=$("answerText").value;clearInterval(state.timer);state.timer=null;openScore()}function openScore(){const p=currentProblem();if(!p)return;state.expPage=0;$("scoreOverlay").classList.remove("hidden");$("scoreMeta").textContent=`${titleOf(p)} · 풀이시간 ${fmtTime(state.solve.elapsedBase)}`;$("ownAnswerView").textContent=state.solve.answer||"(작성한 답안 없음)";$("modelTextView").textContent=p.modelText||"";$("attemptScoreInput").value="";$("attemptScoreInput").max=p.maxScore||"";$("completionInput").value=state.solve.mode==="outline"?"목차만":"완성";$("needReviewInput").value="true";renderChecklist(p);showExplanationPage(0)}function showExplanationPage(index){const p=currentProblem(),pages=realPages(p?.explanationPages||[]);state.expPage=Math.max(0,Math.min(index,pages.length-1));if(pages.length){$("explanationImageView").src=pages[state.expPage];$("explanationImageView").classList.remove("hidden");$("explanationPageBadge").textContent=`해설 ${state.expPage+1}/${pages.length}쪽`}else{$("explanationImageView").classList.add("hidden");$("explanationPageBadge").textContent="해설 이미지 없음"}}function renderChecklist(p){const box=$("pointChecklist"),points=p.points?.length?p.points:pointsFromText(p.pointsText);box.innerHTML="";if(!points.length){box.innerHTML='<p class="hint">채점포인트 없음</p>';return}points.forEach((point,i)=>{const row=document.createElement("label");row.className="check-item";row.innerHTML=`<input type="checkbox" data-point="${i}" /> <span>${esc(point)}</span>`;box.append(row)})}async function saveAttempt(){const p=currentProblem();if(!p||!state.solve)return null;const attempt={id:uuid(),problemId:p.id,subject:p.subject,session:p.session,mode:state.solve.mode,answer:state.solve.answer||"",elapsedMs:state.solve.elapsedBase,score:$("attemptScoreInput").value===""?null:Number($("attemptScoreInput").value),maxScore:p.maxScore||0,difficulty:$("difficultyResultInput").value,needReview:$("needReviewInput").value,completion:$("completionInput").value,memo:$("memoInput").value.trim(),checkedPoints:$$("#pointChecklist input").map(x=>x.checked),completedAt:nowIso()};await put(STORE_ATTEMPTS,attempt);await loadData();toast("풀이 기록 저장 완료");return attempt}async function saveAndNext(){await saveAttempt();if(!state.solve)return;if(state.solve.index>=state.solve.ids.length-1){finishSolve(true);return}state.solve.index++;state.solve.answer="";state.solve.elapsedBase=0;state.solve.startedProblemAt=Date.now();$("scoreOverlay").classList.add("hidden");openCurrentProblem()}function finishSolve(clearDraft=true){clearInterval(state.timer);state.timer=null;state.solve=null;$("solveOverlay").classList.add("hidden");$("scoreOverlay").classList.add("hidden");if(clearDraft)localStorage.removeItem("essayPsatBaseDraft");renderAll()}function fitImage(){state.zoom=1;applyZoom();setTimeout(()=>{const img=$("questionImageView"),scroller=$("questionImageScroller");if(!img.naturalWidth||!scroller.clientWidth)return;state.zoom=Math.max(.2,Math.min(1,(scroller.clientWidth-20)/img.naturalWidth));applyZoom()},30)}function applyZoom(){$("questionImageView").style.width=`${Math.round(state.zoom*100)}%`}async function exportBackup(){const payload={app:APP_VERSION,exportedAt:nowIso(),problems:state.problems,attempts:state.attempts};const blob=new Blob([JSON.stringify(payload)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`essay_psat_base_backup_${new Date().toISOString().slice(0,10)}.json`;a.click();URL.revokeObjectURL(a.href)}async function importBackup(file){if(!file)return;const data=JSON.parse(await file.text());if(!Array.isArray(data.problems)){toast("백업 파일이 아니야");return}if(!confirm("백업 데이터를 현재 앱에 합쳐서 불러올까? 같은 ID는 덮어쓰기 돼."))return;for(const p of data.problems)await put(STORE_PROBLEMS,p);for(const a of data.attempts||[])await put(STORE_ATTEMPTS,a);await loadData();renderAll();toast("복원 완료")}async function wipeAll(){if(!confirm("모든 문제와 기록을 삭제할까? 백업 없으면 복구 불가."))return;await clearStore(STORE_PROBLEMS);await clearStore(STORE_ATTEMPTS);localStorage.removeItem("essayPsatBaseDraft");await loadData();resetForm();renderAll();toast("전체 삭제 완료")}function setupInstall(){window.addEventListener("beforeinstallprompt",event=>{event.preventDefault();state.installPrompt=event;$("installBtn").classList.remove("hidden")});$("installBtn").addEventListener("click",async()=>{if(!state.installPrompt){toast("Chrome 메뉴에서 홈화면 추가를 눌러줘");return}state.installPrompt.prompt();await state.installPrompt.userChoice.catch(()=>null);state.installPrompt=null;$("installBtn").classList.add("hidden")})}function setupEvents(){setupInstall();$$(".tab").forEach(b=>b.addEventListener("click",()=>showView(b.dataset.view)));["solveSubject","solveSession","solveMode","randomCount","listSubject","listSession","listSearch","reviewSubject","reviewSession","reviewType"].forEach(id=>{$(id).addEventListener("input",renderAll);$(id).addEventListener("change",renderAll)});setupPasteZone("questionPasteZone","questionFileInput","question");setupPasteZone("explanationPasteZone","explanationFileInput","explanation");document.addEventListener("paste",event=>pasteImageFromClipboardEvent(event));$("pasteQuestionBtn").addEventListener("click",()=>pasteImageWithClipboardApi("question"));$("pasteExplanationBtn").addEventListener("click",()=>pasteImageWithClipboardApi("explanation"));$("addQuestionFileBtn").addEventListener("click",()=>addBlankPage("question"));$("addExplanationFileBtn").addEventListener("click",()=>addBlankPage("explanation"));$("clearQuestionBtn").addEventListener("click",()=>{state.questionPages=[];renderPageLists()});$("clearExplanationBtn").addEventListener("click",()=>{state.explanationPages=[];renderPageLists()});$("problemForm").addEventListener("submit",saveProblem);$("resetBtn").addEventListener("click",resetForm);$("randomStartBtn").addEventListener("click",()=>startRandom(false));$("reviewRandomStartBtn").addEventListener("click",()=>startRandom(true));$("continueBtn").addEventListener("click",continueSolve);$("answerText").addEventListener("input",saveDraft);$("exitSolveBtn").addEventListener("click",pauseSolve);$("submitAnswerBtn").addEventListener("click",submitAnswer);$("prevQuestionPageBtn").addEventListener("click",()=>showQuestionPage(state.qPage-1));$("nextQuestionPageBtn").addEventListener("click",()=>showQuestionPage(state.qPage+1));$("fitBtn").addEventListener("click",fitImage);$("zoomInBtn").addEventListener("click",()=>{state.zoom=Math.min(3,state.zoom+.15);applyZoom()});$("zoomOutBtn").addEventListener("click",()=>{state.zoom=Math.max(.2,state.zoom-.15);applyZoom()});$("questionImageView").addEventListener("load",fitImage);$("backToAnswerBtn").addEventListener("click",()=>{$("scoreOverlay").classList.add("hidden");if(state.solve){state.solve.startedProblemAt=Date.now();clearInterval(state.timer);state.timer=setInterval(updateTimer,500);$("solveOverlay").classList.remove("hidden")}});$("prevExplanationPageBtn").addEventListener("click",()=>showExplanationPage(state.expPage-1));$("nextExplanationPageBtn").addEventListener("click",()=>showExplanationPage(state.expPage+1));$("saveAttemptBtn").addEventListener("click",saveAttempt);$("saveAndNextBtn").addEventListener("click",saveAndNext);$("finishBtn").addEventListener("click",async()=>{await saveAttempt();finishSolve(true)});$("exportBtn").addEventListener("click",exportBackup);$("importInput").addEventListener("change",async()=>{try{await importBackup($("importInput").files[0])}catch(e){console.error(e);toast("복원 실패")}$("importInput").value=""});$("wipeBtn").addEventListener("click",wipeAll)}async function init(){db=await openDB();await loadData();await normalizeStoredProblems();setupEvents();resetForm();renderAll();if("serviceWorker" in navigator)navigator.serviceWorker.register("sw.js?v=31").catch(()=>{})}init().catch(err=>{console.error(err);alert(`앱 초기화 실패: ${err.message}`)});
+const APP_VERSION="essay-psat-base-v32";const DB_NAME="essayPsatBaseDB_v1";const DB_VERSION=1;const STORE_PROBLEMS="problems";const STORE_ATTEMPTS="attempts";const $=id=>document.getElementById(id);const $$=sel=>Array.from(document.querySelectorAll(sel));let db;const state={problems:[],attempts:[],questionPages:[],explanationPages:[],selectedQuestionPage:-1,selectedExplanationPage:-1,activePasteTarget:"question",solve:null,timer:null,qPage:0,expPage:0,zoom:1,installPrompt:null};function uuid(){return crypto.randomUUID&&crypto.randomUUID()||`id_${Date.now()}_${Math.random().toString(16).slice(2)}`}function nowIso(){return new Date().toISOString()}function toast(msg){const t=$("toast");t.textContent=msg;t.classList.remove("hidden");clearTimeout(toast._t);toast._t=setTimeout(()=>t.classList.add("hidden"),2300)}function esc(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]))}function fmtTime(ms){ms=Math.max(0,Math.floor(ms||0));const sec=Math.floor(ms/1000),h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s=sec%60;return h?`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`:`${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`}function pointsFromText(text){return String(text||"").split(/\n+/).map(x=>x.trim()).filter(Boolean)}function openDB(){return new Promise((resolve,reject)=>{const req=indexedDB.open(DB_NAME,DB_VERSION);req.onupgradeneeded=()=>{const d=req.result;if(!d.objectStoreNames.contains(STORE_PROBLEMS))d.createObjectStore(STORE_PROBLEMS,{keyPath:"id"});if(!d.objectStoreNames.contains(STORE_ATTEMPTS))d.createObjectStore(STORE_ATTEMPTS,{keyPath:"id"})};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error)})}function store(name,mode="readonly"){return db.transaction(name,mode).objectStore(name)}function getAll(name){return new Promise((resolve,reject)=>{const req=store(name).getAll();req.onsuccess=()=>resolve(req.result||[]);req.onerror=()=>reject(req.error)})}function put(name,value){return new Promise((resolve,reject)=>{const req=store(name,"readwrite").put(value);req.onsuccess=()=>resolve(value);req.onerror=()=>reject(req.error)})}function del(name,key){return new Promise((resolve,reject)=>{const req=store(name,"readwrite").delete(key);req.onsuccess=()=>resolve();req.onerror=()=>reject(req.error)})}function clearStore(name){return new Promise((resolve,reject)=>{const req=store(name,"readwrite").clear();req.onsuccess=()=>resolve();req.onerror=()=>reject(req.error)})}async function loadData(){state.problems=(await getAll(STORE_PROBLEMS)).sort((a,b)=>(a.order||0)-(b.order||0));state.attempts=(await getAll(STORE_ATTEMPTS)).sort((a,b)=>String(b.completedAt).localeCompare(String(a.completedAt)))}function setPasteTarget(target){state.activePasteTarget=target;$("questionPasteZone")?.classList.toggle("active-paste",target==="question");$("explanationPasteZone")?.classList.toggle("active-paste",target==="explanation")}function dataUrlBytes(dataUrl){const comma=dataUrl.indexOf(",");const base64=comma>=0?dataUrl.slice(comma+1):dataUrl;return Math.round(base64.length*.75)}function formatBytes(bytes){if(!bytes)return"0B";const u=["B","KB","MB"];let v=bytes,i=0;while(v>=1024&&i<u.length-1){v/=1024;i++}return`${v.toFixed(i?1:0)}${u[i]}`}function imageBlobToDataUrl(blob){return new Promise((resolve,reject)=>{const mode=$("qualityInput").value||"sharp";if(mode==="original"){const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=()=>reject(r.error);r.readAsDataURL(blob);return}const reader=new FileReader();reader.onload=()=>{const img=new Image();img.onload=()=>{const maxDim=mode==="bulk"?1500:2400,scale=Math.min(1,maxDim/Math.max(img.width,img.height)),w=Math.max(1,Math.round(img.width*scale)),h=Math.max(1,Math.round(img.height*scale)),canvas=document.createElement("canvas");canvas.width=w;canvas.height=h;const ctx=canvas.getContext("2d");ctx.fillStyle="white";ctx.fillRect(0,0,w,h);ctx.drawImage(img,0,0,w,h);resolve(canvas.toDataURL("image/jpeg",mode==="bulk"?.72:.88))};img.onerror=reject;img.src=reader.result};reader.onerror=()=>reject(reader.error);reader.readAsDataURL(blob)})}async function addImageFiles(files,target){const arr=Array.from(files||[]).filter(file=>file&&file.type&&file.type.startsWith("image/"));if(!arr.length){toast("이미지 파일이 없어");return}let added=0,size=0;for(const file of arr){const data=await imageBlobToDataUrl(file);if(target==="explanation")state.explanationPages.push(data);else state.questionPages.push(data);size+=dataUrlBytes(data);added++}renderPageLists();setPasteTarget(target);toast(`${target==="explanation"?"해설":"문제"} 이미지 ${added}장 추가 · ${formatBytes(size)}`)}async function pasteImageFromClipboardEvent(event,explicitTarget=""){const items=event.clipboardData?.items?Array.from(event.clipboardData.items):[];const files=items.filter(entry=>entry.type&&entry.type.startsWith("image/")).map(entry=>entry.getAsFile()).filter(Boolean);if(!files.length)return false;event.preventDefault();const target=explicitTarget||event.target.closest?.("[data-paste-target]")?.dataset?.pasteTarget||state.activePasteTarget||"question";toast("스크린샷 처리 중...");await addImageFiles(files,target);return true}async function pasteImageWithClipboardApi(target){setPasteTarget(target);if(!navigator.clipboard||!navigator.clipboard.read){toast("이 브라우저는 버튼 붙여넣기를 지원하지 않아. 영역 클릭 후 Ctrl+V를 눌러줘.");return}try{const items=await navigator.clipboard.read();const files=[];for(const item of items){const type=item.types.find(t=>t.startsWith("image/"));if(!type)continue;const blob=await item.getType(type);files.push(new File([blob],`${target}_${Date.now()}_${files.length}.png`,{type}))}if(!files.length){toast("클립보드에 이미지가 없어");return}toast("스크린샷 처리 중...");await addImageFiles(files,target)}catch(err){console.warn(err);toast("붙여넣기 권한이 막혔어. 영역 클릭 후 Ctrl+V를 눌러줘.")}}function setupPasteZone(zoneId,inputId,target){const zone=$(zoneId),input=$(inputId);zone.addEventListener("click",()=>{setPasteTarget(target);zone.focus()});zone.addEventListener("focus",()=>setPasteTarget(target));zone.addEventListener("paste",event=>pasteImageFromClipboardEvent(event,target));input.addEventListener("change",async()=>{await addImageFiles(input.files,target);input.value=""})}function makeButton(text,fn,cls=""){const b=document.createElement("button");b.type="button";b.textContent=text;if(cls)b.className=cls;b.addEventListener("click",fn);return b}function movePage(target,index,dir){const arr=target==="explanation"?state.explanationPages:state.questionPages,next=index+dir;if(next<0||next>=arr.length)return;[arr[index],arr[next]]=[arr[next],arr[index]];renderPageLists()}function deletePage(target,index){const arr=target==="explanation"?state.explanationPages:state.questionPages;arr.splice(index,1);renderPageLists()}function renderPageList(id,arr,target){const box=$(id);box.innerHTML="";if(!arr.length){box.innerHTML='<p class="hint">아직 이미지가 없어.</p>';return}arr.forEach((src,index)=>{const div=document.createElement("div");div.className="page-item";div.innerHTML=`<img src="${src}" alt="${index+1}쪽" /><div><strong>${index+1}쪽</strong><p class="hint">${target==="explanation"?"해설":"문제"} 페이지</p><div class="page-actions"></div></div>`;const actions=div.querySelector(".page-actions");actions.append(makeButton("위",()=>movePage(target,index,-1),"secondary small"));actions.append(makeButton("아래",()=>movePage(target,index,1),"secondary small"));actions.append(makeButton("삭제",()=>deletePage(target,index),"danger small"));box.append(div)})}function renderPageLists(){renderPageList("questionPageList",state.questionPages,"question");renderPageList("explanationPageList",state.explanationPages,"explanation")}function titleOf(p){return p.title||`${p.session?p.session+" ":""}${p.subject||""} 문제`}function attemptsOf(id){return state.attempts.filter(a=>a.problemId===id)}function lastAttempt(id){return attemptsOf(id).sort((a,b)=>String(b.completedAt).localeCompare(String(a.completedAt)))[0]}function metaOf(p){const last=lastAttempt(p.id);return`${p.subject||"-"} · ${p.session||"회차 없음"} · 문제 ${realPages(p.questionPages||[]).length}쪽 · 해설 ${realPages(p.explanationPages||[]).length}쪽 · ${p.maxScore||0}점 · 제한 ${p.timeLimit||0}분 · 기록 ${attemptsOf(p.id).length}회${last?" · 최근 "+fmtTime(last.elapsedMs):""}`}function filterProblems({subject="",session="",search=""}={}){const s=session.trim().toLowerCase(),q=search.trim().toLowerCase();return state.problems.filter(p=>{if(subject&&p.subject!==subject)return false;if(s&&!String(p.session||"").toLowerCase().includes(s))return false;if(q){const blob=[p.title,p.session,p.subject,p.pointsText,p.modelText].join(" ").toLowerCase();if(!blob.includes(q))return false}return true})}function showView(id){$$(".tab").forEach(b=>b.classList.toggle("active",b.dataset.view===id));$$(".view").forEach(v=>v.classList.toggle("active",v.id===id));renderAll()}function problemCard(p,opts={}){const last=lastAttempt(p.id),div=document.createElement("div");div.className="problem-card";div.innerHTML=`<h3>${esc(titleOf(p))}</h3><p class="meta">${esc(metaOf(p))}</p><div class="badges"><span class="badge">${esc(p.subject||"-")}</span><span class="badge">${esc(p.session||"회차 없음")}</span><span class="badge">문제 ${realPages(p.questionPages||[]).length}쪽</span><span class="badge">해설 ${realPages(p.explanationPages||[]).length}쪽</span>${last?`<span class="badge">최근점수 ${last.score??"-"}</span>`:""}</div><div class="card-actions"></div>`;const actions=div.querySelector(".card-actions");if(opts.solve)actions.append(makeButton("풀기",()=>startSolve([p.id],$("solveMode").value||"outline")));if(opts.review)actions.append(makeButton("다시 풀기",()=>startSolve([p.id],"outline")));if(opts.list){actions.append(makeButton("수정",()=>fillForm(p),"secondary"));actions.append(makeButton("복제",async()=>{const copy={...p,id:uuid(),title:`${titleOf(p)} 복사본`,createdAt:nowIso(),updatedAt:nowIso(),order:Date.now()};await put(STORE_PROBLEMS,copy);await loadData();renderAll();toast("복제 완료")},"secondary"));actions.append(makeButton("삭제",async()=>{if(!confirm("이 문제와 풀이기록을 삭제할까?"))return;await del(STORE_PROBLEMS,p.id);for(const a of attemptsOf(p.id))await del(STORE_ATTEMPTS,a.id);await loadData();renderAll();toast("삭제 완료")},"danger small"))}return div}function renderSolveList(){const list=$("solveList"),arr=filterProblems({subject:$("solveSubject").value,session:$("solveSession").value});list.innerHTML="";if(!arr.length){list.innerHTML='<p class="hint">조건에 맞는 문제가 없어.</p>';return}arr.forEach(p=>list.append(problemCard(p,{solve:true})))}function renderList(){const list=$("problemList"),arr=filterProblems({subject:$("listSubject").value,session:$("listSession").value,search:$("listSearch").value});list.innerHTML="";if(!arr.length){list.innerHTML='<p class="hint">등록된 문제가 없어.</p>';return}arr.forEach((p,i)=>{const card=problemCard(p,{list:true});card.querySelector("h3").textContent=`${i+1}. ${titleOf(p)}`;list.append(card)})}function renderReview(){const list=$("reviewList");let arr=filterProblems({subject:$("reviewSubject").value,session:$("reviewSession").value});if($("reviewType").value==="needed")arr=arr.filter(p=>String(lastAttempt(p.id)?.needReview)==="true");else arr=arr.filter(p=>attemptsOf(p.id).length);list.innerHTML="";if(!arr.length){list.innerHTML='<p class="hint">복습 대상이 없어.</p>';return}arr.forEach(p=>list.append(problemCard(p,{review:true})))}function renderStats(){const done=new Set(state.attempts.map(a=>a.problemId)).size,review=state.problems.filter(p=>String(lastAttempt(p.id)?.needReview)==="true").length;$("statsGrid").innerHTML=`<div class="stat-card">등록 문제<strong>${state.problems.length}</strong></div><div class="stat-card">풀이 완료<strong>${done}</strong></div><div class="stat-card">풀이 기록<strong>${state.attempts.length}</strong></div><div class="stat-card">복습 필요<strong>${review}</strong></div>`}function renderContinue(){$("continueBtn").classList.toggle("hidden",!localStorage.getItem("essayPsatBaseDraft"))}function renderAll(){renderSolveList();renderList();renderReview();renderStats();renderContinue();renderPageLists()}async function saveProblem(event){event.preventDefault();const id=$("editId").value||uuid(),existing=state.problems.find(p=>p.id===id);if(!realPages(state.questionPages).length){toast("문제 이미지를 최소 1쪽 넣어줘");return}const problem={id,subject:$("subjectInput").value,session:$("sessionInput").value.trim(),title:$("titleInput").value.trim(),maxScore:Number($("scoreInput").value||0),timeLimit:Number($("timeInput").value||0),questionPages:realPages(state.questionPages),explanationPages:realPages(state.explanationPages),pointsText:$("pointsInput").value.trim(),points:pointsFromText($("pointsInput").value),modelText:$("modelTextInput").value.trim(),order:existing?.order??Date.now(),createdAt:existing?.createdAt||nowIso(),updatedAt:nowIso()};await put(STORE_PROBLEMS,problem);await loadData();toast($("editId").value?"수정 저장 완료":"저장 완료");resetForm();renderAll()}function fillForm(p){$("formTitle").textContent="문제 수정";$("editId").value=p.id;$("subjectInput").value=p.subject||"형법";$("sessionInput").value=p.session||"";$("titleInput").value=p.title||"";$("scoreInput").value=p.maxScore||20;$("timeInput").value=p.timeLimit||30;$("pointsInput").value=p.pointsText||(p.points||[]).join("\n");$("modelTextInput").value=p.modelText||"";state.questionPages=[...(p.questionPages||[])];state.explanationPages=[...(p.explanationPages||[])];renderPageLists();showView("addView");window.scrollTo(0,0)}function resetForm(){$("formTitle").textContent="문제 등록";$("problemForm").reset();$("editId").value="";$("scoreInput").value=20;$("timeInput").value=30;$("qualityInput").value="sharp";state.questionPages=[];state.explanationPages=[];setPasteTarget("question");renderPageLists()}function chooseRandom(arr,n){return[...arr].sort(()=>Math.random()-.5).slice(0,Math.min(n,arr.length))}function startRandom(reviewOnly=false){let arr=filterProblems({subject:$("solveSubject").value,session:$("solveSession").value});if(reviewOnly)arr=arr.filter(p=>String(lastAttempt(p.id)?.needReview)==="true");if(!arr.length){toast(reviewOnly?"복습필요 문제가 없어":"조건에 맞는 문제가 없어");return}const picks=chooseRandom(arr,Number($("randomCount").value||1));startSolve(picks.map(p=>p.id),$("solveMode").value||"outline")}function currentProblem(){return state.problems.find(p=>p.id===state.solve?.ids[state.solve.index])}function startSolve(ids,mode){state.solve={ids,index:0,mode,startedAt:Date.now(),startedProblemAt:Date.now(),elapsedBase:0,answer:""};state.qPage=0;localStorage.setItem("essayPsatBaseDraft",JSON.stringify(state.solve));openCurrentProblem()}function openCurrentProblem(){const p=currentProblem();if(!p){finishSolve(false);return}state.qPage=0;$("solveOverlay").classList.remove("hidden");$("solveTitle").textContent=titleOf(p);$("solveMeta").textContent=metaOf(p);$("setBadge").textContent=`${state.solve.index+1}/${state.solve.ids.length} · ${state.solve.mode==="outline"?"목차연습":"실전답안"}`;$("answerLabel").textContent=state.solve.mode==="outline"?"내 목차/쟁점":"내 답안";$("answerText").value=state.solve.answer||"";showQuestionPage(0);clearInterval(state.timer);state.timer=setInterval(updateTimer,500);updateTimer()}function showQuestionPage(index){const p=currentProblem(),pages=realPages(p?.questionPages||[]);state.qPage=Math.max(0,Math.min(index,pages.length-1));$("questionImageView").src=pages[state.qPage]||"";$("questionPageBadge").textContent=pages.length?`문제 ${state.qPage+1}/${pages.length}쪽`:"문제 없음";fitImage();saveDraft()}function elapsedNow(){return state.solve?(state.solve.elapsedBase||0)+Date.now()-state.solve.startedProblemAt:0}function updateTimer(){const p=currentProblem(),elapsed=elapsedNow();$("timerText").textContent=fmtTime(elapsed);const limit=Number(p?.timeLimit||0)*6e4;$("limitText").textContent=limit?elapsed<=limit?`남은 ${fmtTime(limit-elapsed)}`:`초과 ${fmtTime(elapsed-limit)}`:""}function saveDraft(){if(!state.solve)return;state.solve.answer=$("answerText")?.value??state.solve.answer;localStorage.setItem("essayPsatBaseDraft",JSON.stringify(state.solve));renderContinue()}function pauseSolve(){if(!state.solve)return;state.solve.elapsedBase=elapsedNow();state.solve.answer=$("answerText").value;clearInterval(state.timer);state.timer=null;saveDraft();$("solveOverlay").classList.add("hidden");toast("이어풀기 저장 완료")}function continueSolve(){try{const saved=JSON.parse(localStorage.getItem("essayPsatBaseDraft")||"null");if(!saved||!saved.ids?.length){toast("이어풀 문제가 없어");return}state.solve=saved;state.solve.startedProblemAt=Date.now();openCurrentProblem()}catch{toast("이어풀 문제가 없어")}}function submitAnswer(){if(!state.solve)return;state.solve.elapsedBase=elapsedNow();state.solve.answer=$("answerText").value;clearInterval(state.timer);state.timer=null;openScore()}function openScore(){const p=currentProblem();if(!p)return;state.expPage=0;$("scoreOverlay").classList.remove("hidden");$("scoreMeta").textContent=`${titleOf(p)} · 풀이시간 ${fmtTime(state.solve.elapsedBase)}`;$("ownAnswerView").textContent=state.solve.answer||"(작성한 답안 없음)";$("modelTextView").textContent=p.modelText||"";$("attemptScoreInput").value="";$("attemptScoreInput").max=p.maxScore||"";$("completionInput").value=state.solve.mode==="outline"?"목차만":"완성";$("needReviewInput").value="true";renderChecklist(p);showExplanationPage(0)}function showExplanationPage(index){const p=currentProblem(),pages=realPages(p?.explanationPages||[]);state.expPage=Math.max(0,Math.min(index,pages.length-1));if(pages.length){$("explanationImageView").src=pages[state.expPage];$("explanationImageView").classList.remove("hidden");$("explanationPageBadge").textContent=`해설 ${state.expPage+1}/${pages.length}쪽`}else{$("explanationImageView").classList.add("hidden");$("explanationPageBadge").textContent="해설 이미지 없음"}}function renderChecklist(p){const box=$("pointChecklist"),points=p.points?.length?p.points:pointsFromText(p.pointsText);box.innerHTML="";if(!points.length){box.innerHTML='<p class="hint">채점포인트 없음</p>';return}points.forEach((point,i)=>{const row=document.createElement("label");row.className="check-item";row.innerHTML=`<input type="checkbox" data-point="${i}" /> <span>${esc(point)}</span>`;box.append(row)})}async function saveAttempt(){const p=currentProblem();if(!p||!state.solve)return null;const attempt={id:uuid(),problemId:p.id,subject:p.subject,session:p.session,mode:state.solve.mode,answer:state.solve.answer||"",elapsedMs:state.solve.elapsedBase,score:$("attemptScoreInput").value===""?null:Number($("attemptScoreInput").value),maxScore:p.maxScore||0,difficulty:$("difficultyResultInput").value,needReview:$("needReviewInput").value,completion:$("completionInput").value,memo:$("memoInput").value.trim(),checkedPoints:$$("#pointChecklist input").map(x=>x.checked),completedAt:nowIso()};await put(STORE_ATTEMPTS,attempt);await loadData();toast("풀이 기록 저장 완료");return attempt}async function saveAndNext(){await saveAttempt();if(!state.solve)return;if(state.solve.index>=state.solve.ids.length-1){finishSolve(true);return}state.solve.index++;state.solve.answer="";state.solve.elapsedBase=0;state.solve.startedProblemAt=Date.now();$("scoreOverlay").classList.add("hidden");openCurrentProblem()}function finishSolve(clearDraft=true){clearInterval(state.timer);state.timer=null;state.solve=null;$("solveOverlay").classList.add("hidden");$("scoreOverlay").classList.add("hidden");if(clearDraft)localStorage.removeItem("essayPsatBaseDraft");renderAll()}function fitImage(){state.zoom=1;applyZoom();setTimeout(()=>{const img=$("questionImageView"),scroller=$("questionImageScroller");if(!img.naturalWidth||!scroller.clientWidth)return;state.zoom=Math.max(.2,Math.min(1,(scroller.clientWidth-20)/img.naturalWidth));applyZoom()},30)}function applyZoom(){$("questionImageView").style.width=`${Math.round(state.zoom*100)}%`}async function exportBackup(){const payload={app:APP_VERSION,exportedAt:nowIso(),problems:state.problems,attempts:state.attempts};const blob=new Blob([JSON.stringify(payload)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`essay_psat_base_backup_${new Date().toISOString().slice(0,10)}.json`;a.click();URL.revokeObjectURL(a.href)}async function importBackup(file){if(!file)return;const data=JSON.parse(await file.text());if(!Array.isArray(data.problems)){toast("백업 파일이 아니야");return}if(!confirm("백업 데이터를 현재 앱에 합쳐서 불러올까? 같은 ID는 덮어쓰기 돼."))return;for(const p of data.problems)await put(STORE_PROBLEMS,p);for(const a of data.attempts||[])await put(STORE_ATTEMPTS,a);await loadData();renderAll();toast("복원 완료")}async function wipeAll(){if(!confirm("모든 문제와 기록을 삭제할까? 백업 없으면 복구 불가."))return;await clearStore(STORE_PROBLEMS);await clearStore(STORE_ATTEMPTS);localStorage.removeItem("essayPsatBaseDraft");await loadData();resetForm();renderAll();toast("전체 삭제 완료")}function setupInstall(){window.addEventListener("beforeinstallprompt",event=>{event.preventDefault();state.installPrompt=event;$("installBtn").classList.remove("hidden")});$("installBtn").addEventListener("click",async()=>{if(!state.installPrompt){toast("Chrome 메뉴에서 홈화면 추가를 눌러줘");return}state.installPrompt.prompt();await state.installPrompt.userChoice.catch(()=>null);state.installPrompt=null;$("installBtn").classList.add("hidden")})}function setupEvents(){setupInstall();$$(".tab").forEach(b=>b.addEventListener("click",()=>showView(b.dataset.view)));["solveSubject","solveSession","solveMode","randomCount","listSubject","listSession","listSearch","reviewSubject","reviewSession","reviewType"].forEach(id=>{$(id).addEventListener("input",renderAll);$(id).addEventListener("change",renderAll)});setupPasteZone("questionPasteZone","questionFileInput","question");setupPasteZone("explanationPasteZone","explanationFileInput","explanation");document.addEventListener("paste",event=>pasteImageFromClipboardEvent(event));$("pasteQuestionBtn").addEventListener("click",()=>pasteImageWithClipboardApi("question"));$("pasteExplanationBtn").addEventListener("click",()=>pasteImageWithClipboardApi("explanation"));$("addQuestionFileBtn").addEventListener("click",()=>addBlankPage("question"));$("addExplanationFileBtn").addEventListener("click",()=>addBlankPage("explanation"));$("clearQuestionBtn").addEventListener("click",()=>{state.questionPages=[];renderPageLists()});$("clearExplanationBtn").addEventListener("click",()=>{state.explanationPages=[];renderPageLists()});$("problemForm").addEventListener("submit",saveProblem);$("resetBtn").addEventListener("click",resetForm);$("randomStartBtn").addEventListener("click",()=>startRandom(false));$("reviewRandomStartBtn").addEventListener("click",()=>startRandom(true));$("continueBtn").addEventListener("click",continueSolve);$("answerText").addEventListener("input",saveDraft);$("exitSolveBtn").addEventListener("click",pauseSolve);$("submitAnswerBtn").addEventListener("click",submitAnswer);$("prevQuestionPageBtn").addEventListener("click",()=>showQuestionPage(state.qPage-1));$("nextQuestionPageBtn").addEventListener("click",()=>showQuestionPage(state.qPage+1));$("fitBtn").addEventListener("click",fitImage);$("zoomInBtn").addEventListener("click",()=>{state.zoom=Math.min(3,state.zoom+.15);applyZoom()});$("zoomOutBtn").addEventListener("click",()=>{state.zoom=Math.max(.2,state.zoom-.15);applyZoom()});$("questionImageView").addEventListener("load",fitImage);$("backToAnswerBtn").addEventListener("click",()=>{$("scoreOverlay").classList.add("hidden");if(state.solve){state.solve.startedProblemAt=Date.now();clearInterval(state.timer);state.timer=setInterval(updateTimer,500);$("solveOverlay").classList.remove("hidden")}});$("prevExplanationPageBtn").addEventListener("click",()=>showExplanationPage(state.expPage-1));$("nextExplanationPageBtn").addEventListener("click",()=>showExplanationPage(state.expPage+1));$("saveAttemptBtn").addEventListener("click",saveAttempt);$("saveAndNextBtn").addEventListener("click",saveAndNext);$("finishBtn").addEventListener("click",async()=>{await saveAttempt();finishSolve(true)});$("exportBtn").addEventListener("click",exportBackup);$("importInput").addEventListener("change",async()=>{try{await importBackup($("importInput").files[0])}catch(e){console.error(e);toast("복원 실패")}$("importInput").value=""});$("wipeBtn").addEventListener("click",wipeAll)}async function init(){db=await openDB();await loadData();await normalizeStoredProblems();setupEvents();resetForm();renderAll();if("serviceWorker" in navigator)navigator.serviceWorker.register("sw.js?v=32").catch(()=>{})}init().catch(err=>{console.error(err);alert(`앱 초기화 실패: ${err.message}`)});
 
 /* === v2 스타일러스 필기 레이어 === */
 state.inkTool = "pen";
@@ -4637,524 +4637,22 @@ setTimeout(() => {
 }, 1800);
 
 
-/* === v29: 문제풀이/해설/답안 손가락 핀치 줌 === */
-function v29Clamp(value, min, max) {
-  return Math.max(min, Math.min(max, value));
-}
-function v29Dist(a, b) {
-  return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1;
-}
-function v29Mid(a, b) {
-  return { x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 };
-}
-
-/* solve 화면은 기존 zoom 로직(state.zoom/applyZoom)을 그대로 사용 */
-function ensureSolvePinchZoomV29() {
-  const host = $("questionImageScroller");
-  if (!host || host.dataset.v29Ready) return;
-  host.dataset.v29Ready = "1";
-
-  let pinch = null;
-
-  const begin = (t1, t2) => {
-    pinch = {
-      startDist: v29Dist(t1, t2),
-      startZoom: Number(state.zoom || 1)
-    };
-    host.classList.add("zoom-active-v29");
+/* === v32: 문제풀이와 같은 실제 이미지 크기 방식으로 해설/답안 확대 === */
+(function reviewRealSizeZoomV32() {
+  const zooms = {
+    scoreExplanationEditWrap: { scale: 1, fitScale: 1, min: 0.45, max: 5 },
+    scoreAnswerEditWrap: { scale: 1, fitScale: 1, min: 0.45, max: 5 }
   };
 
-  const move = (t1, t2) => {
-    if (!pinch) begin(t1, t2);
-    const next = v29Clamp(
-      pinch.startZoom * (v29Dist(t1, t2) / Math.max(1, pinch.startDist)),
-      0.35,
-      6
-    );
-    state.zoom = next;
-    try { applyZoom(); } catch {}
-    try { resizeInkCanvas(); } catch {}
-    try { drawInk(); } catch {}
-  };
-
-  const end = () => {
-    pinch = null;
-    host.classList.remove("zoom-active-v29");
-  };
-
-  host.addEventListener("touchstart", (event) => {
-    if (event.touches.length >= 2) {
-      event.preventDefault();
-      begin(event.touches[0], event.touches[1]);
-    }
-  }, { passive: false, capture: true });
-
-  host.addEventListener("touchmove", (event) => {
-    if (event.touches.length >= 2) {
-      event.preventDefault();
-      move(event.touches[0], event.touches[1]);
-    }
-  }, { passive: false, capture: true });
-
-  host.addEventListener("touchend", (event) => {
-    if (event.touches.length < 2) end();
-  }, { passive: false, capture: true });
-
-  host.addEventListener("touchcancel", () => end(), { passive: false, capture: true });
-}
-
-function ensureZoomStructureV29(hostId) {
-  const host = $(hostId);
-  if (!host) return null;
-
-  host.classList.add("touch-zoom-host");
-
-  let placeholder = host.querySelector(":scope > .touch-zoom-placeholder-v29");
-  let layer = host.querySelector(":scope > .touch-zoom-placeholder-v29 > .touch-zoom-layer-v29");
-
-  if (!placeholder || !layer) {
-    const nodes = Array.from(host.childNodes);
-    placeholder = document.createElement("div");
-    placeholder.className = "touch-zoom-placeholder-v29";
-    layer = document.createElement("div");
-    layer.className = "touch-zoom-layer-v29";
-
-    nodes.forEach(node => layer.appendChild(node));
-    placeholder.appendChild(layer);
-    host.appendChild(placeholder);
-  }
-
-  return { host, placeholder, layer };
-}
-
-function applyTouchZoomV29(hostId) {
-  const parts = ensureZoomStructureV29(hostId);
-  if (!parts) return;
-  const { host, placeholder, layer } = parts;
-
-  if (!host._v29Zoom) host._v29Zoom = { scale: 1, min: 1, max: 5 };
-  const zoom = host._v29Zoom;
-
-  // 현재 실제 내용 높이/너비를 측정
-  layer.style.transform = "none";
-  layer.style.width = "auto";
-  layer.style.height = "auto";
-  placeholder.style.width = "100%";
-  placeholder.style.height = "auto";
-
-  const baseWidth = Math.max(
-    host.clientWidth || 0,
-    layer.scrollWidth || 0,
-    layer.getBoundingClientRect().width || 0
-  );
-  const baseHeight = Math.max(
-    layer.scrollHeight || 0,
-    layer.getBoundingClientRect().height || 0,
-    220
-  );
-
-  zoom.baseWidth = baseWidth;
-  zoom.baseHeight = baseHeight;
-
-  placeholder.style.width = (baseWidth * zoom.scale) + "px";
-  placeholder.style.height = (baseHeight * zoom.scale) + "px";
-
-  layer.style.width = baseWidth + "px";
-  layer.style.height = baseHeight + "px";
-  layer.style.transform = `scale(${zoom.scale})`;
-}
-
-function setupTouchZoomV29(hostId) {
-  const parts = ensureZoomStructureV29(hostId);
-  if (!parts) return;
-  const { host } = parts;
-  if (host.dataset.v29Ready) return;
-  host.dataset.v29Ready = "1";
-
-  if (!host._v29Zoom) host._v29Zoom = { scale: 1, min: 1, max: 5 };
-  let pinch = null;
-
-  const begin = (t1, t2) => {
-    const zoom = host._v29Zoom;
-    pinch = {
-      startDist: v29Dist(t1, t2),
-      startScale: zoom.scale,
-      center: v29Mid(t1, t2),
-      startScrollLeft: host.scrollLeft,
-      startScrollTop: host.scrollTop
-    };
-    host.classList.add("zoom-active-v29");
-  };
-
-  const move = (t1, t2) => {
-    if (!pinch) begin(t1, t2);
-    const zoom = host._v29Zoom;
-    const prevScale = zoom.scale;
-    zoom.scale = v29Clamp(
-      pinch.startScale * (v29Dist(t1, t2) / Math.max(1, pinch.startDist)),
-      zoom.min,
-      zoom.max
-    );
-
-    applyTouchZoomV29(hostId);
-
-    const hostRect = host.getBoundingClientRect();
-    const cx = pinch.center.x - hostRect.left + pinch.startScrollLeft;
-    const cy = pinch.center.y - hostRect.top + pinch.startScrollTop;
-    const ratio = zoom.scale / Math.max(0.0001, prevScale);
-
-    host.scrollLeft = cx * ratio - (pinch.center.x - hostRect.left);
-    host.scrollTop = cy * ratio - (pinch.center.y - hostRect.top);
-  };
-
-  const end = () => {
-    pinch = null;
-    host.classList.remove("zoom-active-v29");
-  };
-
-  host.addEventListener("touchstart", (event) => {
-    if (event.touches.length >= 2) {
-      event.preventDefault();
-      begin(event.touches[0], event.touches[1]);
-    }
-  }, { passive: false, capture: true });
-
-  host.addEventListener("touchmove", (event) => {
-    if (event.touches.length >= 2) {
-      event.preventDefault();
-      move(event.touches[0], event.touches[1]);
-    }
-  }, { passive: false, capture: true });
-
-  host.addEventListener("touchend", (event) => {
-    if (event.touches.length < 2) end();
-  }, { passive: false, capture: true });
-
-  host.addEventListener("touchcancel", () => end(), { passive: false, capture: true });
-
-  applyTouchZoomV29(hostId);
-}
-
-function resetTouchZoomV29(hostId) {
-  const host = $(hostId);
-  if (!host) return;
-  if (!host._v29Zoom) host._v29Zoom = { scale: 1, min: 1, max: 5 };
-  host._v29Zoom.scale = 1;
-  applyTouchZoomV29(hostId);
-  host.scrollLeft = 0;
-  host.scrollTop = 0;
-}
-
-function syncReviewZoomTargetsV29() {
-  setupTouchZoomV29("scoreExplanationEditWrap");
-  setupTouchZoomV29("scoreAnswerEditWrap");
-  applyTouchZoomV29("scoreExplanationEditWrap");
-  applyTouchZoomV29("scoreAnswerEditWrap");
-}
-
-/* 문제풀이 진입/페이지전환 시 핀치줌 연결 */
-const openCurrentProblemV29Original = openCurrentProblem;
-openCurrentProblem = function() {
-  openCurrentProblemV29Original();
-  [80, 220, 500].forEach(delay => setTimeout(() => {
-    try { ensureSolvePinchZoomV29(); } catch {}
-  }, delay));
-};
-
-const showQuestionPageV29Original = showQuestionPage;
-showQuestionPage = function(index) {
-  showQuestionPageV29Original(index);
-  [50, 180].forEach(delay => setTimeout(() => {
-    try {
-      state.zoom = 1;
-      applyZoom();
-      ensureSolvePinchZoomV29();
-      try { resizeInkCanvas(); } catch {}
-      try { drawInk(); } catch {}
-    } catch {}
-  }, delay));
-};
-
-/* 채점창 진입/답안페이지·해설페이지 변경 시 이미지 확대축소 연결 */
-const openScoreV29Original = openScore;
-openScore = function() {
-  openScoreV29Original();
-  [120, 320, 700].forEach(delay => setTimeout(() => {
-    try {
-      syncReviewZoomTargetsV29();
-      resetTouchZoomV29("scoreExplanationEditWrap");
-      resetTouchZoomV29("scoreAnswerEditWrap");
-    } catch {}
-  }, delay));
-};
-
-if (typeof showExplanationPage === "function") {
-  const showExplanationPageV29Original = showExplanationPage;
-  showExplanationPage = function(index) {
-    showExplanationPageV29Original(index);
-    [80, 220].forEach(delay => setTimeout(() => {
-      try {
-        syncReviewZoomTargetsV29();
-        resetTouchZoomV29("scoreExplanationEditWrap");
-      } catch {}
-    }, delay));
-  };
-}
-
-if (typeof renderScoreAnswerPageV11 === "function") {
-  const renderScoreAnswerPageV29Original = renderScoreAnswerPageV11;
-  renderScoreAnswerPageV11 = function(index = 0) {
-    renderScoreAnswerPageV29Original(index);
-    [80, 220].forEach(delay => setTimeout(() => {
-      try {
-        syncReviewZoomTargetsV29();
-        resetTouchZoomV29("scoreAnswerEditWrap");
-      } catch {}
-    }, delay));
-  };
-}
-
-window.addEventListener("resize", () => {
-  [100, 300].forEach(delay => setTimeout(() => {
-    try { applyTouchZoomV29("scoreExplanationEditWrap"); } catch {}
-    try { applyTouchZoomV29("scoreAnswerEditWrap"); } catch {}
-  }, delay));
-});
-
-setTimeout(() => {
-  try { ensureSolvePinchZoomV29(); } catch {}
-  try { syncReviewZoomTargetsV29(); } catch {}
-}, 1200);
-
-
-/* === v30: 해설/답안 확대 후 한 손가락 이동 직접 처리 === */
-function setupReviewPanV30(hostId) {
-  const host = $(hostId);
-  if (!host || host.dataset.v30PanReady) return;
-  host.dataset.v30PanReady = "1";
-  host.classList.add("v30-review-pan");
-
-  let drag = null;
-  let pinchActive = false;
-
-  function zoomState() {
-    return host._v29Zoom || { scale: 1 };
-  }
-
-  function block(event) {
-    event.preventDefault();
-    event.stopPropagation();
-    event.stopImmediatePropagation?.();
-  }
-
-  host.addEventListener("touchstart", event => {
-    if (event.touches.length >= 2) {
-      pinchActive = true;
-      drag = null;
-      host.classList.remove("v30-dragging");
-      return; // v29 핀치 핸들러가 처리
-    }
-
-    if (event.touches.length !== 1) return;
-
-    const zoom = zoomState();
-    if (Number(zoom.scale || 1) <= 1.001) {
-      drag = null;
-      return;
-    }
-
-    block(event);
-
-    const touch = event.touches[0];
-    drag = {
-      x: touch.clientX,
-      y: touch.clientY,
-      left: host.scrollLeft,
-      top: host.scrollTop
-    };
-    host.classList.add("v30-dragging");
-  }, { capture: true, passive: false });
-
-  host.addEventListener("touchmove", event => {
-    if (event.touches.length >= 2) {
-      pinchActive = true;
-      drag = null;
-      host.classList.remove("v30-dragging");
-      return; // v29 핀치 핸들러가 처리
-    }
-
-    if (event.touches.length !== 1 || !drag || pinchActive) return;
-
-    const zoom = zoomState();
-    if (Number(zoom.scale || 1) <= 1.001) {
-      drag = null;
-      host.classList.remove("v30-dragging");
-      return;
-    }
-
-    block(event);
-
-    const touch = event.touches[0];
-    const dx = touch.clientX - drag.x;
-    const dy = touch.clientY - drag.y;
-
-    const maxLeft = Math.max(0, host.scrollWidth - host.clientWidth);
-    const maxTop = Math.max(0, host.scrollHeight - host.clientHeight);
-
-    host.scrollLeft = v29Clamp(drag.left - dx, 0, maxLeft);
-    host.scrollTop = v29Clamp(drag.top - dy, 0, maxTop);
-  }, { capture: true, passive: false });
-
-  host.addEventListener("touchend", event => {
-    if (event.touches.length >= 2) {
-      pinchActive = true;
-      return;
-    }
-
-    if (event.touches.length === 1) {
-      // 핀치에서 한 손가락만 남았을 때 바로 이어서 이동 가능
-      pinchActive = false;
-      const zoom = zoomState();
-      if (Number(zoom.scale || 1) > 1.001) {
-        const touch = event.touches[0];
-        drag = {
-          x: touch.clientX,
-          y: touch.clientY,
-          left: host.scrollLeft,
-          top: host.scrollTop
-        };
-        host.classList.add("v30-dragging");
-      }
-      return;
-    }
-
-    pinchActive = false;
-    drag = null;
-    host.classList.remove("v30-dragging");
-  }, { capture: true, passive: false });
-
-  host.addEventListener("touchcancel", event => {
-    pinchActive = false;
-    drag = null;
-    host.classList.remove("v30-dragging");
-  }, { capture: true, passive: false });
-}
-
-function hardSyncReviewZoomV30(hostId) {
-  const host = $(hostId);
-  if (!host) return;
-
-  try {
-    setupTouchZoomV29(hostId);
-    setupReviewPanV30(hostId);
-    if (typeof applyTouchZoomV30Original === "function") applyTouchZoomV30Original(hostId);
-    else applyTouchZoomV29(hostId);
-  } catch {}
-
-  const placeholder = host.querySelector(":scope > .touch-zoom-placeholder-v29");
-  const layer = placeholder?.querySelector(":scope > .touch-zoom-layer-v29");
-  const zoom = host._v29Zoom;
-
-  if (!placeholder || !layer || !zoom) return;
-
-  // transform은 레이아웃 크기를 늘리지 않으므로 placeholder를 실제 확대크기로 강제
-  const baseW = Math.max(
-    host.clientWidth,
-    zoom.baseWidth || 0,
-    layer.scrollWidth || 0
-  );
-  const baseH = Math.max(
-    host.clientHeight,
-    zoom.baseHeight || 0,
-    layer.scrollHeight || 0,
-    220
-  );
-
-  zoom.baseWidth = baseW;
-  zoom.baseHeight = baseH;
-
-  placeholder.style.setProperty(
-    "width",
-    Math.ceil(baseW * zoom.scale) + "px",
-    "important"
-  );
-  placeholder.style.setProperty(
-    "height",
-    Math.ceil(baseH * zoom.scale) + "px",
-    "important"
-  );
-
-  layer.style.setProperty("width", baseW + "px", "important");
-  layer.style.setProperty("height", baseH + "px", "important");
-  layer.style.transform = `scale(${zoom.scale})`;
-}
-
-function syncAllReviewPanV30() {
-  hardSyncReviewZoomV30("scoreExplanationEditWrap");
-  hardSyncReviewZoomV30("scoreAnswerEditWrap");
-}
-
-/* v29의 확대 처리 이후 실제 스크롤 범위를 다시 계산 */
-const applyTouchZoomV30Original = applyTouchZoomV29;
-applyTouchZoomV29 = function(hostId) {
-  applyTouchZoomV30Original(hostId);
-
-  const host = $(hostId);
-  if (!host) return;
-
-  requestAnimationFrame(() => {
-    try { hardSyncReviewZoomV30(hostId); } catch {}
-  });
-};
-
-const openScoreV30Original = openScore;
-openScore = function() {
-  openScoreV30Original();
-  [100, 280, 650, 1200].forEach(delay => {
-    setTimeout(syncAllReviewPanV30, delay);
-  });
-};
-
-const showExplanationPageV30Original = showExplanationPage;
-showExplanationPage = function(index) {
-  showExplanationPageV30Original(index);
-  [80, 240, 600].forEach(delay => {
-    setTimeout(() => {
-      try { hardSyncReviewZoomV30("scoreExplanationEditWrap"); } catch {}
-    }, delay);
-  });
-};
-
-if (typeof renderScoreAnswerPageV11 === "function") {
-  const renderScoreAnswerPageV30Original = renderScoreAnswerPageV11;
-  renderScoreAnswerPageV11 = function(index = 0) {
-    renderScoreAnswerPageV30Original(index);
-    [80, 240, 600].forEach(delay => {
-      setTimeout(() => {
-        try { hardSyncReviewZoomV30("scoreAnswerEditWrap"); } catch {}
-      }, delay);
-    });
-  };
-}
-
-window.addEventListener("resize", () => {
-  setTimeout(syncAllReviewPanV30, 250);
-});
-
-setTimeout(syncAllReviewPanV30, 1500);
-
-
-/* === v31: 해설/답안 터치를 document capture에서 선점 === */
-(function reviewZoomPanHardFixV31() {
-  const G = {
+  const gesture = {
     host: null,
     mode: null,
     startDist: 1,
     startScale: 1,
-    startScrollLeft: 0,
-    startScrollTop: 0,
     startX: 0,
     startY: 0,
+    startLeft: 0,
+    startTop: 0,
     centerX: 0,
     centerY: 0
   };
@@ -5167,244 +4665,252 @@ setTimeout(syncAllReviewPanV30, 1500);
     return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1;
   }
 
-  function mid(a, b) {
+  function midpoint(a, b) {
     return {
       x: (a.clientX + b.clientX) / 2,
       y: (a.clientY + b.clientY) / 2
     };
   }
 
-  function reviewHost(target) {
-    if (!target || !target.closest) return null;
+  function getHost(target) {
+    if (!target?.closest) return null;
     return target.closest("#scoreExplanationEditWrap, #scoreAnswerEditWrap");
   }
 
-  function stateFor(host) {
-    if (!host._v31Zoom) {
-      host._v31Zoom = {
-        scale: 1,
-        min: 1,
-        max: 5,
-        baseWidth: 0,
-        baseHeight: 0
-      };
-    }
-    return host._v31Zoom;
-  }
-
-  function ensureStructure(host) {
-    let spacer = host.querySelector(":scope > .v31-review-spacer");
-    let layer = spacer?.querySelector(":scope > .v31-review-layer");
-    if (spacer && layer) return { spacer, layer };
-
-    const oldPlaceholder = host.querySelector(":scope > .touch-zoom-placeholder-v29");
-    const oldLayer = oldPlaceholder?.querySelector(":scope > .touch-zoom-layer-v29");
-
-    if (oldPlaceholder && oldLayer) {
-      oldPlaceholder.classList.add("v31-review-spacer");
-      oldLayer.classList.add("v31-review-layer");
-      return { spacer: oldPlaceholder, layer: oldLayer };
-    }
-
-    const nodes = Array.from(host.childNodes);
-    spacer = document.createElement("div");
-    spacer.className = "v31-review-spacer";
-    layer = document.createElement("div");
-    layer.className = "v31-review-layer";
-
-    nodes.forEach(node => layer.appendChild(node));
-    spacer.appendChild(layer);
-    host.appendChild(spacer);
-    return { spacer, layer };
-  }
-
-  function measureBase(host, layer) {
-    const zs = stateFor(host);
-    const oldTransform = layer.style.transform;
-    layer.style.transform = "none";
-
-    let width = 0;
-    let height = 0;
-
+  function getImage(host) {
+    if (!host) return null;
     if (host.id === "scoreExplanationEditWrap") {
       const img = document.getElementById("explanationImageView");
-      if (img && !img.classList.contains("hidden") && img.naturalWidth) {
-        width = Math.max(
-          1,
-          host.clientWidth,
-          img.offsetWidth || 0,
-          img.getBoundingClientRect().width || 0
-        );
-        height = Math.max(
-          220,
-          Math.round(width * img.naturalHeight / Math.max(1, img.naturalWidth)),
-          img.offsetHeight || 0
-        );
+      if (!img || img.classList.contains("hidden") || !img.naturalWidth) return null;
+      return img;
+    }
+    const img = document.getElementById("ownAnswerInkView");
+    if (!img || img.classList.contains("hidden") || !img.naturalWidth) return null;
+    return img;
+  }
+
+  function getCanvas(host) {
+    if (!host) return null;
+    return host.id === "scoreExplanationEditWrap"
+      ? document.getElementById("scoreExplanationCanvas")
+      : document.getElementById("scoreAnswerCanvas");
+  }
+
+  function drawExistingInk(host) {
+    const canvas = getCanvas(host);
+    if (!canvas) return;
+
+    try {
+      if (host.id === "scoreExplanationEditWrap") {
+        if (typeof drawScoreCanvasV14 === "function") {
+          drawScoreCanvasV14(canvas, "exp");
+          return;
+        }
+        if (typeof drawScoreCanvasV12 === "function") {
+          drawScoreCanvasV12(canvas, "exp");
+          return;
+        }
+      } else {
+        if (typeof drawScoreAnswerCanvasV28 === "function") {
+          drawScoreAnswerCanvasV28();
+          return;
+        }
+        if (typeof drawScoreCanvasV14 === "function") {
+          drawScoreCanvasV14(canvas, "answer");
+          return;
+        }
+        if (typeof drawScoreCanvasV12 === "function") {
+          drawScoreCanvasV12(canvas, "answer");
+          return;
+        }
       }
-    } else {
-      const pre = document.getElementById("ownAnswerView");
-      const ink = document.getElementById("ownAnswerInkView");
-      width = Math.max(
-        1,
-        host.clientWidth,
-        pre?.scrollWidth || 0,
-        ink?.offsetWidth || 0
-      );
-      height = Math.max(
-        260,
-        pre?.scrollHeight || 0,
-        ink && !ink.classList.contains("hidden") ? ink.offsetHeight || 0 : 0,
-        host.clientHeight || 0
-      );
-    }
-
-    if (!width) {
-      width = Math.max(1, host.clientWidth, layer.scrollWidth || 0, layer.getBoundingClientRect().width || 0);
-    }
-    if (!height) {
-      height = Math.max(220, layer.scrollHeight || 0, layer.getBoundingClientRect().height || 0);
-    }
-
-    zs.baseWidth = width;
-    zs.baseHeight = height;
-    layer.style.transform = oldTransform;
+    } catch {}
   }
 
-  function apply(host) {
-    if (!host) return;
-    host.classList.add("v31-review-zoom");
-    const zs = stateFor(host);
-    const { spacer, layer } = ensureStructure(host);
+  function fitInfo(host, img) {
+    const hostWidth = Math.max(
+      1,
+      host.clientWidth || host.getBoundingClientRect().width || window.innerWidth - 24
+    );
 
-    if (!zs.baseWidth || !zs.baseHeight) measureBase(host, layer);
+    const naturalW = Math.max(1, img.naturalWidth || img.width || hostWidth);
+    const naturalH = Math.max(1, img.naturalHeight || img.height || 220);
 
-    const w = Math.max(host.clientWidth, zs.baseWidth * zs.scale);
-    const h = Math.max(host.clientHeight, zs.baseHeight * zs.scale);
-
-    spacer.style.setProperty("width", Math.ceil(w) + "px", "important");
-    spacer.style.setProperty("height", Math.ceil(h) + "px", "important");
-    spacer.style.setProperty("min-width", Math.ceil(w) + "px", "important");
-    spacer.style.setProperty("min-height", Math.ceil(h) + "px", "important");
-
-    layer.style.setProperty("width", zs.baseWidth + "px", "important");
-    layer.style.setProperty("height", zs.baseHeight + "px", "important");
-    layer.style.transform = `scale(${zs.scale})`;
+    return {
+      hostWidth,
+      naturalW,
+      naturalH,
+      fitScale: hostWidth / naturalW
+    };
   }
 
-  function resetHost(host) {
+  function apply(host, resetBase = false) {
+    const img = getImage(host);
+    if (!host || !img) return;
+
+    host.classList.add("v32-real-zoom");
+
+    const z = zooms[host.id];
+    const info = fitInfo(host, img);
+
+    if (resetBase || !z.fitScale) {
+      z.fitScale = info.fitScale;
+    }
+
+    const actualScale = info.fitScale * z.scale;
+    const width = Math.max(1, Math.round(info.naturalW * actualScale));
+    const height = Math.max(1, Math.round(info.naturalH * actualScale));
+
+    img.style.setProperty("width", width + "px", "important");
+    img.style.setProperty("height", height + "px", "important");
+    img.style.setProperty("max-width", "none", "important");
+    img.style.setProperty("max-height", "none", "important");
+
+    const canvas = getCanvas(host);
+    if (canvas) {
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.max(1, Math.round(width * dpr));
+      canvas.height = Math.max(1, Math.round(height * dpr));
+      canvas.style.setProperty("width", width + "px", "important");
+      canvas.style.setProperty("height", height + "px", "important");
+      canvas.style.setProperty("left", "0px", "important");
+      canvas.style.setProperty("top", "0px", "important");
+      drawExistingInk(host);
+    }
+
+    // 이미지 자체가 실제로 커지므로 host.scrollWidth / scrollHeight도 같이 커진다.
+    host.style.setProperty(
+      "height",
+      Math.min(
+        Math.max(240, height),
+        Math.floor(window.innerHeight * 0.62)
+      ) + "px",
+      "important"
+    );
+  }
+
+  function reset(host) {
     if (!host) return;
-    const zs = stateFor(host);
-    zs.scale = 1;
-    zs.baseWidth = 0;
-    zs.baseHeight = 0;
+    const z = zooms[host.id];
+    z.scale = 1;
+    z.fitScale = 0;
     host.scrollLeft = 0;
     host.scrollTop = 0;
-    apply(host);
+    apply(host, true);
   }
 
-  function block(event) {
+  function stop(event) {
     event.preventDefault();
     event.stopPropagation();
     event.stopImmediatePropagation();
   }
 
-  function startPinch(host, event) {
-    const zs = stateFor(host);
+  function beginPinch(host, event) {
     const a = event.touches[0];
     const b = event.touches[1];
-    const c = mid(a, b);
+    const c = midpoint(a, b);
     const rect = host.getBoundingClientRect();
+    const z = zooms[host.id];
 
-    G.host = host;
-    G.mode = "pinch";
-    G.startDist = dist(a, b);
-    G.startScale = zs.scale;
-    G.startScrollLeft = host.scrollLeft;
-    G.startScrollTop = host.scrollTop;
-    G.centerX = c.x - rect.left;
-    G.centerY = c.y - rect.top;
+    gesture.host = host;
+    gesture.mode = "pinch";
+    gesture.startDist = dist(a, b);
+    gesture.startScale = z.scale;
+    gesture.startLeft = host.scrollLeft;
+    gesture.startTop = host.scrollTop;
+    gesture.centerX = c.x - rect.left;
+    gesture.centerY = c.y - rect.top;
   }
 
-  function startPan(host, event) {
+  function beginPan(host, event) {
     const t = event.touches[0];
-    G.host = host;
-    G.mode = "pan";
-    G.startX = t.clientX;
-    G.startY = t.clientY;
-    G.startScrollLeft = host.scrollLeft;
-    G.startScrollTop = host.scrollTop;
+    gesture.host = host;
+    gesture.mode = "pan";
+    gesture.startX = t.clientX;
+    gesture.startY = t.clientY;
+    gesture.startLeft = host.scrollLeft;
+    gesture.startTop = host.scrollTop;
   }
 
+  // 해설/답안 영역만 capture 단계에서 선점.
+  // 문제풀이 화면에는 전혀 적용하지 않는다.
   document.addEventListener("touchstart", event => {
-    const host = reviewHost(event.target);
-    if (!host) return;
-    const zs = stateFor(host);
+    const host = getHost(event.target);
+    if (!host || !getImage(host)) return;
+    const z = zooms[host.id];
 
     if (event.touches.length >= 2) {
-      block(event);
-      startPinch(host, event);
+      stop(event);
+      beginPinch(host, event);
       return;
     }
 
-    if (event.touches.length === 1 && zs.scale > 1.001) {
-      block(event);
-      startPan(host, event);
+    if (event.touches.length === 1 && z.scale > 1.001) {
+      stop(event);
+      beginPan(host, event);
     }
   }, { capture: true, passive: false });
 
   document.addEventListener("touchmove", event => {
-    const host = G.host || reviewHost(event.target);
-    if (!host) return;
-    const zs = stateFor(host);
+    const host = gesture.host || getHost(event.target);
+    if (!host || !getImage(host)) return;
+
+    const z = zooms[host.id];
 
     if (event.touches.length >= 2) {
-      block(event);
+      stop(event);
 
-      if (G.mode !== "pinch" || G.host !== host) {
-        startPinch(host, event);
+      if (gesture.mode !== "pinch" || gesture.host !== host) {
+        beginPinch(host, event);
       }
 
       const a = event.touches[0];
       const b = event.touches[1];
+
       const nextScale = clamp(
-        G.startScale * (dist(a, b) / Math.max(1, G.startDist)),
-        zs.min,
-        zs.max
+        gesture.startScale *
+          (dist(a, b) / Math.max(1, gesture.startDist)),
+        z.min,
+        z.max
       );
 
-      zs.scale = nextScale;
+      z.scale = nextScale;
       apply(host);
 
-      const ratio = nextScale / Math.max(0.0001, G.startScale);
+      const ratio = nextScale / Math.max(0.0001, gesture.startScale);
 
       host.scrollLeft = clamp(
-        (G.startScrollLeft + G.centerX) * ratio - G.centerX,
+        (gesture.startLeft + gesture.centerX) * ratio - gesture.centerX,
         0,
         Math.max(0, host.scrollWidth - host.clientWidth)
       );
+
       host.scrollTop = clamp(
-        (G.startScrollTop + G.centerY) * ratio - G.centerY,
+        (gesture.startTop + gesture.centerY) * ratio - gesture.centerY,
         0,
         Math.max(0, host.scrollHeight - host.clientHeight)
       );
+
       return;
     }
 
-    if (event.touches.length === 1 && zs.scale > 1.001) {
-      block(event);
+    if (event.touches.length === 1 && z.scale > 1.001) {
+      stop(event);
 
-      if (G.mode !== "pan" || G.host !== host) {
-        startPan(host, event);
+      if (gesture.mode !== "pan" || gesture.host !== host) {
+        beginPan(host, event);
       }
 
       const t = event.touches[0];
+
       host.scrollLeft = clamp(
-        G.startScrollLeft - (t.clientX - G.startX),
+        gesture.startLeft - (t.clientX - gesture.startX),
         0,
         Math.max(0, host.scrollWidth - host.clientWidth)
       );
+
       host.scrollTop = clamp(
-        G.startScrollTop - (t.clientY - G.startY),
+        gesture.startTop - (t.clientY - gesture.startY),
         0,
         Math.max(0, host.scrollHeight - host.clientHeight)
       );
@@ -5412,81 +4918,106 @@ setTimeout(syncAllReviewPanV30, 1500);
   }, { capture: true, passive: false });
 
   document.addEventListener("touchend", event => {
-    if (!G.host) return;
-    const host = G.host;
-    const zs = stateFor(host);
+    if (!gesture.host) return;
 
-    block(event);
+    const host = gesture.host;
+    const z = zooms[host.id];
+
+    stop(event);
 
     if (event.touches.length >= 2) {
-      startPinch(host, event);
+      beginPinch(host, event);
       return;
     }
 
-    if (event.touches.length === 1 && zs.scale > 1.001) {
-      startPan(host, event);
+    if (event.touches.length === 1 && z.scale > 1.001) {
+      beginPan(host, event);
       return;
     }
 
-    G.host = null;
-    G.mode = null;
+    gesture.host = null;
+    gesture.mode = null;
   }, { capture: true, passive: false });
 
   document.addEventListener("touchcancel", event => {
-    if (!G.host) return;
-    block(event);
-    G.host = null;
-    G.mode = null;
+    if (!gesture.host) return;
+    stop(event);
+    gesture.host = null;
+    gesture.mode = null;
   }, { capture: true, passive: false });
 
-  function syncAll(resetZoom) {
-    const exp = document.getElementById("scoreExplanationEditWrap");
-    const ans = document.getElementById("scoreAnswerEditWrap");
-    [exp, ans].forEach(host => {
-      if (!host) return;
-      if (resetZoom) resetHost(host);
-      else {
-        const zs = stateFor(host);
-        zs.baseWidth = 0;
-        zs.baseHeight = 0;
-        apply(host);
-      }
-    });
+  function syncExplanation(resetZoom = false) {
+    const host = document.getElementById("scoreExplanationEditWrap");
+    const img = getImage(host);
+    if (!host || !img) return;
+
+    const run = () => {
+      if (!img.naturalWidth) return;
+      if (resetZoom) reset(host);
+      else apply(host, true);
+    };
+
+    img.onload = run;
+    run();
   }
 
-  const openScoreV31Original = openScore;
-  openScore = function() {
-    openScoreV31Original();
-    [80, 220, 550, 1100].forEach(delay => {
-      setTimeout(() => syncAll(true), delay);
-    });
-  };
+  function syncAnswer(resetZoom = false) {
+    const host = document.getElementById("scoreAnswerEditWrap");
+    const img = getImage(host);
+    if (!host || !img) return;
 
-  const showExplanationPageV31Original = showExplanationPage;
-  showExplanationPage = function(index) {
-    showExplanationPageV31Original(index);
-    [80, 220, 500].forEach(delay => {
+    const run = () => {
+      if (!img.naturalWidth) return;
+      if (resetZoom) reset(host);
+      else apply(host, true);
+    };
+
+    img.onload = run;
+    run();
+  }
+
+  const openScoreV32Original = openScore;
+  openScore = function() {
+    openScoreV32Original();
+
+    // v28의 기존 지연 캔버스 재설정이 모두 끝난 뒤 마지막으로 실제 크기를 맞춘다.
+    [120, 360, 900, 1700].forEach(delay => {
       setTimeout(() => {
-        resetHost(document.getElementById("scoreExplanationEditWrap"));
+        syncExplanation(true);
+        syncAnswer(true);
       }, delay);
     });
   };
 
+  const showExplanationPageV32Original = showExplanationPage;
+  showExplanationPage = function(index) {
+    showExplanationPageV32Original(index);
+
+    [100, 360, 900].forEach(delay => {
+      setTimeout(() => syncExplanation(true), delay);
+    });
+  };
+
   if (typeof renderScoreAnswerPageV11 === "function") {
-    const renderScoreAnswerPageV31Original = renderScoreAnswerPageV11;
+    const renderScoreAnswerPageV32Original = renderScoreAnswerPageV11;
     renderScoreAnswerPageV11 = function(index = 0) {
-      renderScoreAnswerPageV31Original(index);
-      [80, 220, 500].forEach(delay => {
-        setTimeout(() => {
-          resetHost(document.getElementById("scoreAnswerEditWrap"));
-        }, delay);
+      renderScoreAnswerPageV32Original(index);
+
+      [100, 360, 900].forEach(delay => {
+        setTimeout(() => syncAnswer(true), delay);
       });
     };
   }
 
   window.addEventListener("resize", () => {
-    setTimeout(() => syncAll(false), 250);
+    setTimeout(() => {
+      syncExplanation(false);
+      syncAnswer(false);
+    }, 250);
   });
 
-  setTimeout(() => syncAll(false), 1400);
+  setTimeout(() => {
+    syncExplanation(false);
+    syncAnswer(false);
+  }, 1600);
 })();

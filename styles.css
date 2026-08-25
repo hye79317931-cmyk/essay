@@ -1206,83 +1206,34 @@
 }
 
 
-/* === v29 손가락 핀치 줌 === */
-.touch-zoom-host {
+/* === v32: 해설/내답안 스크린샷 실제크기 핀치줌 === */
+#scoreExplanationEditWrap.v32-real-zoom,
+#scoreAnswerEditWrap.v32-real-zoom {
+  position: relative !important;
   overflow: auto !important;
   -webkit-overflow-scrolling: touch !important;
   overscroll-behavior: contain !important;
-  touch-action: pan-x pan-y !important;
-}
-.touch-zoom-host.zoom-active-v29 {
   touch-action: none !important;
 }
-.touch-zoom-placeholder-v29 {
-  position: relative !important;
-  min-width: 100% !important;
-}
-.touch-zoom-layer-v29 {
-  position: absolute !important;
-  left: 0 !important;
-  top: 0 !important;
-  transform-origin: 0 0 !important;
-  will-change: transform !important;
-}
-.touch-zoom-layer-v29 > img {
+
+#scoreExplanationEditWrap.v32-real-zoom #explanationImageView,
+#scoreAnswerEditWrap.v32-real-zoom #ownAnswerInkView {
   display: block !important;
   max-width: none !important;
-}
-#scoreExplanationEditWrap,
-#scoreAnswerEditWrap {
-  overflow: auto !important;
-  -webkit-overflow-scrolling: touch !important;
-}
-
-
-/* === v30 해설/답안 확대 후 손가락 이동 보정 === */
-#scoreExplanationEditWrap.v30-review-pan,
-#scoreAnswerEditWrap.v30-review-pan {
-  overflow: auto !important;
-  -webkit-overflow-scrolling: touch !important;
-  overscroll-behavior: contain !important;
-  touch-action: none !important;
-  cursor: grab !important;
-}
-
-#scoreExplanationEditWrap.v30-review-pan.v30-dragging,
-#scoreAnswerEditWrap.v30-review-pan.v30-dragging {
-  cursor: grabbing !important;
-}
-
-#scoreExplanationEditWrap .touch-zoom-placeholder-v29,
-#scoreAnswerEditWrap .touch-zoom-placeholder-v29 {
-  flex: 0 0 auto !important;
-  min-width: 100% !important;
-  min-height: 100% !important;
-}
-
-#scoreExplanationEditWrap .touch-zoom-layer-v29,
-#scoreAnswerEditWrap .touch-zoom-layer-v29 {
+  max-height: none !important;
+  transform: none !important;
   transform-origin: 0 0 !important;
 }
 
-/* === v31 해설/답안 핀치줌 + 이동 강제 보정 === */
-#scoreExplanationEditWrap.v31-review-zoom,
-#scoreAnswerEditWrap.v31-review-zoom {
-  position: relative !important;
-  overflow: auto !important;
-  -webkit-overflow-scrolling: touch !important;
-  overscroll-behavior: contain !important;
-  touch-action: none !important;
-}
-.v31-review-spacer {
-  position: relative !important;
-  min-width: 100% !important;
-  min-height: 100% !important;
-}
-.v31-review-layer {
+#scoreExplanationEditWrap.v32-real-zoom #scoreExplanationCanvas,
+#scoreAnswerEditWrap.v32-real-zoom #scoreAnswerCanvas {
   position: absolute !important;
   left: 0 !important;
   top: 0 !important;
-  transform-origin: 0 0 !important;
-  will-change: transform !important;
+  max-width: none !important;
+  max-height: none !important;
+  transform: none !important;
+  z-index: 70 !important;
+  touch-action: none !important;
+  pointer-events: auto !important;
 }
