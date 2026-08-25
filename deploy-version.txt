@@ -1,2 +1,2 @@
-essay v29 pinch zoom
-created: 2026-08-25T03:28:53.481106
+essay v30 review pan fix
+created: 2026-08-25T06:24:22.719148
