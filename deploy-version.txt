@@ -1,2 +1,2 @@
-essay v30 review pan fix
-created: 2026-08-25T06:24:22.719148
+essay v31 review zoom pan hardfix
+created: 2026-08-25T06:42:03.869187

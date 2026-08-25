@@ -1264,3 +1264,25 @@
 #scoreAnswerEditWrap .touch-zoom-layer-v29 {
   transform-origin: 0 0 !important;
 }
+
+/* === v31 해설/답안 핀치줌 + 이동 강제 보정 === */
+#scoreExplanationEditWrap.v31-review-zoom,
+#scoreAnswerEditWrap.v31-review-zoom {
+  position: relative !important;
+  overflow: auto !important;
+  -webkit-overflow-scrolling: touch !important;
+  overscroll-behavior: contain !important;
+  touch-action: none !important;
+}
+.v31-review-spacer {
+  position: relative !important;
+  min-width: 100% !important;
+  min-height: 100% !important;
+}
+.v31-review-layer {
+  position: absolute !important;
+  left: 0 !important;
+  top: 0 !important;
+  transform-origin: 0 0 !important;
+  will-change: transform !important;
+}
