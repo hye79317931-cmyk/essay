@@ -1,2 +1,2 @@
-essay v32 review real-size zoom
-created: 2026-08-25T06:49:14.764220
+essay v33 review zoom rebuild from v29
+created: 2026-08-25T06:58:08.466387
