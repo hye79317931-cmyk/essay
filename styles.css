@@ -1209,3 +1209,12 @@
 #scoreExplanationEditWrap.v34-exp-gesture{position:relative!important;overflow:hidden!important;touch-action:none!important;background:#fff!important}
 #scoreExplanationEditWrap.v34-exp-gesture #explanationImageView{position:absolute!important;display:block!important;max-width:none!important;max-height:none!important;margin:0!important;transform:none!important;object-fit:fill!important;user-select:none!important;-webkit-user-drag:none!important}
 #scoreExplanationEditWrap.v34-exp-gesture #scoreExplanationCanvas{position:absolute!important;z-index:90!important;max-width:none!important;max-height:none!important;transform:none!important;pointer-events:auto!important;touch-action:none!important}
+
+
+/* === v35 답안 페이지 버튼 안정화 === */
+#prevAnswerPageBtn,
+#nextAnswerPageBtn,
+#addAnswerPageBtn {
+  touch-action: manipulation !important;
+  pointer-events: auto !important;
+}
