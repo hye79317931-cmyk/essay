@@ -2,7 +2,7 @@
   "name": "2차 서술형 답안연습",
   "short_name": "2차답안",
   "id": "/essay/",
-  "start_url": "./?v=35",
+  "start_url": "./?v=36",
   "scope": "./",
   "display": "standalone",
   "background_color": "#f5f7fb",

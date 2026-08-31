@@ -1,2 +1,2 @@
-essay v35 answer page freeze fix
-created: 2026-08-25T14:24:40.108907
+Essay v36 Firebase realtime sync
+created: 2026-08-31T03:32:35.270671

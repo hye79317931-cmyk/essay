@@ -7,7 +7,7 @@
   <title>2차 서술형 답안연습</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icon-192.png" />
-  <link rel="stylesheet" href="styles.css?v=35" />
+  <link rel="stylesheet" href="styles.css?v=36" />
 </head>
 <body>
   <header class="app-header">
@@ -105,7 +105,35 @@
 
     <section id="reviewView" class="view"><section class="card"><h2>복습</h2><div class="grid three"><label>대분류<select id="reviewSubject"><option value="">전체</option><option value="형법">형법</option><option value="형사소송법">형사소송법</option><option value="행정법">행정법</option><option value="교정학">교정학</option></select></label><label>연도/회차<input id="reviewSession" type="text" placeholder="연도/회차 검색" /></label><label>구분<select id="reviewType"><option value="needed">복습필요</option><option value="all">전체기록</option></select></label></div><div id="reviewList" class="list"></div></section></section>
     <section id="listView" class="view"><section class="card"><h2>목록</h2><div class="grid three"><label>대분류<select id="listSubject"><option value="">전체</option><option value="형법">형법</option><option value="형사소송법">형사소송법</option><option value="행정법">행정법</option><option value="교정학">교정학</option></select></label><label>연도/회차<input id="listSession" type="text" placeholder="연도/회차 검색" /></label><label>검색<input id="listSearch" type="search" placeholder="제목, 포인트 검색" /></label></div><div id="problemList" class="list"></div></section></section>
-    <section id="backupView" class="view"><section class="card"><h2>통계</h2><div id="statsGrid" class="stats-grid"></div></section><section class="card"><h2>백업 / 복원</h2><div class="row wrap"><button id="exportBtn" type="button">백업 파일 내보내기</button><label class="file-button">백업 파일 불러오기<input id="importInput" type="file" accept="application/json" /></label></div><p class="hint">문제·해설 이미지는 폰 브라우저 저장소에 저장됩니다. 자주 백업해두세요.</p></section><section class="card danger-card"><h2>전체 삭제</h2><button id="wipeBtn" class="danger" type="button">전체 데이터 삭제</button></section></section>
+    <section id="backupView" class="view"><section class="card"><h2>통계</h2><div id="statsGrid" class="stats-grid"></div></section><section class="card"><h2>백업 / 복원</h2><div class="row wrap"><button id="exportBtn" type="button">백업 파일 내보내기</button><label class="file-button">백업 파일 불러오기<input id="importInput" type="file" accept="application/json" /></label></div><p class="hint">문제·해설 이미지는 폰 브라우저 저장소에 저장됩니다. 자주 백업해두세요.</p></section>
+<section class="card" id="essayFirebaseSyncCardV36">
+  <h2>폰 · 태블릿 실시간 동기화</h2>
+  <p id="essayFirebaseStatusV36" class="hint">Firebase 연결 확인 중...</p>
+
+  <details class="essay-sync-details-v36">
+    <summary>Firebase 설정 완료</summary>
+    <p class="hint">PSAT에서 만든 psat-sync Firebase 프로젝트를 같이 사용해. Essay 데이터는 essayData 경로에 따로 저장돼.</p>
+  </details>
+
+  <div class="grid two">
+    <label>이메일
+      <input id="essayFirebaseEmailV36" type="email" autocomplete="username" placeholder="PSAT에서 사용한 이메일">
+    </label>
+    <label>비밀번호
+      <input id="essayFirebasePasswordV36" type="password" autocomplete="current-password" placeholder="6자 이상">
+    </label>
+  </div>
+
+  <div class="row wrap">
+    <button id="essayFirebaseLoginBtnV36" type="button">로그인 · 동기화 시작</button>
+    <button id="essayFirebaseLogoutBtnV36" class="secondary hidden" type="button">로그아웃</button>
+    <button id="essayFirebasePushBtnV36" class="secondary" type="button">이 기기 데이터 올리기</button>
+    <button id="essayFirebasePullBtnV36" class="secondary" type="button">클라우드 데이터 받기</button>
+  </div>
+
+  <p class="hint">PSAT과 같은 이메일 계정을 사용하면 돼. 앱을 껐다 켜도 로그인 상태가 유지되고 이후 변경사항은 자동 동기화돼.</p>
+</section>
+<section class="card danger-card"><h2>전체 삭제</h2><button id="wipeBtn" class="danger" type="button">전체 데이터 삭제</button></section></section>
   </main>
 
   <section id="solveOverlay" class="overlay hidden">
@@ -208,6 +236,10 @@
     </div>
   </section>
   <div id="toast" class="toast hidden"></div>
-  <script src="app.js?v=35"></script>
+  
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-database-compat.js"></script>
+  <script src="app.js?v=36"></script>
 </body>
 </html>

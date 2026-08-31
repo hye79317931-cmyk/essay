@@ -1218,3 +1218,24 @@
   touch-action: manipulation !important;
   pointer-events: auto !important;
 }
+
+
+/* === v36 Essay Firebase 실시간 동기화 === */
+#essayFirebaseSyncCardV36 .essay-sync-details-v36 {
+  margin: 10px 0 14px;
+  border: 1px solid var(--line, #d8deea);
+  border-radius: 14px;
+  padding: 10px 12px;
+}
+#essayFirebaseSyncCardV36 .essay-sync-details-v36 summary {
+  cursor: pointer;
+  font-weight: 900;
+}
+#essayFirebaseStatusV36.essay-sync-ok-v36 {
+  color: #14a6df !important;
+  font-weight: 900 !important;
+}
+#essayFirebaseStatusV36.essay-sync-error-v36 {
+  color: #c62828 !important;
+  font-weight: 900 !important;
+}
