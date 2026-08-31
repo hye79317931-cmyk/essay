@@ -1271,3 +1271,35 @@
 #scoreOverlay .score-card:last-child {
   margin-bottom: 80px !important;
 }
+
+
+/* === v38 자가채점 전체 스크롤 강제 === */
+#scoreOverlay {
+  overflow: hidden !important;
+}
+#scoreOverlay .score-shell {
+  position: relative !important;
+  height: 100dvh !important;
+  max-height: 100dvh !important;
+  min-height: 0 !important;
+  overflow-y: scroll !important;
+  overflow-x: hidden !important;
+  -webkit-overflow-scrolling: touch !important;
+  touch-action: none !important;
+  overscroll-behavior: contain !important;
+  padding-bottom: 220px !important;
+  box-sizing: border-box !important;
+}
+#scoreOverlay .score-card:last-child {
+  margin-bottom: 120px !important;
+}
+
+/* 해설 이미지/캔버스는 확대 기능 유지 */
+#scoreExplanationEditWrap {
+  overscroll-behavior: contain !important;
+}
+
+/* 텍스트 해설에서도 전체 화면 스크롤 방해 금지 */
+#scoreModelTextEditWrap {
+  overscroll-behavior: contain !important;
+}

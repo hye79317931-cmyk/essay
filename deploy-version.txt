@@ -1,2 +1,2 @@
-Essay v37 explanation full scroll fix
-created: 2026-08-31T12:49:22.011509
+Essay v38 score scroll hardfix
+created: 2026-08-31T12:59:33.880431
