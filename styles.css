@@ -1239,3 +1239,35 @@
   color: #c62828 !important;
   font-weight: 900 !important;
 }
+
+
+/* === v37 해설화면 스크롤/하단 잘림 수정 === */
+#scoreOverlay {
+  overflow: hidden !important;
+}
+#scoreOverlay .score-shell {
+  box-sizing: border-box !important;
+  height: 100dvh !important;
+  max-height: 100dvh !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  -webkit-overflow-scrolling: touch !important;
+  overscroll-behavior-y: contain !important;
+  padding-bottom: 140px !important;
+  touch-action: pan-y !important;
+}
+#scoreExplanationEditWrap:not(.v27-no-image) {
+  box-sizing: border-box !important;
+  height: min(62dvh, 720px) !important;
+  max-height: 62dvh !important;
+  min-height: 240px !important;
+}
+#scoreModelTextEditWrap {
+  max-height: 62dvh !important;
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch !important;
+}
+#scoreOverlay .score-card:last-child {
+  margin-bottom: 80px !important;
+}
