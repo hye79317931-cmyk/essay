@@ -1267,3 +1267,18 @@
   touch-action:none!important;
 }
 /* 손가락은 이동/확대, 실제 필기 stroke는 JS에서 pointerType=pen만 허용 */
+
+
+/* === v51: 해설 내부 이동은 해설칸에만 고정 === */
+#scoreExplanationViewerV47,
+#scoreExplanationViewportV47{
+  overscroll-behavior:contain!important;
+}
+#scoreExplanationViewportV47{
+  touch-action:none!important;
+}
+/* 해설 바깥 score-shell은 직접 터치했을 때만 세로 스크롤 */
+#scoreOverlay .score-shell{
+  overscroll-behavior-y:auto!important;
+  touch-action:pan-y!important;
+}
