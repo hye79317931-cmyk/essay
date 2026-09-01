@@ -1,25 +1,29 @@
 'use strict';
 
-const CACHE_NAME = 'essay-psat-base-v48';
+const CACHE_NAME = 'essay-pwa-v49';
 const ASSETS = [
   './',
   './index.html',
-  './styles.css?v=48',
-  './app.js?v=48',
-  './manifest.webmanifest?v=48',
-  './icon-192.png?v=48',
-  './icon-512.png?v=48'
+  './styles.css?v=49',
+  './app.js?v=49',
+  './manifest.webmanifest',
+  './icon-192.png',
+  './icon-512.png'
 ];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS)));
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
+  );
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(caches.keys().then((keys) => Promise.all(
-    keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
-  )));
+  event.waitUntil(
+    caches.keys().then((keys) => Promise.all(
+      keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
+    ))
+  );
   self.clients.claim();
 });
 

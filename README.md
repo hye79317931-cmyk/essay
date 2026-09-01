@@ -321,3 +321,14 @@
 - manifest/icon v48 cache bust
 - appinstalled 처리
 - 첫 설치 준비가 늦을 경우 설치 버튼에서 SW 준비 후 1회 재로드
+
+
+## v49 PWA 설치 수정
+- v48/이전 에세이 Service Worker + Cache Storage만 1회 초기화
+- IndexedDB / localStorage / Firebase 데이터는 삭제하지 않음
+- PSAT 앱과 동일한 단순 manifest/SW 구성
+- manifest/icon URL의 쿼리스트링 제거
+- manifest id 추가
+- Service Worker 등록 완료 후 앱 초기화
+- beforeinstallprompt 발생 시 상단 '앱 설치' 버튼 표시
+- standalone 설치

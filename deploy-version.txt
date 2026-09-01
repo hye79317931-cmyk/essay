@@ -1,1 +1,1 @@
-Essay v48 PWA install fix
+Essay v49 PWA install reset
