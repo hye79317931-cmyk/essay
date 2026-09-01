@@ -1,2 +1,2 @@
-Essay v41 explanation zoom pan
-created: 2026-09-01T01:41:10.834273
+Essay v42 performance explanation zoom/pan
+created: 2026-09-01T01:52:21.865862
