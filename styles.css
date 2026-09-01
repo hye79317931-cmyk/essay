@@ -1239,146 +1239,77 @@
   color: #c62828 !important;
   font-weight: 900 !important;
 }
-
-
-/* === v37 해설화면 스크롤/하단 잘림 수정 === */
-#scoreOverlay {
-  overflow: hidden !important;
+\n\n/* === v40 해설 화면 클린 레이아웃 === */
+#scoreOverlay .score-shell{
+  height:100dvh!important;
+  max-height:100dvh!important;
+  overflow-y:auto!important;
+  overflow-x:hidden!important;
+  -webkit-overflow-scrolling:touch!important;
+  touch-action:pan-y!important;
+  overscroll-behavior-y:auto!important;
+  padding-bottom:150px!important;
 }
-#scoreOverlay .score-shell {
-  box-sizing: border-box !important;
-  height: 100dvh !important;
-  max-height: 100dvh !important;
-  min-height: 0 !important;
-  overflow-y: auto !important;
-  overflow-x: hidden !important;
-  -webkit-overflow-scrolling: touch !important;
-  overscroll-behavior-y: contain !important;
-  padding-bottom: 140px !important;
-  touch-action: pan-y !important;
-}
-#scoreExplanationEditWrap:not(.v27-no-image) {
-  box-sizing: border-box !important;
-  height: min(62dvh, 720px) !important;
-  max-height: 62dvh !important;
-  min-height: 240px !important;
-}
-#scoreModelTextEditWrap {
-  max-height: 62dvh !important;
-  overflow-y: auto !important;
-  -webkit-overflow-scrolling: touch !important;
-}
-#scoreOverlay .score-card:last-child {
-  margin-bottom: 80px !important;
-}
-
-
-/* === v38 해설 기본배율은 네이티브 세로스크롤 === */
-#scoreOverlay {
-  overflow: hidden !important;
-}
-#scoreOverlay .score-shell {
-  height: 100dvh !important;
-  max-height: 100dvh !important;
-  overflow-y: scroll !important;
-  overflow-x: hidden !important;
-  -webkit-overflow-scrolling: touch !important;
-  touch-action: pan-y !important;
-  overscroll-behavior-y: auto !important;
-  padding-bottom: 180px !important;
-}
-#scoreExplanationEditWrap.v38-exp-gesture {
-  position: relative !important;
-  overflow: hidden !important;
-  touch-action: pan-y !important;
-  background: #fff !important;
-}
-#scoreExplanationEditWrap.v38-exp-gesture #explanationImageView {
-  position: absolute !important;
-  display: block !important;
-  max-width: none !important;
-  max-height: none !important;
-  margin: 0 !important;
-  transform: none !important;
-  object-fit: fill !important;
-  user-select: none !important;
-  -webkit-user-drag: none !important;
-}
-#scoreExplanationEditWrap.v38-exp-gesture #scoreExplanationCanvas {
-  position: absolute !important;
-  z-index: 90 !important;
-  max-width: none !important;
-  max-height: none !important;
-  transform: none !important;
-  pointer-events: auto !important;
-  touch-action: pan-y !important;
-}
-#scoreModelTextEditWrap {
-  max-height: none !important;
-  overflow: visible !important;
-  touch-action: pan-y !important;
-}
-#scoreOverlay .score-card:last-child {
-  margin-bottom: 120px !important;
-}
-
-
-/* === v39 해설 이미지 실제 높이 사용 - 잘림 제거 === */
-#scoreOverlay .score-shell {
-  height: 100dvh !important;
-  max-height: 100dvh !important;
-  overflow-y: auto !important;
-  overflow-x: hidden !important;
-  -webkit-overflow-scrolling: touch !important;
-  touch-action: pan-y !important;
-  padding-bottom: 180px !important;
-}
-
 #scoreExplanationEditWrap,
-#scoreExplanationEditWrap.v38-exp-gesture,
-#scoreExplanationEditWrap.v39-exp-flow {
-  position: relative !important;
-  width: 100% !important;
-  height: auto !important;
-  min-height: 0 !important;
-  max-height: none !important;
-  overflow-x: auto !important;
-  overflow-y: visible !important;
-  -webkit-overflow-scrolling: touch !important;
-  touch-action: pan-x pan-y !important;
-  overscroll-behavior: auto !important;
+#scoreExplanationEditWrap.v34-exp-gesture{
+  position:relative!important;
+  width:100%!important;
+  max-width:100%!important;
+  max-height:none!important;
+  overflow-y:visible!important;
+  -webkit-overflow-scrolling:touch!important;
+  touch-action:pan-y!important;
+  overscroll-behavior:auto!important;
+  background:#fff!important;
 }
-
-#scoreExplanationEditWrap #explanationImageView {
-  position: relative !important;
-  left: auto !important;
-  top: auto !important;
-  max-width: none !important;
-  max-height: none !important;
-  display: block !important;
-  transform: none !important;
-  margin: 0 !important;
+#scoreExplanationEditWrap #explanationImageView{
+  position:relative!important;
+  left:0!important;
+  top:0!important;
+  display:block!important;
+  max-width:none!important;
+  max-height:none!important;
+  margin:0!important;
+  transform:none!important;
+  object-fit:fill!important;
 }
-
-#scoreExplanationEditWrap #scoreExplanationCanvas {
-  position: absolute !important;
-  left: 0 !important;
-  top: 0 !important;
-  max-width: none !important;
-  max-height: none !important;
-  transform: none !important;
-  touch-action: pan-x pan-y !important;
-  pointer-events: auto !important;
+#scoreExplanationEditWrap #scoreExplanationCanvas{
+  position:absolute!important;
+  left:0!important;
+  top:0!important;
+  z-index:20!important;
+  max-width:none!important;
+  max-height:none!important;
+  transform:none!important;
+  touch-action:pan-y!important;
+  pointer-events:auto!important;
 }
-
-/* 해설 뒤 채점포인트가 실제 이미지 다음에 바로 이어짐 */
 #scoreOverlay .score-grid,
-#scoreOverlay .score-box {
-  overflow: visible !important;
+#scoreOverlay .score-box{
+  overflow:visible!important;
+}
+#scoreModelTextEditWrap{
+  max-height:none!important;
+  overflow:visible!important;
+  touch-action:pan-y!important;
+}
+#scoreOverlay .score-card:last-child{
+  margin-bottom:110px!important;
 }
 
-#scoreOverlay .score-card:last-child {
-  position: relative !important;
-  margin-top: 12px !important;
-  margin-bottom: 140px !important;
+
+/* === v41 확대 후 상하좌우 이동 === */
+#scoreExplanationEditWrap.v41-zoomed {
+  overflow: auto !important;
+  overscroll-behavior: contain !important;
+  touch-action: none !important;
+  -webkit-overflow-scrolling: touch !important;
+}
+#scoreExplanationEditWrap.v41-zoomed #scoreExplanationCanvas {
+  touch-action: none !important;
+}
+#scoreExplanationEditWrap:not(.v41-zoomed) {
+  overflow-x: hidden !important;
+  overflow-y: visible !important;
+  touch-action: pan-y !important;
 }
