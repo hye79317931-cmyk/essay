@@ -1,1 +1,1 @@
-Essay v52 compare split screen
+Essay v53 safe compare layout based on v51

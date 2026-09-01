@@ -1284,85 +1284,97 @@
 }
 
 
-/* === v52 내 답안 + 해설 한 화면 비교 === */
-#scoreOverlay .score-shell.v52-compare-active{
+/* === v53: v51 구조 유지 + 한 화면 비교 === */
+#scoreOverlay.v53-compare .score-shell.v53-compare-shell{
   height:100dvh!important;
   max-height:100dvh!important;
-  overflow:hidden!important;
-  touch-action:none!important;
-  padding-bottom:0!important;
+  overflow-y:auto!important;
+  overflow-x:hidden!important;
+  padding:6px!important;
 }
 
-#scoreCompareSplitV52{
+#scoreOverlay.v53-compare .score-head{
+  margin-bottom:5px!important;
+  min-height:38px!important;
+  padding:5px 7px!important;
+}
+
+#scoreOverlay.v53-compare .score-grid.v53-compare-grid{
+  height:calc(100dvh - 58px)!important;
+  min-height:0!important;
   display:grid!important;
-  grid-template-rows:minmax(0,1fr) minmax(0,1fr)!important;
-  gap:6px!important;
-  width:100%!important;
-  height:calc(100dvh - 118px)!important;
-  min-height:0!important;
+  gap:5px!important;
   overflow:hidden!important;
-  padding:4px 0!important;
-  box-sizing:border-box!important;
 }
 
-.score-compare-pane-v52{
-  position:relative!important;
-  min-height:0!important;
-  overflow:auto!important;
-  -webkit-overflow-scrolling:touch!important;
-  overscroll-behavior:contain!important;
-  background:#fff!important;
-  border:1px solid #d9dee8!important;
-  border-radius:10px!important;
-  box-sizing:border-box!important;
+/* 세로 화면: 내 답안 위 / 해설 아래 */
+@media (orientation:portrait){
+  #scoreOverlay.v53-compare .score-grid.v53-compare-grid{
+    grid-template-columns:1fr!important;
+    grid-template-rows:minmax(0,1fr) minmax(0,1fr)!important;
+  }
 }
 
-#scoreAnswerPaneV52{
-  touch-action:pan-y!important;
-}
-
-#scoreExplanationPaneV52{
-  touch-action:none!important;
-}
-
-.score-compare-head-v52{
-  position:sticky!important;
-  top:0!important;
-  z-index:50!important;
-  height:26px!important;
-  line-height:26px!important;
-  padding:0 10px!important;
-  font-size:12px!important;
-  font-weight:800!important;
-  background:rgba(255,255,255,.94)!important;
-  border-bottom:1px solid #e5e7eb!important;
-  pointer-events:none!important;
-}
-
-#scoreAnswerPaneV52 .v52-answer-content,
-#scoreExplanationPaneV52 .v52-explanation-content{
-  width:100%!important;
-  min-width:0!important;
-  margin:0!important;
-}
-
-#scoreExplanationPaneV52 .v52-explanation-content{
-  min-height:100%!important;
-}
-
-#scoreOverlay .v52-empty-typed-answer{
-  display:none!important;
-}
-
-/* v52에서는 비교영역 밖의 원래 카드 여백이 한 화면을 밀어내지 않도록 축소 */
-#scoreOverlay.v52-active .score-card{
-  margin-bottom:4px!important;
-}
-
-/* 휴대폰 가로/태블릿 가로에서는 좌우 비교가 더 효율적 */
-@media (orientation:landscape) and (min-width:700px){
-  #scoreCompareSplitV52{
+/* 가로 화면: 내 답안 왼쪽 / 해설 오른쪽 */
+@media (orientation:landscape){
+  #scoreOverlay.v53-compare .score-grid.v53-compare-grid{
     grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important;
     grid-template-rows:minmax(0,1fr)!important;
   }
+}
+
+#scoreOverlay.v53-compare .score-grid.v53-compare-grid > .score-box{
+  min-width:0!important;
+  min-height:0!important;
+  height:100%!important;
+  overflow:hidden!important;
+  display:flex!important;
+  flex-direction:column!important;
+  padding:6px!important;
+  border-radius:12px!important;
+}
+
+/* 제목/버튼은 위에 고정, 실제 답안/해설 부분만 남은 높이를 사용 */
+#scoreOverlay.v53-compare .v53-answer-box #scoreAnswerEditWrap{
+  flex:1 1 auto!important;
+  min-height:0!important;
+  height:auto!important;
+  max-height:none!important;
+  overflow:auto!important;
+  -webkit-overflow-scrolling:touch!important;
+  overscroll-behavior:contain!important;
+}
+
+#scoreOverlay.v53-compare .v53-explanation-box #scoreExplanationViewerV47{
+  flex:1 1 auto!important;
+  min-height:0!important;
+  height:auto!important;
+  max-height:none!important;
+  margin-top:3px!important;
+}
+
+/* v51 해설 viewer 안의 실제 viewport가 박스 높이를 사용하도록 */
+#scoreOverlay.v53-compare .v53-explanation-box #scoreExplanationViewportV47{
+  height:100%!important;
+  max-height:100%!important;
+}
+
+/* 텍스트 해설인 경우에도 같은 박스 안에서 스크롤 */
+#scoreOverlay.v53-compare .v53-explanation-box #scoreModelTextEditWrap{
+  flex:1 1 auto!important;
+  min-height:0!important;
+  max-height:none!important;
+  overflow:auto!important;
+  -webkit-overflow-scrolling:touch!important;
+  overscroll-behavior:contain!important;
+}
+
+/* 비교 화면 다음의 채점포인트는 기존 DOM 그대로 아래에 둔다. */
+#scoreOverlay.v53-compare .score-card{
+  margin-top:8px!important;
+}
+
+/* 빈 키보드 답안은 v50 규칙 그대로 숨김 */
+#scoreOverlay.v53-compare #ownAnswerView.keyboard-answer-empty-v50{
+  display:none!important;
 }
