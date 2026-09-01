@@ -1,2 +1,2 @@
-Essay v42 performance explanation zoom/pan
-created: 2026-09-01T01:52:21.865862
+Essay v43 single touch explanation
+created: 2026-09-01T02:17:28.403806
