@@ -1,1 +1,1 @@
-Essay v49 PWA install reset
+Essay v50 explanation base-pan + hide empty keyboard answer + stylus-only
