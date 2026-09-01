@@ -1,2 +1,2 @@
-Essay v43 single touch explanation
-created: 2026-09-01T02:17:28.403806
+Essay v44 isolated explanation viewer
+created: 2026-09-01T02:27:37.715124

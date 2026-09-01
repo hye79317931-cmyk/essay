@@ -253,19 +253,22 @@
 - 생성시각: 2026-08-31T03:32:35.270671
 
 
-## v43 해설 터치 구조 재작성
+## v44 해설 뷰어 완전 분리
 - v36 안정판 기준 재제작
-- v34 해설 gesture 블록 완전 제거
-- 해설 wrapper를 새 노드로 교체하여 구버전 터치/포인터 리스너 제거
-- 해설 canvas는 pointer-events:none: 손가락 이벤트를 절대 가로채지 않음
-- S펜 필기는 wrapper가 직접 처리
-- 100% 한 손가락: Android Chrome 네이티브 페이지 스크롤만 사용
+- 기존 scoreExplanationEditWrap / scoreExplanationCanvas 화면에서 완전 제거
+- 예전 해설 touch/pointer/canvas 코드가 새 뷰어를 건드릴 수 없음
+- 새 scoreExplanationViewerV44 하나만 사용
+- 확대 전 한 손가락: 자가채점 화면 전체 세로 이동
 - 두 손가락: 확대/축소
-- 확대 후 한 손가락: 해설창 상하좌우 직접 이동
-- 필기 없을 때 canvas bitmap 1x1 유지하여 스크롤 GPU 부담 최소화
-- 필기 있을 때도 backing canvas 최대 약 2.2M 픽셀 제한
-- 채점 화면 오픈 후 반복되던 답안/텍스트 canvas 재생성을 1회로 throttle
-- v35 답안 페이지 추가/이동 수정 유지
+- 확대 후 한 손가락: 이미지 내부 상하좌우 이동
+- touch-action:none + 단일 pointer handler로 제스처 소유권 충돌 제거
+- 확대/이동 중 이미지/캔버스 재생성 없음
+- 해설 필기 없으면 canvas bitmap 1x1
+- 해설 필기 있을 때만 저해상도 backing canvas 생성
+- 답안 캔버스 5회 재생성을 1회로 축소
+- 텍스트 해설 캔버스 재생성 debounce
+- S펜 해설 필기 유지
+- v35 답안 페이지 수정 유지
 - v36 Firebase 실시간 동기화 유지
 - 하위폴더 없음
-- 생성: 2026-09-01T02:17:28.403806
+- 생성: 2026-09-01T02:27:37.715124
