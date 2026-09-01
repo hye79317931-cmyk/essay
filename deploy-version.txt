@@ -1,2 +1,1 @@
-Essay v47 hybrid zoom pan + sync-safe
-created: 2026-09-01T06:04:44.728406
+Essay v48 PWA install fix

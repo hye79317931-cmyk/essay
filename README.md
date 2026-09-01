@@ -311,3 +311,13 @@
 - 확대 이미지 상단/하단을 넘긴 세로 드래그는 바깥 자가채점 화면으로 전달
 - 기존 해설 DOM은 계속 비활성화
 - 생성: 2026-09-01T06:04:44.728406
+
+
+## v48 홈화면 설치 수정
+- v47 기능/Firebase 동기화 유지
+- beforeinstallprompt를 앱 시작 즉시 캡처
+- Service Worker를 DB/Firebase 로딩 전에 즉시 등록
+- PSAT 앱과 같은 PWA 캐시 구조 적용
+- manifest/icon v48 cache bust
+- appinstalled 처리
+- 첫 설치 준비가 늦을 경우 설치 버튼에서 SW 준비 후 1회 재로드
