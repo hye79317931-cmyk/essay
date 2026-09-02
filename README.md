@@ -392,3 +392,14 @@
 - 스타일러스만 필기 / 손가락은 이동·확대
 - 빈 키보드 답안 숨김 유지
 - v56 전체지우개 / Firebase / PWA 유지
+
+
+## v59 문제풀이 필기 복구
+- v58 기준
+- v57의 resetProblemInkLayerV10/resetAnswerInkLayerV10 강제 교체 제거
+- v57의 openCurrentProblem 추가 반복 reset 제거
+- 문제/답안 필기는 기존 v13 lifecycle 그대로 사용
+- 필기 stroke는 pointerType=pen만 허용
+- 손가락은 기존 이동/스크롤 동작 유지
+- v58 내 답안+해설 한 화면 비교 유지
+- 해설 전체지우개/Firebase/PWA 유지
