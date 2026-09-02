@@ -1,1 +1,1 @@
-Essay v55 restore answer layout
+Essay v56 restore v51 layout + clear-all
