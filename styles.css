@@ -1503,16 +1503,13 @@
   margin-top:8px!important;
 }
 
-
-/* === v61 문제풀이 캔버스 전용 === */
-#solveOverlay #inkCanvas{
+/* === v62 문제풀이 답안작성 전용 === */
+#solveOverlay #handwritingWrap{
   touch-action:none!important;
-  user-select:none!important;
-  -webkit-user-select:none!important;
-  -webkit-touch-callout:none!important;
 }
 #solveOverlay #answerInkCanvas{
-  touch-action:pan-x pan-y!important;
+  touch-action:none!important;
+  pointer-events:auto!important;
   user-select:none!important;
   -webkit-user-select:none!important;
   -webkit-touch-callout:none!important;

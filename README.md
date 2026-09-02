@@ -405,15 +405,12 @@
 - 해설 전체지우개/Firebase/PWA 유지
 
 
-## v61
-- v60 폐기, v59 기준 재제작
-- 자가채점 내 답안 관련 함수/DOM/CSS는 v59 그대로 유지
-- scoreAnswerCanvas/resetScoreAnswerCanvas/renderScoreAnswerPage 비수정
-- 문제풀이 solveOverlay의 inkCanvas/answerInkCanvas만 별도 정리
-- 기존 legacy reset timeout이 끝난 뒤 solve 화면에서만 canvas 재구성
-- scoreOverlay가 열려 있으면 v61 solve cleanup 실행 안 함
-- 스타일러스만 필기
-- 문제에서 손가락은 이동
-- 답안에서 손가락은 필기 금지
-- v58 내 답안+해설 한 화면 비교 유지
-- v61 접속 시 Essay 서비스워커/cache 1회 갱신
+## v62
+- v61 폐기, v59 기준
+- 문제풀이 answerInkCanvas만 수정
+- 첫 1회만 과거 listener 제거용 canvas 교체
+- 이후 반복 교체 금지
+- pointerType=pen만 필기
+- 답안 이전/다음/추가 유지
+- 자가채점 내답안/해설 화면 비수정
+- v58 한화면 비교/Firebase/PWA 유지
