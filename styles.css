@@ -1284,97 +1284,65 @@
 }
 
 
-/* === v53: v51 구조 유지 + 한 화면 비교 === */
-#scoreOverlay.v53-compare .score-shell.v53-compare-shell{
+/* === v55: 내 답안 원형 복구 + 바깥 비교 배치만 === */
+#scoreOverlay.v55-compare .score-shell{
   height:100dvh!important;
   max-height:100dvh!important;
   overflow-y:auto!important;
   overflow-x:hidden!important;
   padding:6px!important;
+  box-sizing:border-box!important;
 }
 
-#scoreOverlay.v53-compare .score-head{
-  margin-bottom:5px!important;
-  min-height:38px!important;
-  padding:5px 7px!important;
-}
-
-#scoreOverlay.v53-compare .score-grid.v53-compare-grid{
-  height:calc(100dvh - 58px)!important;
-  min-height:0!important;
+#scoreOverlay.v55-compare .score-grid{
   display:grid!important;
-  gap:5px!important;
-  overflow:hidden!important;
+  gap:6px!important;
+  align-items:start!important;
 }
 
-/* 세로 화면: 내 답안 위 / 해설 아래 */
+/* 세로화면: 내 답안 위, 해설 아래. 내부 콘텐츠 크기는 건드리지 않음 */
 @media (orientation:portrait){
-  #scoreOverlay.v53-compare .score-grid.v53-compare-grid{
+  #scoreOverlay.v55-compare .score-grid{
     grid-template-columns:1fr!important;
-    grid-template-rows:minmax(0,1fr) minmax(0,1fr)!important;
   }
 }
 
-/* 가로 화면: 내 답안 왼쪽 / 해설 오른쪽 */
-@media (orientation:landscape){
-  #scoreOverlay.v53-compare .score-grid.v53-compare-grid{
+/* 가로 태블릿: 좌우 비교 */
+@media (orientation:landscape) and (min-width:700px){
+  #scoreOverlay.v55-compare .score-grid{
     grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important;
-    grid-template-rows:minmax(0,1fr)!important;
   }
 }
 
-#scoreOverlay.v53-compare .score-grid.v53-compare-grid > .score-box{
-  min-width:0!important;
-  min-height:0!important;
-  height:100%!important;
-  overflow:hidden!important;
-  display:flex!important;
-  flex-direction:column!important;
-  padding:6px!important;
-  border-radius:12px!important;
-}
-
-/* 제목/버튼은 위에 고정, 실제 답안/해설 부분만 남은 높이를 사용 */
-#scoreOverlay.v53-compare .v53-answer-box #scoreAnswerEditWrap{
-  flex:1 1 auto!important;
-  min-height:0!important;
+/* 핵심: v53에서 강제로 줬던 height/flex/overflow 전부 원래 값으로 복구 */
+#scoreOverlay.v55-compare #scoreAnswerEditWrap{
   height:auto!important;
   max-height:none!important;
-  overflow:auto!important;
-  -webkit-overflow-scrolling:touch!important;
-  overscroll-behavior:contain!important;
+  min-height:0!important;
+  overflow:visible!important;
+  flex:none!important;
 }
 
-#scoreOverlay.v53-compare .v53-explanation-box #scoreExplanationViewerV47{
-  flex:1 1 auto!important;
-  min-height:0!important;
+#scoreOverlay.v55-compare .score-grid > .score-box{
   height:auto!important;
-  max-height:none!important;
-  margin-top:3px!important;
-}
-
-/* v51 해설 viewer 안의 실제 viewport가 박스 높이를 사용하도록 */
-#scoreOverlay.v53-compare .v53-explanation-box #scoreExplanationViewportV47{
-  height:100%!important;
-  max-height:100%!important;
-}
-
-/* 텍스트 해설인 경우에도 같은 박스 안에서 스크롤 */
-#scoreOverlay.v53-compare .v53-explanation-box #scoreModelTextEditWrap{
-  flex:1 1 auto!important;
   min-height:0!important;
   max-height:none!important;
-  overflow:auto!important;
-  -webkit-overflow-scrolling:touch!important;
-  overscroll-behavior:contain!important;
+  overflow:visible!important;
+  display:block!important;
 }
 
-/* 비교 화면 다음의 채점포인트는 기존 DOM 그대로 아래에 둔다. */
-#scoreOverlay.v53-compare .score-card{
-  margin-top:8px!important;
+/* 내 답안 이미지/캔버스는 기존 스크립트가 계산한 크기를 그대로 사용 */
+#scoreOverlay.v55-compare #scoreAnswerEditWrap img,
+#scoreOverlay.v55-compare #scoreAnswerEditWrap canvas{
+  max-height:none!important;
 }
 
-/* 빈 키보드 답안은 v50 규칙 그대로 숨김 */
-#scoreOverlay.v53-compare #ownAnswerView.keyboard-answer-empty-v50{
+/* 빈 키보드 답안은 기존 v50 규칙 유지 */
+#scoreOverlay.v55-compare #ownAnswerView.keyboard-answer-empty-v50{
   display:none!important;
+}
+
+/* 해설은 v51 독립 viewer 동작 그대로 */
+#scoreOverlay.v55-compare [id^="scoreExplanationViewerV"]{
+  min-height:0!important;
 }
