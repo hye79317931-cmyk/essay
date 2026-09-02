@@ -1,1 +1,1 @@
-Essay v59 stable solve handwriting + stylus-only
+Essay v60 clean solve handwriting controller

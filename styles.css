@@ -1502,3 +1502,17 @@
 #scoreOverlay.v58-one-screen .score-card{
   margin-top:8px!important;
 }
+
+
+/* === v60 문제풀이 필기 최종 안정화 === */
+#inkCanvas,
+#answerInkCanvas,
+#handwritingWrap{
+  touch-action:none!important;
+}
+#inkCanvas,
+#answerInkCanvas{
+  user-select:none!important;
+  -webkit-user-select:none!important;
+  -webkit-touch-callout:none!important;
+}

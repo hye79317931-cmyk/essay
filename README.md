@@ -403,3 +403,19 @@
 - 손가락은 기존 이동/스크롤 동작 유지
 - v58 내 답안+해설 한 화면 비교 유지
 - 해설 전체지우개/Firebase/PWA 유지
+
+
+## v60 문제풀이 필기 전면 정리
+- v59 기준
+- v2/v8/v9/v10/v12/v13의 문제/답안 필기 reset 호출을 단일 v60 controller로 통합
+- legacy listener 제거를 위해 최초 1회만 canvas 교체
+- 이후 문제 열기/페이지 전환/resize에서 canvas 반복 교체 금지
+- bitmap 크기가 실제로 달라질 때만 resize
+- S펜 pointerType=pen만 stroke 생성
+- 손가락/마우스는 답안 필기 불가
+- 문제 이미지에서 손가락은 이동만
+- coalesced pointer events 사용으로 S펜 선 연결 안정화
+- touch-action:none으로 S펜 필기 중 pointercancel 방지
+- v58 내 답안+해설 한 화면 비교 유지
+- 해설/Firebase 기능 유지
+- v60 접속 시 기존 Essay service worker/cache 1회 초기화
