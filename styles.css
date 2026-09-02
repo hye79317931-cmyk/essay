@@ -1504,14 +1504,15 @@
 }
 
 
-/* === v60 문제풀이 필기 최종 안정화 === */
-#inkCanvas,
-#answerInkCanvas,
-#handwritingWrap{
+/* === v61 문제풀이 캔버스 전용 === */
+#solveOverlay #inkCanvas{
   touch-action:none!important;
+  user-select:none!important;
+  -webkit-user-select:none!important;
+  -webkit-touch-callout:none!important;
 }
-#inkCanvas,
-#answerInkCanvas{
+#solveOverlay #answerInkCanvas{
+  touch-action:pan-x pan-y!important;
   user-select:none!important;
   -webkit-user-select:none!important;
   -webkit-touch-callout:none!important;

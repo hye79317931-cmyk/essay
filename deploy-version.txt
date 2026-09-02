@@ -1,1 +1,1 @@
-Essay v60 clean solve handwriting controller
+Essay v61 solve-only ink fix; score answer untouched from v59
