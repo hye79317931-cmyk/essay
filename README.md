@@ -405,12 +405,13 @@
 - 해설 전체지우개/Firebase/PWA 유지
 
 
-## v62
-- v61 폐기, v59 기준
-- 문제풀이 answerInkCanvas만 수정
-- 첫 1회만 과거 listener 제거용 canvas 교체
-- 이후 반복 교체 금지
-- pointerType=pen만 필기
-- 답안 이전/다음/추가 유지
-- 자가채점 내답안/해설 화면 비수정
-- v58 한화면 비교/Firebase/PWA 유지
+## v63
+- v59 기준
+- 문제풀이 답안 영역 touch-action:none으로 S펜 stroke 취소 방지
+- 제출 후 내 답안 scoreAnswerEditWrap도 touch-action:none
+- 제출 후 내 답안에서 손가락은 JS 수동 스크롤
+- 제출 후 내 답안에서 S펜만 필기
+- scoreAnswerCanvas 저장/그리기/레이아웃 구조는 v57 그대로
+- v58 내 답안+해설 한 화면 유지
+- 해설/Firebase/PWA 유지
+- v63 접속 시 Essay service worker/cache 1회 갱신

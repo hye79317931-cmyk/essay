@@ -1503,14 +1503,27 @@
   margin-top:8px!important;
 }
 
-/* === v62 문제풀이 답안작성 전용 === */
-#solveOverlay #handwritingWrap{
-  touch-action:none!important;
-}
+
+/* === v63 S펜/손가락 입력 충돌 수정 === */
+
+/* 문제풀이 답안: 브라우저 pan 제스처가 S펜 stroke를 취소하지 않게 함 */
+#solveOverlay #handwritingWrap,
 #solveOverlay #answerInkCanvas{
   touch-action:none!important;
-  pointer-events:auto!important;
-  user-select:none!important;
-  -webkit-user-select:none!important;
-  -webkit-touch-callout:none!important;
+}
+
+/*
+  제출 후 내 답안:
+  native pan은 끄고 JS에서 손가락 scroll 처리.
+  canvas는 표시층 그대로 pointer-events:none 유지.
+*/
+#scoreOverlay #scoreAnswerEditWrap,
+#scoreOverlay.v58-one-screen #scoreAnswerEditWrap{
+  touch-action:none!important;
+  overscroll-behavior:contain!important;
+}
+
+#scoreOverlay #scoreAnswerCanvas{
+  pointer-events:none!important;
+  touch-action:none!important;
 }
