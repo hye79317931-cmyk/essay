@@ -1545,3 +1545,23 @@
 #scoreOverlay #scoreAnswerEditWrap{
   display:block!important;
 }
+
+
+/* === v65 제출 후 내 답안: 가로 폭 맞춤 === */
+#scoreOverlay #ownAnswerInkView,
+#scoreOverlay.v58-one-screen #ownAnswerInkView{
+  display:block!important;
+  width:100%!important;
+  max-width:100%!important;
+  height:auto!important;
+  max-height:none!important;
+  object-fit:contain!important;
+  margin:0!important;
+}
+
+#scoreOverlay #scoreAnswerEditWrap,
+#scoreOverlay.v58-one-screen #scoreAnswerEditWrap{
+  overflow-x:hidden!important;
+  overflow-y:auto!important;
+  -webkit-overflow-scrolling:touch!important;
+}

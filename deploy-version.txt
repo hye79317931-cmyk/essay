@@ -1,1 +1,1 @@
-Essay v64 score answer fit-to-pane; no upscaling
+Essay v65 score answer width-fit
