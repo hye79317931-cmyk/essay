@@ -1584,3 +1584,30 @@
   overflow-x:hidden!important;
   overflow-y:auto!important;
 }
+
+
+/* === v67 내 답안으로 돌아가기 버튼 === */
+#scoreOverlay .v67-answer-title-row{
+  display:flex!important;
+  align-items:center!important;
+  justify-content:space-between!important;
+  gap:6px!important;
+}
+
+#scoreOverlay .v67-answer-title-actions{
+  display:flex!important;
+  align-items:center!important;
+  gap:5px!important;
+  min-width:0!important;
+}
+
+#scoreOverlay .v67-back-answer-btn{
+  display:inline-flex!important;
+  flex:0 0 auto!important;
+  min-height:26px!important;
+  padding:4px 8px!important;
+  font-size:.68rem!important;
+  line-height:1!important;
+  white-space:nowrap!important;
+  z-index:120!important;
+}
