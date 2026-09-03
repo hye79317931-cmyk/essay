@@ -1,1 +1,1 @@
-Essay v63 solve answer + score answer pen touch fix
+Essay v64 score answer fit-to-pane; no upscaling
