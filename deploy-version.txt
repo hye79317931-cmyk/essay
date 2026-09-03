@@ -1,1 +1,1 @@
-Essay v65 score answer width-fit
+Essay v66 true answer aspect ratio + width fit

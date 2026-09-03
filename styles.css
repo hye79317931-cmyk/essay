@@ -1565,3 +1565,22 @@
   overflow-y:auto!important;
   -webkit-overflow-scrolling:touch!important;
 }
+
+
+/* === v66 내 답안 실제 비율 + 가로 화면맞춤 === */
+#scoreOverlay #ownAnswerInkView,
+#scoreOverlay.v58-one-screen #ownAnswerInkView{
+  display:block!important;
+  width:100%!important;
+  max-width:100%!important;
+  height:auto!important;
+  max-height:none!important;
+  object-fit:fill!important;
+  margin:0!important;
+}
+
+#scoreOverlay #scoreAnswerEditWrap,
+#scoreOverlay.v58-one-screen #scoreAnswerEditWrap{
+  overflow-x:hidden!important;
+  overflow-y:auto!important;
+}
