@@ -1611,3 +1611,18 @@
   white-space:nowrap!important;
   z-index:120!important;
 }
+
+
+/* === v68 제출후 내답안 수정펜 === */
+#scoreOverlay #scoreAnswerCanvas{
+  pointer-events:auto!important;
+  touch-action:none!important;
+  z-index:80!important;
+  user-select:none!important;
+  -webkit-user-select:none!important;
+}
+
+#scoreOverlay #scoreAnswerEditWrap{
+  touch-action:none!important;
+  overscroll-behavior:contain!important;
+}

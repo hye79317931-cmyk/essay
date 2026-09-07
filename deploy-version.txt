@@ -1,1 +1,1 @@
-Essay v67 restore back-to-written-answer button
+Essay v68 per-problem answer isolation + score answer edit pen fix
