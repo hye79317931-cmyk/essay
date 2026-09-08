@@ -1626,3 +1626,16 @@
   touch-action:none!important;
   overscroll-behavior:contain!important;
 }
+
+/* === v69 수정펜: 이벤트는 wrapper/document에서 받고 canvas는 표시 전용 === */
+#scoreOverlay #scoreAnswerEditWrap{
+  position:relative!important;
+  touch-action:none!important;
+}
+#scoreOverlay #scoreAnswerCanvas{
+  position:absolute!important;
+  left:0!important;
+  top:0!important;
+  pointer-events:none!important;
+  z-index:90!important;
+}

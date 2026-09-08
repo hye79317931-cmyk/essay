@@ -1,1 +1,1 @@
-Essay v68 per-problem answer isolation + score answer edit pen fix
+Essay v69 score answer edit pen wrapper capture
