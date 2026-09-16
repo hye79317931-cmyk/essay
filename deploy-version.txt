@@ -1,1 +1,1 @@
-Essay v70 safe union recovery
+Essay v71 tombstone delete + safe union recovery
