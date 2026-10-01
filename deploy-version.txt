@@ -1,1 +1,1 @@
-Essay v70 solve reliability: localStorage quota guard + emergency open
+Essay v72 solve-open storage guard (based on e71)
