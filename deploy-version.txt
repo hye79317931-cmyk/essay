@@ -1,1 +1,1 @@
-Essay v71 tombstone delete + safe union recovery
+Essay v70 solve reliability: localStorage quota guard + emergency open
