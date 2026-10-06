@@ -1,12 +1,12 @@
 'use strict';
 
-const CACHE_NAME = 'essay-pwa-v74';
+const CACHE_NAME = 'essay-pwa-v75';
 const APP_SHELL = [
   './',
   './index.html',
-  './styles.css?v=74',
-  './app.js?v=74',
-  './manifest.webmanifest?v=74',
+  './styles.css?v=75',
+  './app.js?v=75',
+  './manifest.webmanifest?v=75',
   './icon-192.png',
   './icon-512.png'
 ];
@@ -19,7 +19,7 @@ self.addEventListener('install', event => {
 self.addEventListener('activate', event => {
   event.waitUntil((async()=>{
     const keys=await caches.keys();
-    await Promise.all(keys.filter(key=>key.startsWith('essay-pwa-')&&key!==CACHE_NAME).map(key=>caches.delete(key)));
+    await Promise.all(keys.filter(k=>k.startsWith('essay-pwa-')&&k!==CACHE_NAME).map(k=>caches.delete(k)));
     await self.clients.claim();
   })());
 });
@@ -28,10 +28,8 @@ self.addEventListener('fetch', event => {
   if(event.request.method!=='GET') return;
   const url=new URL(event.request.url);
   if(url.origin!==self.location.origin) return;
-
-  const isNavigation=event.request.mode==='navigate';
-  const isAppCode=/\.(?:js|css|webmanifest)$/.test(url.pathname);
-  if(isNavigation||isAppCode){
+  const code=event.request.mode==='navigate' || /\.(?:js|css|webmanifest)$/.test(url.pathname);
+  if(code){
     event.respondWith((async()=>{
       try{
         const fresh=await fetch(event.request,{cache:'no-store'});
@@ -44,7 +42,6 @@ self.addEventListener('fetch', event => {
     })());
     return;
   }
-
   event.respondWith((async()=>{
     const cached=await caches.match(event.request);
     if(cached)return cached;
@@ -53,8 +50,6 @@ self.addEventListener('fetch', event => {
       const cache=await caches.open(CACHE_NAME);
       cache.put(event.request,fresh.clone()).catch(()=>{});
       return fresh;
-    }catch{
-      return Response.error();
-    }
+    }catch{return Response.error();}
   })());
 });

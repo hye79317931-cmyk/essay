@@ -1,1 +1,1 @@
-Essay v74 install + speed fix (based on user-provided e72)
+Essay v75 install + safe speed + e72 handwriting restored
