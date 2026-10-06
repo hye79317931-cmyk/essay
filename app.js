@@ -1,6 +1,6 @@
-const APP_VERSION="essay-psat-base-v75";const DB_NAME="essayPsatBaseDB_v1";const DB_VERSION=1;const STORE_PROBLEMS="problems";const STORE_ATTEMPTS="attempts";const $=id=>document.getElementById(id);const $$=sel=>Array.from(document.querySelectorAll(sel));let db;const state={problems:[],attempts:[],questionPages:[],explanationPages:[],selectedQuestionPage:-1,selectedExplanationPage:-1,activePasteTarget:"question",solve:null,timer:null,qPage:0,expPage:0,zoom:1,installPrompt:null};
+const APP_VERSION="essay-psat-base-v77";const DB_NAME="essayPsatBaseDB_v1";const DB_VERSION=1;const STORE_PROBLEMS="problems";const STORE_ATTEMPTS="attempts";const $=id=>document.getElementById(id);const $$=sel=>Array.from(document.querySelectorAll(sel));let db;const state={problems:[],attempts:[],questionPages:[],explanationPages:[],selectedQuestionPage:-1,selectedExplanationPage:-1,activePasteTarget:"question",solve:null,timer:null,qPage:0,expPage:0,zoom:1,installPrompt:null};
 
-/* === v75: 설치 이벤트를 DB 로딩 전에 확보. 필기 코드는 e72 그대로 유지 === */
+/* === v76: 설치 이벤트를 DB 로딩 전에 확보 === */
 window.addEventListener("beforeinstallprompt",event=>{
   event.preventDefault();
   state.installPrompt=event;
@@ -34,7 +34,7 @@ function uuid(){return crypto.randomUUID&&crypto.randomUUID()||`id_${Date.now()}
   const btn=$("installBtn");
   if(!btn)return;
 
-  // v75: init 전에 이미 받은 installPrompt를 지우지 않는다.
+  // v76: init 전에 받은 설치 prompt를 지우지 않는다.
 
   window.addEventListener("beforeinstallprompt",event=>{
     event.preventDefault();
@@ -671,17 +671,16 @@ function setupEvents(){setupInstall();$$(".tab").forEach(b=>b.addEventListener("
   });
 })();
 
-/* === v75: PWA 설치 안정화 — 데이터/필기/입력 로직은 건드리지 않음 === */
+/* === v76: PWA 설치 안정화 — 데이터/필기 로직과 분리 === */
 async function resetEssayPwaOnceV49(){
-  // 과거 버전처럼 실행 때 서비스워커/캐시를 해제하지 않는다.
+  // 기존처럼 실행할 때 서비스워커/캐시를 강제로 해제하지 않는다.
   return;
 }
 
 async function registerEssayServiceWorkerV49(){
   if(!("serviceWorker" in navigator))return;
   try{
-    const reg=await navigator.serviceWorker.register("./sw.js?v=75",{scope:"./"});
-    // 앱 시작을 막지 않도록 업데이트 확인은 백그라운드 처리.
+    const reg=await navigator.serviceWorker.register("./sw.js?v=77",{scope:"./"});
     reg.update().catch(()=>{});
   }catch(err){
     console.warn("Service worker registration failed",err);
@@ -690,6 +689,7 @@ async function registerEssayServiceWorkerV49(){
 
 async function bootEssayV49(){
   await resetEssayPwaOnceV49();
+  // 서비스워커 ready를 기다리지 않고 로컬 DB/화면부터 연다.
   const swTask=registerEssayServiceWorkerV49();
   await init();
   Promise.resolve(swTask).catch(()=>{});
@@ -1346,7 +1346,6 @@ saveAttempt = async function() {
     attempt.answerInkStrokes = state.solve?.answerInkStrokes || [];
     attempt.answerInputMode = state.solve?.answerInputMode || "handwriting";
     await put(STORE_ATTEMPTS, attempt);
-    await loadData();
   }
   return attempt;
 };
@@ -2146,7 +2145,10 @@ saveAttempt = async function() {
   if (attempt && state.solve?.answerPages) {
     attempt.answerPages = state.solve.answerPages;
     await put(STORE_ATTEMPTS, attempt);
-    await loadData();
+    const iV77=(state.attempts||[]).findIndex(a=>String(a?.id??"")===String(attempt.id));
+    if(iV77>=0) state.attempts[iV77]={...attempt};
+    else state.attempts.unshift({...attempt});
+    state.attempts.sort((a,b)=>String(b.completedAt||"").localeCompare(String(a.completedAt||"")));
   }
   return attempt;
 };
@@ -7377,7 +7379,7 @@ setTimeout(() => {
 
     clearInterval(localTimer);
     localTimer = setInterval(() => {
-      if (!fbUser || applyingRemote || pushing) return;
+      if (!fbUser || applyingRemote || pushing || state.currentStroke || state.answerInkCurrentStroke) return;
 
       const signature = localSignatureV36();
       if (signature === lastLocalSignature) return;
@@ -7394,7 +7396,7 @@ setTimeout(() => {
             true
           );
         });
-    }, 2600);
+    }, 9000);
   }
 
   function startV36() {
@@ -7435,11 +7437,10 @@ setTimeout(() => {
     if (fbUser) schedulePushV36();
   });
 
-  // v75: 첫 화면/필기 준비가 끝난 뒤 동기화를 시작해서 초기 버벅임을 줄인다.
   if("requestIdleCallback" in window){
-    requestIdleCallback(()=>startV36(),{timeout:3500});
+    requestIdleCallback(()=>startV36(),{timeout:4500});
   }else{
-    setTimeout(startV36,3000);
+    setTimeout(startV36,2500);
   }
 })();
 
@@ -8122,22 +8123,196 @@ startSolve = function(ids, mode) {
 };
 
 
-/* === v75: 안전한 목록 속도 개선 — 필기/캔버스/저장 함수는 변경하지 않음 === */
-(function essayListSpeedV75(){
-  let ref=null;
-  let index=new Map();
-  function rebuild(){
-    ref=state.attempts;
-    index=new Map();
+/* === v76: 설치앱 S펜 입력 최종 브리지 ===
+   - 손가락(pointerType=touch)은 절대 필기하지 않음
+   - S펜 pen 이벤트를 document capture에서 직접 받아 canvas 겹침/포인터 레이어 영향 제거
+   - 일부 Android WebAPK에서 장치종류를 불명확하게 주는 경우 pressure가 있는 mouse/unknown도 펜으로 허용
+   - 문제 필기 + 제출 전 답안 필기만 담당. 채점 수정펜/해설펜은 기존 v47/v69 컨트롤러 유지.
+*/
+(function essaySolvePenBridgeV76(){
+  if(window.__essaySolvePenBridgeV76)return;
+  window.__essaySolvePenBridgeV76=true;
+
+  let active=null;
+  const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+  const byId=id=>document.getElementById(id);
+
+  function visible(el){
+    if(!el)return false;
+    const r=el.getBoundingClientRect();
+    const st=getComputedStyle(el);
+    return r.width>1&&r.height>1&&st.display!=="none"&&st.visibility!=="hidden";
+  }
+  function inside(e,el){
+    if(!visible(el))return false;
+    const r=el.getBoundingClientRect();
+    return e.clientX>=r.left&&e.clientX<=r.right&&e.clientY>=r.top&&e.clientY<=r.bottom;
+  }
+  function isPenLike(e){
+    if(!e||e.pointerType==="touch")return false;
+    if(e.pointerType==="pen")return true;
+    // WebAPK/기기에서 stylus가 mouse 또는 빈 값으로 보고되는 경우의 안전 fallback.
+    return (e.pointerType==="mouse"||e.pointerType==="") && Number(e.pressure||0)>0 && (e.buttons===1||e.type==="pointerup"||e.type==="pointercancel");
+  }
+  function point(e,canvas){
+    const r=canvas.getBoundingClientRect();
+    return {x:clamp((e.clientX-r.left)/Math.max(1,r.width),0,1),y:clamp((e.clientY-r.top)/Math.max(1,r.height),0,1)};
+  }
+  function solveVisible(){
+    const solve=byId("solveOverlay");
+    const score=byId("scoreOverlay");
+    return !!(solve&&!solve.classList.contains("hidden")&&(!score||score.classList.contains("hidden"))&&state.solve);
+  }
+  function draw(kind){
+    if(kind==="answer"){
+      try{if(typeof drawAnswerInkV10==="function")drawAnswerInkV10();else if(typeof drawAnswerInkV9==="function")drawAnswerInkV9();}catch{}
+    }else{
+      try{if(typeof drawProblemInkV13==="function")drawProblemInkV13();else if(typeof drawInkV10==="function")drawInkV10();else if(typeof drawInkV9==="function")drawInkV9();}catch{}
+    }
+  }
+  function save(kind){
+    if(kind==="answer"){
+      state.answerInkCurrentStroke=null;
+      try{if(typeof saveCurrentAnswerPageV10==="function")saveCurrentAnswerPageV10();else if(typeof saveAnswerDraftInk==="function")saveAnswerDraftInk();}catch{}
+    }else{
+      state.currentStroke=null;
+      try{if(typeof saveProblemInkV13==="function")saveProblemInkV13();else localStorage.setItem("essayPsatBaseInk_v2",JSON.stringify(state.inkData||{}));}catch{}
+    }
+  }
+
+  document.addEventListener("pointerdown",e=>{
+    if(!solveVisible()||!isPenLike(e))return;
+    const answer=byId("answerInkCanvas");
+    const problem=byId("inkCanvas");
+    let kind=null,canvas=null;
+    if(state.answerInputMode!=="keyboard"&&inside(e,answer)){kind="answer";canvas=answer;}
+    else if(inside(e,problem)){kind="problem";canvas=problem;}
+    else return;
+
+    e.preventDefault();e.stopPropagation();e.stopImmediatePropagation?.();
+    if(kind==="answer"){
+      const tool=state.answerInkTool==="eraser"?"eraser":"pen";
+      const stroke={tool,size:Number(state.answerInkSize||3)*(tool==="eraser"?5:1),points:[point(e,canvas)]};
+      if(!Array.isArray(state.answerInkStrokes))state.answerInkStrokes=[];
+      state.answerInkStrokes.push(stroke);
+      state.answerInkCurrentStroke=stroke;
+      active={id:e.pointerId,kind,canvas,stroke};
+    }else{
+      let key="";
+      try{key=typeof currentProblemInkKeyV13==="function"?currentProblemInkKeyV13():"";}catch{}
+      if(!key){try{key=typeof inkKey==="function"?inkKey():"";}catch{}}
+      if(!key)return;
+      const tool=state.inkTool==="eraser"?"eraser":"pen";
+      const stroke={tool,size:Number(state.inkSize||3)*(tool==="eraser"?5:1),points:[point(e,canvas)]};
+      if(!state.inkData||typeof state.inkData!=="object")state.inkData={};
+      if(!Array.isArray(state.inkData[key]))state.inkData[key]=[];
+      state.inkData[key].push(stroke);
+      state.currentStroke=stroke;
+      active={id:e.pointerId,kind,canvas,stroke};
+    }
+    draw(kind);
+  },true);
+
+  document.addEventListener("pointermove",e=>{
+    if(!active||e.pointerId!==active.id||!isPenLike(e))return;
+    e.preventDefault();e.stopPropagation();e.stopImmediatePropagation?.();
+    let events=[e];
+    try{const c=e.getCoalescedEvents?.();if(c?.length)events=c;}catch{}
+    for(const item of events)active.stroke.points.push(point(item,active.canvas));
+    draw(active.kind);
+  },true);
+
+  function end(e){
+    if(!active||e.pointerId!==active.id)return;
+    if(e.pointerType==="touch")return;
+    e.preventDefault();e.stopPropagation();e.stopImmediatePropagation?.();
+    const kind=active.kind;
+    active=null;
+    save(kind);draw(kind);
+  }
+  document.addEventListener("pointerup",end,true);
+  document.addEventListener("pointercancel",end,true);
+
+  window.essaySolvePenBridgeV76={isPenLike};
+})();
+
+
+/* === v77: 필기 보존형 성능 패치 ===
+   원칙: v76 S펜 브리지는 수정하지 않는다.
+   1) 캔버스 전체 재그리기는 pointer 이벤트마다가 아니라 화면 프레임당 1회만 수행
+   2) 풀이기록 검색은 인덱스 사용
+   3) 숨겨진 탭까지 매번 렌더하지 않음
+   데이터 구조/필기 저장형식/Firebase 경로는 변경하지 않음.
+*/
+(function essaySafePerformanceV77(){
+  if(window.__essaySafePerformanceV77)return;
+  window.__essaySafePerformanceV77=true;
+
+  // A. 필기점은 전부 저장하고, 화면 redraw만 requestAnimationFrame으로 묶는다.
+  function rafWrapV77(name){
+    const original=window[name];
+    if(typeof original!=="function"||original.__v77RafWrapped)return;
+    let raf=0, pending=false;
+    const wrapped=function(){
+      pending=true;
+      if(raf)return;
+      raf=requestAnimationFrame(()=>{
+        raf=0;
+        if(!pending)return;
+        pending=false;
+        try{original();}catch(err){console.warn("v77 draw",name,err);}
+      });
+    };
+    wrapped.__v77RafWrapped=true;
+    wrapped.__v77Original=original;
+    window[name]=wrapped;
+  }
+  rafWrapV77("drawInkV10");
+  rafWrapV77("drawAnswerInkV10");
+
+  // B. attemptsOf/lastAttempt의 반복 filter+sort 제거. 배열이 바뀌면 자동 재구축.
+  let attemptsRefV77=null, attemptsLenV77=-1, attemptIndexV77=new Map();
+  function rebuildAttemptIndexV77(){
+    attemptsRefV77=state.attempts;
+    attemptsLenV77=(state.attempts||[]).length;
+    attemptIndexV77=new Map();
     for(const row of state.attempts||[]){
       const key=String(row?.problemId??"");
       if(!key)continue;
-      let arr=index.get(key);
-      if(!arr){arr=[];index.set(key,arr);}
+      let arr=attemptIndexV77.get(key);
+      if(!arr){arr=[];attemptIndexV77.set(key,arr);}
       arr.push(row);
     }
+    for(const arr of attemptIndexV77.values()){
+      arr.sort((a,b)=>String(b.completedAt||"").localeCompare(String(a.completedAt||"")));
+    }
   }
-  function ensure(){if(ref!==state.attempts)rebuild();}
-  attemptsOf=function(id){ensure();return index.get(String(id))||[];};
-  lastAttempt=function(id){const arr=attemptsOf(id);return arr[0];};
+  function ensureAttemptIndexV77(){
+    if(attemptsRefV77!==state.attempts||attemptsLenV77!==(state.attempts||[]).length)rebuildAttemptIndexV77();
+  }
+  attemptsOf=function(id){
+    ensureAttemptIndexV77();
+    return attemptIndexV77.get(String(id))||[];
+  };
+  lastAttempt=function(id){
+    const arr=attemptsOf(id);
+    return arr[0];
+  };
+
+  // C. 현재 보이는 탭만 렌더. 풀이/필기 overlay 자체는 건드리지 않는다.
+  renderAll=function(){
+    try{renderContinue();}catch{}
+    const active=document.querySelector(".view.active")?.id||"solveView";
+    if(active==="solveView"){
+      try{renderSolveList();}catch(err){console.warn("v77 solve render",err);}
+    }else if(active==="listView"){
+      try{renderList();}catch(err){console.warn("v77 list render",err);}
+    }else if(active==="reviewView"){
+      try{renderReview();}catch(err){console.warn("v77 review render",err);}
+    }else if(active==="backupView"){
+      try{renderStats();}catch(err){console.warn("v77 stats render",err);}
+    }else if(active==="addView"){
+      try{renderPageLists();}catch(err){console.warn("v77 page render",err);}
+    }
+  };
 })();

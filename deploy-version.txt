@@ -1,1 +1,1 @@
-Essay v75 install + safe speed + e72 handwriting restored
+Essay v77 handwriting-preserving performance fix (based on e76; e72 data schema)
