@@ -1639,3 +1639,10 @@
   pointer-events:none!important;
   z-index:90!important;
 }
+
+/* v74: long lists - defer off-screen layout/paint in Chromium */
+.problem-card,
+.page-item {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 180px;
+}

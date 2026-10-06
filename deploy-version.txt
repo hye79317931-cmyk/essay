@@ -1,1 +1,1 @@
-Essay v72 solve-open storage guard (based on e71)
+Essay v74 install + speed fix (based on user-provided e72)
