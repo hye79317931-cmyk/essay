@@ -1,1 +1,1 @@
-Essay v73 PWA install fix - stable e71 base; data stores unchanged
+73

@@ -1,6446 +1,5737 @@
-const APP_VERSION="essay-psat-base-v73";const DB_NAME="essayPsatBaseDB_v1";const DB_VERSION=1;const STORE_PROBLEMS="problems";const STORE_ATTEMPTS="attempts";const $=id=>document.getElementById(id);const $$=sel=>Array.from(document.querySelectorAll(sel));let db;const state={problems:[],attempts:[],questionPages:[],explanationPages:[],selectedQuestionPage:-1,selectedExplanationPage:-1,activePasteTarget:"question",solve:null,timer:null,qPage:0,expPage:0,zoom:1,installPrompt:null};
-function uuid(){return crypto.randomUUID&&crypto.randomUUID()||`id_${Date.now()}_${Math.random().toString(16).slice(2)}`}function nowIso(){return new Date().toISOString()}function toast(msg){const t=$("toast");t.textContent=msg;t.classList.remove("hidden");clearTimeout(toast._t);toast._t=setTimeout(()=>t.classList.add("hidden"),2300)}function esc(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]))}function fmtTime(ms){ms=Math.max(0,Math.floor(ms||0));const sec=Math.floor(ms/1000),h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s=sec%60;return h?`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`:`${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`}function pointsFromText(text){return String(text||"").split(/\n+/).map(x=>x.trim()).filter(Boolean)}function openDB(){return new Promise((resolve,reject)=>{const req=indexedDB.open(DB_NAME,DB_VERSION);req.onupgradeneeded=()=>{const d=req.result;if(!d.objectStoreNames.contains(STORE_PROBLEMS))d.createObjectStore(STORE_PROBLEMS,{keyPath:"id"});if(!d.objectStoreNames.contains(STORE_ATTEMPTS))d.createObjectStore(STORE_ATTEMPTS,{keyPath:"id"})};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error)})}function store(name,mode="readonly"){return db.transaction(name,mode).objectStore(name)}function getAll(name){return new Promise((resolve,reject)=>{const req=store(name).getAll();req.onsuccess=()=>resolve(req.result||[]);req.onerror=()=>reject(req.error)})}function put(name,value){return new Promise((resolve,reject)=>{const req=store(name,"readwrite").put(value);req.onsuccess=()=>resolve(value);req.onerror=()=>reject(req.error)})}function del(name,key){return new Promise((resolve,reject)=>{const req=store(name,"readwrite").delete(key);req.onsuccess=()=>resolve();req.onerror=()=>reject(req.error)})}function clearStore(name){return new Promise((resolve,reject)=>{const req=store(name,"readwrite").clear();req.onsuccess=()=>resolve();req.onerror=()=>reject(req.error)})}async function loadData(){state.problems=(await getAll(STORE_PROBLEMS)).sort((a,b)=>(a.order||0)-(b.order||0));state.attempts=(await getAll(STORE_ATTEMPTS)).sort((a,b)=>String(b.completedAt).localeCompare(String(a.completedAt)))}function setPasteTarget(target){state.activePasteTarget=target;$("questionPasteZone")?.classList.toggle("active-paste",target==="question");$("explanationPasteZone")?.classList.toggle("active-paste",target==="explanation")}function dataUrlBytes(dataUrl){const comma=dataUrl.indexOf(",");const base64=comma>=0?dataUrl.slice(comma+1):dataUrl;return Math.round(base64.length*.75)}function formatBytes(bytes){if(!bytes)return"0B";const u=["B","KB","MB"];let v=bytes,i=0;while(v>=1024&&i<u.length-1){v/=1024;i++}return`${v.toFixed(i?1:0)}${u[i]}`}function imageBlobToDataUrl(blob){return new Promise((resolve,reject)=>{const mode=$("qualityInput").value||"sharp";if(mode==="original"){const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=()=>reject(r.error);r.readAsDataURL(blob);return}const reader=new FileReader();reader.onload=()=>{const img=new Image();img.onload=()=>{const maxDim=mode==="bulk"?1500:2400,scale=Math.min(1,maxDim/Math.max(img.width,img.height)),w=Math.max(1,Math.round(img.width*scale)),h=Math.max(1,Math.round(img.height*scale)),canvas=document.createElement("canvas");canvas.width=w;canvas.height=h;const ctx=canvas.getContext("2d");ctx.fillStyle="white";ctx.fillRect(0,0,w,h);ctx.drawImage(img,0,0,w,h);resolve(canvas.toDataURL("image/jpeg",mode==="bulk"?.72:.88))};img.onerror=reject;img.src=reader.result};reader.onerror=()=>reject(reader.error);reader.readAsDataURL(blob)})}async function addImageFiles(files,target){const arr=Array.from(files||[]).filter(file=>file&&file.type&&file.type.startsWith("image/"));if(!arr.length){toast("이미지 파일이 없어");return}let added=0,size=0;for(const file of arr){const data=await imageBlobToDataUrl(file);if(target==="explanation")state.explanationPages.push(data);else state.questionPages.push(data);size+=dataUrlBytes(data);added++}renderPageLists();setPasteTarget(target);toast(`${target==="explanation"?"해설":"문제"} 이미지 ${added}장 추가 · ${formatBytes(size)}`)}async function pasteImageFromClipboardEvent(event,explicitTarget=""){const items=event.clipboardData?.items?Array.from(event.clipboardData.items):[];const files=items.filter(entry=>entry.type&&entry.type.startsWith("image/")).map(entry=>entry.getAsFile()).filter(Boolean);if(!files.length)return false;event.preventDefault();const target=explicitTarget||event.target.closest?.("[data-paste-target]")?.dataset?.pasteTarget||state.activePasteTarget||"question";toast("스크린샷 처리 중...");await addImageFiles(files,target);return true}async function pasteImageWithClipboardApi(target){setPasteTarget(target);if(!navigator.clipboard||!navigator.clipboard.read){toast("이 브라우저는 버튼 붙여넣기를 지원하지 않아. 영역 클릭 후 Ctrl+V를 눌러줘.");return}try{const items=await navigator.clipboard.read();const files=[];for(const item of items){const type=item.types.find(t=>t.startsWith("image/"));if(!type)continue;const blob=await item.getType(type);files.push(new File([blob],`${target}_${Date.now()}_${files.length}.png`,{type}))}if(!files.length){toast("클립보드에 이미지가 없어");return}toast("스크린샷 처리 중...");await addImageFiles(files,target)}catch(err){console.warn(err);toast("붙여넣기 권한이 막혔어. 영역 클릭 후 Ctrl+V를 눌러줘.")}}function setupPasteZone(zoneId,inputId,target){const zone=$(zoneId),input=$(inputId);zone.addEventListener("click",()=>{setPasteTarget(target);zone.focus()});zone.addEventListener("focus",()=>setPasteTarget(target));zone.addEventListener("paste",event=>pasteImageFromClipboardEvent(event,target));input.addEventListener("change",async()=>{await addImageFiles(input.files,target);input.value=""})}function makeButton(text,fn,cls=""){const b=document.createElement("button");b.type="button";b.textContent=text;if(cls)b.className=cls;b.addEventListener("click",fn);return b}function movePage(target,index,dir){const arr=target==="explanation"?state.explanationPages:state.questionPages,next=index+dir;if(next<0||next>=arr.length)return;[arr[index],arr[next]]=[arr[next],arr[index]];renderPageLists()}function deletePage(target,index){const arr=target==="explanation"?state.explanationPages:state.questionPages;arr.splice(index,1);renderPageLists()}function renderPageList(id,arr,target){const box=$(id);box.innerHTML="";if(!arr.length){box.innerHTML='<p class="hint">아직 이미지가 없어.</p>';return}arr.forEach((src,index)=>{const div=document.createElement("div");div.className="page-item";div.innerHTML=`<img src="${src}" alt="${index+1}쪽" /><div><strong>${index+1}쪽</strong><p class="hint">${target==="explanation"?"해설":"문제"} 페이지</p><div class="page-actions"></div></div>`;const actions=div.querySelector(".page-actions");actions.append(makeButton("위",()=>movePage(target,index,-1),"secondary small"));actions.append(makeButton("아래",()=>movePage(target,index,1),"secondary small"));actions.append(makeButton("삭제",()=>deletePage(target,index),"danger small"));box.append(div)})}function renderPageLists(){renderPageList("questionPageList",state.questionPages,"question");renderPageList("explanationPageList",state.explanationPages,"explanation")}function titleOf(p){return p.title||`${p.session?p.session+" ":""}${p.subject||""} 문제`}function attemptsOf(id){return state.attempts.filter(a=>a.problemId===id)}function lastAttempt(id){return attemptsOf(id).sort((a,b)=>String(b.completedAt).localeCompare(String(a.completedAt)))[0]}function metaOf(p){const last=lastAttempt(p.id);return`${p.subject||"-"} · ${p.session||"회차 없음"} · 문제 ${realPages(p.questionPages||[]).length}쪽 · 해설 ${realPages(p.explanationPages||[]).length}쪽 · ${p.maxScore||0}점 · 제한 ${p.timeLimit||0}분 · 기록 ${attemptsOf(p.id).length}회${last?" · 최근 "+fmtTime(last.elapsedMs):""}`}function filterProblems({subject="",session="",search=""}={}){const s=session.trim().toLowerCase(),q=search.trim().toLowerCase();return state.problems.filter(p=>{if(subject&&p.subject!==subject)return false;if(s&&!String(p.session||"").toLowerCase().includes(s))return false;if(q){const blob=[p.title,p.session,p.subject,p.pointsText,p.modelText].join(" ").toLowerCase();if(!blob.includes(q))return false}return true})}function showView(id){$$(".tab").forEach(b=>b.classList.toggle("active",b.dataset.view===id));$$(".view").forEach(v=>v.classList.toggle("active",v.id===id));renderAll()}function problemCard(p,opts={}){const last=lastAttempt(p.id),div=document.createElement("div");div.className="problem-card";div.innerHTML=`<h3>${esc(titleOf(p))}</h3><p class="meta">${esc(metaOf(p))}</p><div class="badges"><span class="badge">${esc(p.subject||"-")}</span><span class="badge">${esc(p.session||"회차 없음")}</span><span class="badge">문제 ${realPages(p.questionPages||[]).length}쪽</span><span class="badge">해설 ${realPages(p.explanationPages||[]).length}쪽</span>${last?`<span class="badge">최근점수 ${last.score??"-"}</span>`:""}</div><div class="card-actions"></div>`;const actions=div.querySelector(".card-actions");if(opts.solve)actions.append(makeButton("풀기",()=>startSolve([p.id],$("solveMode").value||"outline")));if(opts.review)actions.append(makeButton("다시 풀기",()=>startSolve([p.id],"outline")));if(opts.list){actions.append(makeButton("수정",()=>fillForm(p),"secondary"));actions.append(makeButton("복제",async()=>{const copy={...p,id:uuid(),title:`${titleOf(p)} 복사본`,createdAt:nowIso(),updatedAt:nowIso(),order:Date.now()};await put(STORE_PROBLEMS,copy);await loadData();renderAll();toast("복제 완료")},"secondary"));actions.append(makeButton("삭제",async()=>{if(!confirm("이 문제와 풀이기록을 삭제할까?"))return;await del(STORE_PROBLEMS,p.id);for(const a of attemptsOf(p.id))await del(STORE_ATTEMPTS,a.id);await loadData();renderAll();toast("삭제 완료")},"danger small"))}return div}function renderSolveList(){const list=$("solveList"),arr=filterProblems({subject:$("solveSubject").value,session:$("solveSession").value});list.innerHTML="";if(!arr.length){list.innerHTML='<p class="hint">조건에 맞는 문제가 없어.</p>';return}arr.forEach(p=>list.append(problemCard(p,{solve:true})))}function renderList(){const list=$("problemList"),arr=filterProblems({subject:$("listSubject").value,session:$("listSession").value,search:$("listSearch").value});list.innerHTML="";if(!arr.length){list.innerHTML='<p class="hint">등록된 문제가 없어.</p>';return}arr.forEach((p,i)=>{const card=problemCard(p,{list:true});card.querySelector("h3").textContent=`${i+1}. ${titleOf(p)}`;list.append(card)})}function renderReview(){const list=$("reviewList");let arr=filterProblems({subject:$("reviewSubject").value,session:$("reviewSession").value});if($("reviewType").value==="needed")arr=arr.filter(p=>String(lastAttempt(p.id)?.needReview)==="true");else arr=arr.filter(p=>attemptsOf(p.id).length);list.innerHTML="";if(!arr.length){list.innerHTML='<p class="hint">복습 대상이 없어.</p>';return}arr.forEach(p=>list.append(problemCard(p,{review:true})))}function renderStats(){const done=new Set(state.attempts.map(a=>a.problemId)).size,review=state.problems.filter(p=>String(lastAttempt(p.id)?.needReview)==="true").length;$("statsGrid").innerHTML=`<div class="stat-card">등록 문제<strong>${state.problems.length}</strong></div><div class="stat-card">풀이 완료<strong>${done}</strong></div><div class="stat-card">풀이 기록<strong>${state.attempts.length}</strong></div><div class="stat-card">복습 필요<strong>${review}</strong></div>`}function renderContinue(){$("continueBtn").classList.toggle("hidden",!localStorage.getItem("essayPsatBaseDraft"))}function renderAll(){renderSolveList();renderList();renderReview();renderStats();renderContinue();renderPageLists()}async function saveProblem(event){event.preventDefault();const id=$("editId").value||uuid(),existing=state.problems.find(p=>p.id===id);if(!realPages(state.questionPages).length){toast("문제 이미지를 최소 1쪽 넣어줘");return}const problem={id,subject:$("subjectInput").value,session:$("sessionInput").value.trim(),title:$("titleInput").value.trim(),maxScore:Number($("scoreInput").value||0),timeLimit:Number($("timeInput").value||0),questionPages:realPages(state.questionPages),explanationPages:realPages(state.explanationPages),pointsText:$("pointsInput").value.trim(),points:pointsFromText($("pointsInput").value),modelText:$("modelTextInput").value.trim(),order:existing?.order??Date.now(),createdAt:existing?.createdAt||nowIso(),updatedAt:nowIso()};await put(STORE_PROBLEMS,problem);await loadData();toast($("editId").value?"수정 저장 완료":"저장 완료");resetForm();renderAll()}function fillForm(p){$("formTitle").textContent="문제 수정";$("editId").value=p.id;$("subjectInput").value=p.subject||"형법";$("sessionInput").value=p.session||"";$("titleInput").value=p.title||"";$("scoreInput").value=p.maxScore||20;$("timeInput").value=p.timeLimit||30;$("pointsInput").value=p.pointsText||(p.points||[]).join("\n");$("modelTextInput").value=p.modelText||"";state.questionPages=[...(p.questionPages||[])];state.explanationPages=[...(p.explanationPages||[])];renderPageLists();showView("addView");window.scrollTo(0,0)}function resetForm(){$("formTitle").textContent="문제 등록";$("problemForm").reset();$("editId").value="";$("scoreInput").value=20;$("timeInput").value=30;$("qualityInput").value="sharp";state.questionPages=[];state.explanationPages=[];setPasteTarget("question");renderPageLists()}function chooseRandom(arr,n){return[...arr].sort(()=>Math.random()-.5).slice(0,Math.min(n,arr.length))}function startRandom(reviewOnly=false){let arr=filterProblems({subject:$("solveSubject").value,session:$("solveSession").value});if(reviewOnly)arr=arr.filter(p=>String(lastAttempt(p.id)?.needReview)==="true");if(!arr.length){toast(reviewOnly?"복습필요 문제가 없어":"조건에 맞는 문제가 없어");return}const picks=chooseRandom(arr,Number($("randomCount").value||1));startSolve(picks.map(p=>p.id),$("solveMode").value||"outline")}function currentProblem(){return state.problems.find(p=>p.id===state.solve?.ids[state.solve.index])}function startSolve(ids,mode){state.solve={ids,index:0,mode,startedAt:Date.now(),startedProblemAt:Date.now(),elapsedBase:0,answer:""};state.qPage=0;localStorage.setItem("essayPsatBaseDraft",JSON.stringify(state.solve));openCurrentProblem()}function openCurrentProblem(){const p=currentProblem();if(!p){finishSolve(false);return}state.qPage=0;$("solveOverlay").classList.remove("hidden");$("solveTitle").textContent=titleOf(p);$("solveMeta").textContent=metaOf(p);$("setBadge").textContent=`${state.solve.index+1}/${state.solve.ids.length} · ${state.solve.mode==="outline"?"목차연습":"실전답안"}`;$("answerLabel").textContent=state.solve.mode==="outline"?"내 목차/쟁점":"내 답안";$("answerText").value=state.solve.answer||"";showQuestionPage(0);clearInterval(state.timer);state.timer=setInterval(updateTimer,500);updateTimer()}function showQuestionPage(index){const p=currentProblem(),pages=realPages(p?.questionPages||[]);state.qPage=Math.max(0,Math.min(index,pages.length-1));$("questionImageView").src=pages[state.qPage]||"";$("questionPageBadge").textContent=pages.length?`문제 ${state.qPage+1}/${pages.length}쪽`:"문제 없음";fitImage();saveDraft()}function elapsedNow(){return state.solve?(state.solve.elapsedBase||0)+Date.now()-state.solve.startedProblemAt:0}function updateTimer(){const p=currentProblem(),elapsed=elapsedNow();$("timerText").textContent=fmtTime(elapsed);const limit=Number(p?.timeLimit||0)*6e4;$("limitText").textContent=limit?elapsed<=limit?`남은 ${fmtTime(limit-elapsed)}`:`초과 ${fmtTime(elapsed-limit)}`:""}function saveDraft(){if(!state.solve)return;state.solve.answer=$("answerText")?.value??state.solve.answer;localStorage.setItem("essayPsatBaseDraft",JSON.stringify(state.solve));renderContinue()}function pauseSolve(){if(!state.solve)return;state.solve.elapsedBase=elapsedNow();state.solve.answer=$("answerText").value;clearInterval(state.timer);state.timer=null;saveDraft();$("solveOverlay").classList.add("hidden");toast("이어풀기 저장 완료")}function continueSolve(){try{const saved=JSON.parse(localStorage.getItem("essayPsatBaseDraft")||"null");if(!saved||!saved.ids?.length){toast("이어풀 문제가 없어");return}state.solve=saved;state.solve.startedProblemAt=Date.now();openCurrentProblem()}catch{toast("이어풀 문제가 없어")}}function submitAnswer(){if(!state.solve)return;state.solve.elapsedBase=elapsedNow();state.solve.answer=$("answerText").value;clearInterval(state.timer);state.timer=null;openScore()}function openScore(){const p=currentProblem();if(!p)return;state.expPage=0;$("scoreOverlay").classList.remove("hidden");$("scoreMeta").textContent=`${titleOf(p)} · 풀이시간 ${fmtTime(state.solve.elapsedBase)}`;{const own=$("ownAnswerView");const txt=String(state.solve.answer||"");own.textContent=txt;own.classList.toggle("keyboard-answer-empty-v50",!txt.trim())};$("modelTextView").textContent=p.modelText||"";$("attemptScoreInput").value="";$("attemptScoreInput").max=p.maxScore||"";$("completionInput").value=state.solve.mode==="outline"?"목차만":"완성";$("needReviewInput").value="true";renderChecklist(p);showExplanationPage(0)}function showExplanationPage(index){const p=currentProblem(),pages=realPages(p?.explanationPages||[]);state.expPage=Math.max(0,Math.min(index,pages.length-1));if(pages.length){$("explanationImageView").src=pages[state.expPage];$("explanationImageView").classList.remove("hidden");$("explanationPageBadge").textContent=`해설 ${state.expPage+1}/${pages.length}쪽`}else{$("explanationImageView").classList.add("hidden");$("explanationPageBadge").textContent="해설 이미지 없음"}}function renderChecklist(p){const box=$("pointChecklist"),points=p.points?.length?p.points:pointsFromText(p.pointsText);box.innerHTML="";if(!points.length){box.innerHTML='<p class="hint">채점포인트 없음</p>';return}points.forEach((point,i)=>{const row=document.createElement("label");row.className="check-item";row.innerHTML=`<input type="checkbox" data-point="${i}" /> <span>${esc(point)}</span>`;box.append(row)})}async function saveAttempt(){const p=currentProblem();if(!p||!state.solve)return null;const attempt={id:uuid(),problemId:p.id,subject:p.subject,session:p.session,mode:state.solve.mode,answer:state.solve.answer||"",elapsedMs:state.solve.elapsedBase,score:$("attemptScoreInput").value===""?null:Number($("attemptScoreInput").value),maxScore:p.maxScore||0,difficulty:$("difficultyResultInput").value,needReview:$("needReviewInput").value,completion:$("completionInput").value,memo:$("memoInput").value.trim(),checkedPoints:$$("#pointChecklist input").map(x=>x.checked),completedAt:nowIso()};await put(STORE_ATTEMPTS,attempt);await loadData();toast("풀이 기록 저장 완료");return attempt}async function saveAndNext(){await saveAttempt();if(!state.solve)return;if(state.solve.index>=state.solve.ids.length-1){finishSolve(true);return}state.solve.index++;state.solve.answer="";state.solve.elapsedBase=0;state.solve.startedProblemAt=Date.now();$("scoreOverlay").classList.add("hidden");openCurrentProblem()}function finishSolve(clearDraft=true){clearInterval(state.timer);state.timer=null;state.solve=null;$("solveOverlay").classList.add("hidden");$("scoreOverlay").classList.add("hidden");if(clearDraft)localStorage.removeItem("essayPsatBaseDraft");renderAll()}function fitImage(){state.zoom=1;applyZoom();setTimeout(()=>{const img=$("questionImageView"),scroller=$("questionImageScroller");if(!img.naturalWidth||!scroller.clientWidth)return;state.zoom=Math.max(.2,Math.min(1,(scroller.clientWidth-20)/img.naturalWidth));applyZoom()},30)}function applyZoom(){$("questionImageView").style.width=`${Math.round(state.zoom*100)}%`}async function exportBackup(){const payload={app:APP_VERSION,exportedAt:nowIso(),problems:state.problems,attempts:state.attempts};const blob=new Blob([JSON.stringify(payload)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`essay_psat_base_backup_${new Date().toISOString().slice(0,10)}.json`;a.click();URL.revokeObjectURL(a.href)}async function importBackup(file){if(!file)return;const data=JSON.parse(await file.text());if(!Array.isArray(data.problems)){toast("백업 파일이 아니야");return}if(!confirm("백업 데이터를 현재 앱에 합쳐서 불러올까? 같은 ID는 덮어쓰기 돼."))return;for(const p of data.problems)await put(STORE_PROBLEMS,p);for(const a of data.attempts||[])await put(STORE_ATTEMPTS,a);await loadData();renderAll();toast("복원 완료")}async function wipeAll(){if(!confirm("모든 문제와 기록을 삭제할까? 백업 없으면 복구 불가."))return;await clearStore(STORE_PROBLEMS);await clearStore(STORE_ATTEMPTS);localStorage.removeItem("essayPsatBaseDraft");await loadData();resetForm();renderAll();toast("전체 삭제 완료")}function setupInstall(){
-  const btn=$("installBtn");
-  if(!btn)return;
+'use strict';
 
-  const isStandalone=()=>window.matchMedia?.("(display-mode: standalone)")?.matches===true || navigator.standalone===true;
-  state.installPrompt=null;
+const DB_NAME = 'psat-random-note-db';
+const DB_VERSION = 1;
+const STORES = { problems: 'problems', history: 'history' };
+const SLOW_MS = 180000;
+const WRONG_CLEAR_STREAK = 2;
+const SYNC_CONFIG_KEY = 'psat-sync-config';
+const SYNC_TOMBSTONES_KEY = 'psat-sync-tombstones';
+const SYNC_INTERVAL_MS = 5 * 60 * 1000;
+const SUBJECT_GROUPS = ['언어', '자료', '상황'];
+const PAUSED_SESSION_KEY = 'psat-paused-session-v25';
 
-  if(isStandalone())btn.classList.add("hidden");
+const $ = (id) => document.getElementById(id);
+const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 
-  window.addEventListener("beforeinstallprompt",event=>{
-    event.preventDefault();
-    state.installPrompt=event;
-    if(!isStandalone())btn.classList.remove("hidden");
-  });
+const els = {
+  tabs: $$('.tab'),
+  views: $$('.view'),
+  installBtn: $('installBtn'),
+  toast: $('toast'),
 
-  window.addEventListener("appinstalled",()=>{
-    state.installPrompt=null;
-    btn.classList.add("hidden");
-    toast("앱 설치 완료");
-  });
+  modeSelect: $('modeSelect'),
+  subjectFilter: $('subjectFilter'),
+  yearFilter: $('yearFilter'),
+  quickStartBtns: $$('.quick-start'),
+  sessionCount: $('sessionCount'),
+  sessionMinutes: $('sessionMinutes'),
+  startBtn: $('startBtn'),
+  continueBtn: $('continueBtn'),
+  emptySolve: $('emptySolve'),
+  solvePanel: $('solvePanel'),
+  sessionSummary: $('sessionSummary'),
+  problemTitle: $('problemTitle'),
+  problemMeta: $('problemMeta'),
+  questionTimer: $('questionTimer'),
+  sessionTimer: $('sessionTimer'),
+  leftQuestionTimer: $('leftQuestionTimer'),
+  leftSessionTimer: $('leftSessionTimer'),
+  imageScroller: $('imageScroller'),
+  imageWrap: $('imageWrap'),
+  problemImage: $('problemImage'),
+  inkCanvas: $('inkCanvas'),
+  penBtn: $('penBtn'),
+  eraserBtn: $('eraserBtn'),
+  penSize: $('penSize'),
+  penSizeLabel: $('penSizeLabel'),
+  eraserSize: $('eraserSize'),
+  eraserSizeLabel: $('eraserSizeLabel'),
+  clearInkBtn: $('clearInkBtn'),
+  exitSolveBtn: $('exitSolveBtn'),
+  zoomOutBtn: $('zoomOutBtn'),
+  zoomInBtn: $('zoomInBtn'),
+  fitZoomBtn: $('fitZoomBtn'),
+  zoomLabel: $('zoomLabel'),
+  choices: $$('.choice'),
+  checkBtn: $('checkBtn'),
+  showExpBtn: $('showExpBtn'),
+  flagBtn: $('flagBtn'),
+  nextBtn: $('nextBtn'),
+  resultBox: $('resultBox'),
+  explanationBox: $('explanationBox'),
 
-  btn.addEventListener("click",async()=>{
-    if(isStandalone()){
-      btn.classList.add("hidden");
-      toast("이미 앱으로 실행 중이야.");
-      return;
-    }
-    const promptEvent=state.installPrompt;
-    if(!promptEvent){
-      toast("설치 정보를 새로 읽는 중이야. Chrome 새로고침 후 다시 눌러줘.");
-      return;
-    }
-    state.installPrompt=null;
-    try{
-      await promptEvent.prompt();
-      const choice=await promptEvent.userChoice.catch(()=>null);
-      if(choice?.outcome==="accepted")btn.classList.add("hidden");
-      else btn.classList.add("hidden");
-    }catch(err){
-      console.warn("PWA install prompt failed",err);
-      btn.classList.add("hidden");
-      toast("설치창을 열지 못했어. 페이지를 새로고침한 뒤 다시 눌러줘.");
-    }
-  });
+  formTitle: $('formTitle'),
+  problemForm: $('problemForm'),
+  saveProblemBtn: $('saveProblemBtn'),
+  saveOnlyBtn: $('saveOnlyBtn'),
+  newProblemModeBtn: $('newProblemModeBtn'),
+  editingId: $('editingId'),
+  subjectInput: $('subjectInput'),
+  categoryInput: $('categoryInput'),
+  yearInput: $('yearInput'),
+  answerInput: $('answerInput'),
+  difficultyInput: $('difficultyInput'),
+  imageInput: $('imageInput'),
+  previewImage: $('previewImage'),
+  problemPasteZone: $('problemPasteZone'),
+  pasteProblemBtn: $('pasteProblemBtn'),
+  clearProblemImageBtn: $('clearProblemImageBtn'),
+  explanationImageInput: $('explanationImageInput'),
+  previewExplanationImage: $('previewExplanationImage'),
+  detectAnswerBtn: $('detectAnswerBtn'),
+  answerDetectStatus: $('answerDetectStatus'),
+  toggleExplanationTextBtn: $('toggleExplanationTextBtn'),
+  explanationTextWrap: $('explanationTextWrap'),
+  explanationPasteZone: $('explanationPasteZone'),
+  pasteExplanationBtn: $('pasteExplanationBtn'),
+  clearExplanationImageBtn: $('clearExplanationImageBtn'),
+  imageQualityInput: $('imageQualityInput'),
+  explanationInput: $('explanationInput'),
+  tagsInput: $('tagsInput'),
+  resetFormBtn: $('resetFormBtn'),
+
+  reviewWrongBtn: $('reviewWrongBtn'),
+  reviewWrongRandomBtn: $('reviewWrongRandomBtn'),
+  reviewCorrectBtn: $('reviewCorrectBtn'),
+  reviewSubjectFilter: $('reviewSubjectFilter'),
+  reviewYearFilter: $('reviewYearFilter'),
+  reviewYearTextFilter: $('reviewYearTextFilter'),
+  reviewListTitle: $('reviewListTitle'),
+  clearSolvedWrongBtn: $('clearSolvedWrongBtn'),
+  wrongList: $('wrongList'),
+  searchInput: $('searchInput'),
+  listSubjectFilter: $('listSubjectFilter'),
+  listYearFilter: $('listYearFilter'),
+  listYearTextFilter: $('listYearTextFilter'),
+  bulkYearSource: $('bulkYearSource'),
+  bulkYearTarget: $('bulkYearTarget'),
+  bulkYearApplyBtn: $('bulkYearApplyBtn'),
+  manualAnswerBtns: $$('.manual-answer'),
+  problemList: $('problemList'),
+  statsCards: $('statsCards'),
+  exportBtn: $('exportBtn'),
+  importInput: $('importInput'),
+  wipeBtn: $('wipeBtn'),
+
+  syncStatus: $('syncStatus'),
+  syncOwnerInput: $('syncOwnerInput'),
+  syncRepoInput: $('syncRepoInput'),
+  syncBranchInput: $('syncBranchInput'),
+  syncPathInput: $('syncPathInput'),
+  syncTokenInput: $('syncTokenInput'),
+  saveSyncBtn: $('saveSyncBtn'),
+  manualSyncBtn: $('manualSyncBtn'),
+  pullSyncBtn: $('pullSyncBtn'),
+  disableSyncBtn: $('disableSyncBtn')
+};
+
+const state = {
+  problems: [],
+  current: null,
+  selectedAnswer: null,
+  checked: false,
+  queue: [],
+  queueIndex: 0,
+  session: null,
+  lastSession: null,
+  reviewMode: 'wrong',
+  reviewBaseline: null,
+  autoNextTimer: null,
+  questionStart: 0,
+  timerId: null,
+  drawTool: 'pen',
+  drawing: false,
+  activeDrawPointerId: null,
+  currentStroke: null,
+  touchPointers: new Map(),
+  gesture: null,
+  zoom: 1,
+  db: null,
+  deferredInstallPrompt: null,
+  activePasteTarget: 'problem',
+  formProblemImageData: '',
+  formExplanationImageData: '',
+  formExplanationPagesV61: [],
+  formExplanationPageIndexV61: 0,
+  formExplanationOcrData: '',
+  formExplanationOcrCandidates: [],
+  formExplanationVisualAnswer: 0,
+  formExplanationVisualConfidence: 0,
+  lastOcrText: '',
+  autoFitOnImageLoad: false,
+  solveFullscreenActive: false,
+  saveBusy: false,
+  editQueueIds: [],
+  lastEditedId: '',
+  answerDetectRunning: false,
+  answerDetectTimer: null,
+  draggingProblemId: '',
+  pointerReorder: null,
+  dragAutoScrollRaf: 0,
+  syncConfig: null,
+  syncTimer: null,
+  syncDebounceTimer: null,
+  syncRunning: false,
+  syncApplying: false,
+  tombstones: {},
+  deviceId: localStorage.getItem('psat-device-id') || '',
+  problemMapV63: new Map(),
+  minOrderV63: null,
+  listLimitV63: 60,
+  reviewLimitV63: 60
+};
+
+if (!state.deviceId) {
+  state.deviceId = uidSafe();
+  localStorage.setItem('psat-device-id', state.deviceId);
 }
-function setupEvents(){$$(".tab").forEach(b=>b.addEventListener("click",()=>showView(b.dataset.view)));["solveSubject","solveSession","solveMode","randomCount","listSubject","listSession","listSearch","reviewSubject","reviewSession","reviewType"].forEach(id=>{$(id).addEventListener("input",renderAll);$(id).addEventListener("change",renderAll)});setupPasteZone("questionPasteZone","questionFileInput","question");setupPasteZone("explanationPasteZone","explanationFileInput","explanation");document.addEventListener("paste",event=>pasteImageFromClipboardEvent(event));$("pasteQuestionBtn").addEventListener("click",()=>pasteImageWithClipboardApi("question"));$("pasteExplanationBtn").addEventListener("click",()=>pasteImageWithClipboardApi("explanation"));$("addQuestionFileBtn").addEventListener("click",()=>addBlankPage("question"));$("addExplanationFileBtn").addEventListener("click",()=>addBlankPage("explanation"));$("clearQuestionBtn").addEventListener("click",()=>{state.questionPages=[];renderPageLists()});$("clearExplanationBtn").addEventListener("click",()=>{state.explanationPages=[];renderPageLists()});$("problemForm").addEventListener("submit",saveProblem);$("resetBtn").addEventListener("click",resetForm);$("randomStartBtn").addEventListener("click",()=>startRandom(false));$("reviewRandomStartBtn").addEventListener("click",()=>startRandom(true));$("continueBtn").addEventListener("click",continueSolve);$("answerText").addEventListener("input",saveDraft);$("exitSolveBtn").addEventListener("click",pauseSolve);$("submitAnswerBtn").addEventListener("click",submitAnswer);$("prevQuestionPageBtn").addEventListener("click",()=>showQuestionPage(state.qPage-1));$("nextQuestionPageBtn").addEventListener("click",()=>showQuestionPage(state.qPage+1));$("fitBtn").addEventListener("click",fitImage);$("zoomInBtn").addEventListener("click",()=>{state.zoom=Math.min(3,state.zoom+.15);applyZoom()});$("zoomOutBtn").addEventListener("click",()=>{state.zoom=Math.max(.2,state.zoom-.15);applyZoom()});$("questionImageView").addEventListener("load",fitImage);$("backToAnswerBtn").addEventListener("click",()=>{$("scoreOverlay").classList.add("hidden");if(state.solve){state.solve.startedProblemAt=Date.now();clearInterval(state.timer);state.timer=setInterval(updateTimer,500);$("solveOverlay").classList.remove("hidden")}});$("prevExplanationPageBtn").addEventListener("click",()=>showExplanationPage(state.expPage-1));$("nextExplanationPageBtn").addEventListener("click",()=>showExplanationPage(state.expPage+1));$("saveAttemptBtn").addEventListener("click",saveAttempt);$("saveAndNextBtn").addEventListener("click",saveAndNext);$("finishBtn").addEventListener("click",async()=>{await saveAttempt();finishSolve(true)});$("exportBtn").addEventListener("click",exportBackup);$("importInput").addEventListener("change",async()=>{try{await importBackup($("importInput").files[0])}catch(e){console.error(e);toast("복원 실패")}$("importInput").value=""});$("wipeBtn").addEventListener("click",wipeAll)}async function init(){db=await openDB();await loadData();await normalizeStoredProblems();setupEvents();resetForm();renderAll();}
 
-/* === v56: v51 화면 원형 유지 + 해설 전체지우개만 수정 === */
-(function essayExplanationClearAllV56(){
-  function currentKeyV56(){
-    try{ if(typeof scoreExpKeyV24==="function") return scoreExpKeyV24(); }catch{}
-    try{ if(typeof scoreKeyV11==="function") return scoreKeyV11("exp"); }catch{}
-    let p=null; try{p=typeof currentProblem==="function"?currentProblem():null}catch{}
-    return `${p?.id||"unknown"}:exp:${state.expPage||0}`;
-  }
+function uidSafe() {
+  if (globalThis.crypto && crypto.randomUUID) return crypto.randomUUID();
+  return `device-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
 
-  function saveV56(){
-    try{
-      localStorage.setItem("essayScoreExpEditsV11",JSON.stringify(state.scoreExpEdits||{}));
-    }catch{}
-  }
-
-  function clearCanvasV56(){
-    ["scoreExplanationInkV47","scoreExplanationInkV46","scoreExplanationInkV45",
-     "scoreExplanationInkV44","scoreExplanationCanvas","scoreModelTextCanvasV26"]
-      .forEach(id=>{
-        const c=document.getElementById(id);
-        if(!c||typeof c.getContext!=="function")return;
-        try{
-          const ctx=c.getContext("2d");
-          ctx.setTransform(1,0,0,1,0,0);
-          ctx.clearRect(0,0,c.width,c.height);
-        }catch{}
-      });
-  }
-
-  document.addEventListener("click",event=>{
-    const btn=event.target?.closest?.(
-      "#clearScoreExpInkBtn,#scoreExpClearBtn,[data-action='clear-score-exp'],[data-action='clear-explanation-ink']"
-    );
-    if(!btn)return;
-
-    event.preventDefault();
-    event.stopPropagation();
-    event.stopImmediatePropagation();
-
-    if(!confirm("현재 해설의 필기를 모두 지울까?"))return;
-
-    if(!state.scoreExpEdits||typeof state.scoreExpEdits!=="object")state.scoreExpEdits={};
-
-    const key=currentKeyV56();
-    delete state.scoreExpEdits[key];
-
-    let p=null; try{p=typeof currentProblem==="function"?currentProblem():null}catch{}
-    const pid=String(p?.id||"");
-    const page=String(state.expPage||0);
-
-    if(pid){
-      for(const k of Object.keys(state.scoreExpEdits)){
-        const s=String(k);
-        if(s.includes(pid)&&/exp/i.test(s)&&(s.endsWith(":"+page)||s.includes(`:${page}:`))){
-          delete state.scoreExpEdits[k];
-        }
-      }
-    }
-
-    saveV56();
-    clearCanvasV56();
-
-    try{ if(typeof drawScoreExplanationCanvasV24==="function") drawScoreExplanationCanvasV24(); }catch{}
-    try{ if(typeof resetScoreModelTextCanvasV26==="function") resetScoreModelTextCanvasV26(); }catch{}
-    try{ if(typeof scheduleFirebaseSyncV36==="function") scheduleFirebaseSyncV36("local"); }catch{}
-    try{ if(typeof scheduleCloudSyncV46==="function") scheduleCloudSyncV46(); }catch{}
-    try{ toast("해설 필기 전체 삭제"); }catch{}
-  },true);
-})();
-
-
-/* === v57: 스타일러스만 필기 + 내 답안 화면 정리 === */
-(function essayStrictPenAndAnswerViewV57(){
-  const isPenV57 = event => event?.pointerType === "pen";
-
-  /*
-    v13에 남아 있던 "pen 또는 mouse" 허용을 영구 차단.
-    synthetic mouse 이벤트도 필기 stroke로 들어가지 못한다.
-  */
-  try{
-    isStylusOrMouseV13 = event => event?.pointerType === "pen";
-  }catch{}
-
-  /*
-    혹시 남아 있는 legacy mouse listener가 같은 canvas에서 실행되려 해도
-    mouse/unknown pointer는 capture 단계에서 차단.
-    touch는 차단하지 않아 기존 손가락 이동/스크롤이 그대로 동작한다.
-  */
-  document.addEventListener("pointerdown",event=>{
-    const canvas=event.target?.closest?.(
-      "#inkCanvas,#answerInkCanvas,#scoreAnswerCanvas,#scoreExplanationCanvas,#scoreModelTextCanvas"
-    );
-    if(!canvas)return;
-    if(event.pointerType==="touch" || event.pointerType==="pen")return;
-    event.preventDefault();
-    event.stopPropagation();
-    event.stopImmediatePropagation();
-  },true);
-
-  /* ---------- 채점화면 '내 답안'을 단순하고 안정적인 구조로 정리 ---------- */
-  function answerKeyV57(){
-    try{
-      if(typeof scoreAnswerKeyV28==="function")return scoreAnswerKeyV28();
-    }catch{}
-    try{
-      if(typeof scoreKeyV14==="function")return scoreKeyV14("answer");
-    }catch{}
-    const p=typeof currentProblem==="function"?currentProblem():null;
-    return `${p?.id||"unknown"}:answer:${state.scoreAnswerPageIndex||0}`;
-  }
-
-  function ensureAnswerStoreV57(){
-    if(!state.scoreAnswerEdits || typeof state.scoreAnswerEdits!=="object"){
-      try{
-        state.scoreAnswerEdits=JSON.parse(
-          localStorage.getItem("essayScoreAnswerEditsV11")||"{}"
-        );
-      }catch{
-        state.scoreAnswerEdits={};
-      }
-    }
-  }
-
-  function saveAnswerStoreV57(){
-    ensureAnswerStoreV57();
-    try{
-      localStorage.setItem(
-        "essayScoreAnswerEditsV11",
-        JSON.stringify(state.scoreAnswerEdits||{})
-      );
-    }catch{}
-  }
-
-  function pointV57(event,canvas){
-    const r=canvas.getBoundingClientRect();
-    return{
-      x:Math.max(0,Math.min(1,(event.clientX-r.left)/Math.max(1,r.width))),
-      y:Math.max(0,Math.min(1,(event.clientY-r.top)/Math.max(1,r.height)))
+function openDb() {
+  if (state.db) return Promise.resolve(state.db);
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      state.db = request.result;
+      resolve(state.db);
     };
-  }
-
-  function sizeAnswerViewV57(){
-    const wrap=document.getElementById("scoreAnswerEditWrap");
-    const pre=document.getElementById("ownAnswerView");
-    const img=document.getElementById("ownAnswerInkView");
-    const canvas=document.getElementById("scoreAnswerCanvas");
-    if(!wrap||!pre||!canvas)return false;
-
-    const width=Math.max(
-      1,
-      Math.floor(
-        wrap.clientWidth ||
-        wrap.getBoundingClientRect().width ||
-        window.innerWidth-24
-      )
-    );
-
-    const hasText=
-      !pre.classList.contains("keyboard-answer-empty-v50") &&
-      String(pre.textContent||"").trim().length>0;
-
-    if(!hasText){
-      pre.classList.add("keyboard-answer-empty-v50");
-      pre.style.setProperty("display","none","important");
-      pre.style.setProperty("min-height","0","important");
-      pre.style.setProperty("height","0","important");
-      pre.style.setProperty("padding","0","important");
-      pre.style.setProperty("margin","0","important");
-    }else{
-      pre.style.removeProperty("display");
-      pre.style.setProperty("width",width+"px","important");
-      pre.style.setProperty("min-height","0","important");
-      pre.style.setProperty("height","auto","important");
-      pre.style.setProperty("padding","10px","important");
-      pre.style.setProperty("margin","0","important");
-    }
-
-    const hasInk=
-      !!img &&
-      !img.classList.contains("hidden") &&
-      !!img.src;
-
-    let inkHeight=0;
-    let inkWidth=0;
-    if(hasInk){
-      /*
-        v64:
-        제출 후 내 답안은 절대 확대하지 않는다.
-        원본보다 작아질 수는 있지만, 원본보다 크게 늘리지 않음.
-        한 화면 비교에서는 현재 내답안 pane 안에 전체가 들어오도록 fit.
-      */
-      const naturalW=Math.max(1,Number(img.naturalWidth||0));
-      const naturalH=Math.max(1,Number(img.naturalHeight||0));
-
-      /*
-        v65:
-        제출 후 내 답안은 가로폭에 딱 맞춤.
-        세로는 원본 비율대로 유지하고 길면 내부 스크롤.
-      */
-      inkWidth=width;
-
-      if(naturalW>0 && naturalH>0){
-        inkHeight=Math.max(
-          1,
-          Math.round(width*naturalH/naturalW)
-        );
-      }else{
-        const current=img.getBoundingClientRect();
-        const ratio=
-          current.width>0 && current.height>0
-            ? current.height/current.width
-            : 1;
-        inkHeight=Math.max(1,Math.round(width*ratio));
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(STORES.problems)) {
+        db.createObjectStore(STORES.problems, { keyPath: 'id' });
       }
-
-      if(inkHeight && inkWidth){
-        img.style.setProperty("width","100%","important");
-        img.style.setProperty("height",inkHeight+"px","important");
-        img.style.setProperty("max-width","100%","important");
-        img.style.setProperty("max-height","100%","important");
-        img.style.setProperty("object-fit","contain","important");
-        img.style.setProperty("margin-left","auto","important");
-        img.style.setProperty("margin-right","auto","important");
-        img.style.setProperty(
-          "margin-top",
-          hasText ? "6px" : "0px",
-          "important"
-        );
+      if (!db.objectStoreNames.contains(STORES.history)) {
+        db.createObjectStore(STORES.history, { keyPath: 'id' });
       }
-    }
-
-    /*
-      canvas를 잠깐 아주 작게 해 두고 실제 visible content 높이만 계산.
-      예전 v28의 강제 240/260px 빈 공간 누적을 제거한다.
-    */
-    canvas.style.setProperty("width","1px","important");
-    canvas.style.setProperty("height","1px","important");
-
-    let textBottom=0;
-    if(hasText){
-      textBottom=Math.ceil(
-        (pre.offsetTop||0)+
-        Math.max(pre.scrollHeight||0,pre.getBoundingClientRect().height||0)
-      );
-    }
-
-    let inkBottom=0;
-    if(hasInk && inkHeight){
-      inkBottom=Math.ceil((img.offsetTop||0)+inkHeight);
-    }
-
-    const contentHeight=Math.max(
-      160,
-      textBottom,
-      inkBottom
-    );
-
-    let maxVisible=Math.max(
-      220,
-      Math.floor((window.visualViewport?.height||window.innerHeight)*0.48)
-    );
-    const scoreOverlayV58=document.getElementById("scoreOverlay");
-    const scorePaneV58=wrap.closest(".score-box");
-    const oneScreenV58=!!scoreOverlayV58?.classList.contains("v58-one-screen");
-    if(oneScreenV58 && scorePaneV58){
-      const paneRectV58=scorePaneV58.getBoundingClientRect();
-      const wrapRectV58=wrap.getBoundingClientRect();
-      maxVisible=Math.max(
-        120,
-        Math.floor(paneRectV58.bottom-wrapRectV58.top-8)
-      );
-    }
-    const visibleHeight=oneScreenV58
-      ? maxVisible
-      : Math.min(contentHeight,maxVisible);
-
-    wrap.style.setProperty("height",visibleHeight+"px","important");
-    wrap.style.setProperty("min-height",Math.min(160,visibleHeight)+"px","important");
-    wrap.style.setProperty("max-height",maxVisible+"px","important");
-    wrap.style.setProperty("overflow","auto","important");
-    wrap.style.setProperty("-webkit-overflow-scrolling","touch","important");
-    wrap.style.setProperty("touch-action","none","important");
-    wrap.style.setProperty("overscroll-behavior","contain","important");
-
-    const dpr=Math.min(window.devicePixelRatio||1,1.5);
-    canvas.width=Math.max(1,Math.round(width*dpr));
-    canvas.height=Math.max(1,Math.round(contentHeight*dpr));
-    canvas.dataset.v57Dpr=String(dpr);
-    canvas.style.setProperty("width",width+"px","important");
-    canvas.style.setProperty("height",contentHeight+"px","important");
-    canvas.style.setProperty("left","0","important");
-    canvas.style.setProperty("top","0","important");
-    canvas.style.setProperty("position","absolute","important");
-
-    /*
-      손가락 이벤트는 canvas가 받지 않는다.
-      wrapper의 native scroll이 직접 받는다.
-      S펜은 wrapper pointer handler가 처리한다.
-    */
-    canvas.style.setProperty("pointer-events","none","important");
-    canvas.style.setProperty("touch-action","none","important");
-
-    return true;
-  }
-
-  function drawAnswerEditsV57(){
-    ensureAnswerStoreV57();
-    const canvas=document.getElementById("scoreAnswerCanvas");
-    if(!canvas)return;
-
-    const r=canvas.getBoundingClientRect();
-    if(!r.width||!r.height)return;
-
-    const dpr=Number(canvas.dataset.v57Dpr||1);
-    const ctx=canvas.getContext("2d");
-    ctx.setTransform(dpr,0,0,dpr,0,0);
-    ctx.clearRect(0,0,r.width,r.height);
-
-    const strokes=state.scoreAnswerEdits[answerKeyV57()]||[];
-    for(const stroke of strokes){
-      if(!stroke?.points?.length)continue;
-
-      ctx.save();
-      ctx.globalCompositeOperation=
-        stroke.tool==="eraser"?"destination-out":"source-over";
-      ctx.lineCap="round";
-      ctx.lineJoin="round";
-      ctx.strokeStyle=
-        stroke.tool==="eraser"?"rgba(0,0,0,1)":"#ef4444";
-      ctx.lineWidth=Number(stroke.size||4);
-      ctx.beginPath();
-
-      stroke.points.forEach((pt,index)=>{
-        const x=pt.x*r.width;
-        const y=pt.y*r.height;
-        if(index===0)ctx.moveTo(x,y);
-        else ctx.lineTo(x,y);
-      });
-
-      if(stroke.points.length===1){
-        const p=stroke.points[0];
-        ctx.lineTo(p.x*r.width+.01,p.y*r.height+.01);
-      }
-      ctx.stroke();
-      ctx.restore();
-    }
-  }
-
-  function bindAnswerPenV57(){
-    const wrap=document.getElementById("scoreAnswerEditWrap");
-    if(!wrap||wrap.dataset.penV63==="1")return;
-
-    /*
-      v63:
-      브라우저 native pan을 끄고(pointer touch-action:none)
-      손가락 이동은 직접 scrollTop/scrollLeft로 처리.
-      S펜은 stroke만 생성.
-    */
-    wrap.dataset.penV63="1";
-    wrap.dataset.penV57="1";
-
-    let current=null;
-    let activePenId=null;
-    let touchPan=null;
-
-    wrap.addEventListener("pointerdown",event=>{
-      const canvas=document.getElementById("scoreAnswerCanvas");
-      if(!canvas)return;
-
-      if(event.pointerType==="touch"){
-        event.preventDefault();
-        event.stopPropagation();
-        try{wrap.setPointerCapture(event.pointerId)}catch{}
-
-        touchPan={
-          id:event.pointerId,
-          x:event.clientX,
-          y:event.clientY,
-          left:wrap.scrollLeft,
-          top:wrap.scrollTop
-        };
-        return;
-      }
-
-      if(!isPenV57(event))return;
-
-      event.preventDefault();
-      event.stopPropagation();
-      try{wrap.setPointerCapture(event.pointerId)}catch{}
-
-      ensureAnswerStoreV57();
-
-      activePenId=event.pointerId;
-      const tool=
-        state.scoreAnswerEditTool==="eraser"?"eraser":"pen";
-      const size=
-        Number(
-          state.scoreAnswerSize ||
-          document.getElementById("scoreAnswerSizeInput")?.value ||
-          4
-        )*(tool==="eraser"?5:1);
-
-      current={
-        tool,
-        size,
-        points:[pointV57(event,canvas)]
-      };
-
-      const key=answerKeyV57();
-      if(!state.scoreAnswerEdits[key])state.scoreAnswerEdits[key]=[];
-      state.scoreAnswerEdits[key].push(current);
-      drawAnswerEditsV57();
-    },true);
-
-    wrap.addEventListener("pointermove",event=>{
-      const canvas=document.getElementById("scoreAnswerCanvas");
-      if(!canvas)return;
-
-      if(event.pointerType==="touch"){
-        if(!touchPan || touchPan.id!==event.pointerId)return;
-
-        event.preventDefault();
-        event.stopPropagation();
-
-        wrap.scrollLeft=
-          touchPan.left-(event.clientX-touchPan.x);
-        wrap.scrollTop=
-          touchPan.top-(event.clientY-touchPan.y);
-        return;
-      }
-
-      if(!isPenV57(event) || !current || activePenId!==event.pointerId)return;
-
-      event.preventDefault();
-      event.stopPropagation();
-
-      const list=
-        typeof event.getCoalescedEvents==="function"
-          ? event.getCoalescedEvents()
-          : [event];
-
-      for(const item of list){
-        current.points.push(pointV57(item,canvas));
-      }
-      drawAnswerEditsV57();
-    },true);
-
-    const end=event=>{
-      if(event.pointerType==="touch"){
-        if(touchPan?.id===event.pointerId){
-          touchPan=null;
-        }
-        return;
-      }
-
-      if(!isPenV57(event) || !current || activePenId!==event.pointerId)return;
-
-      event.preventDefault();
-      event.stopPropagation();
-
-      current=null;
-      activePenId=null;
-      saveAnswerStoreV57();
-      drawAnswerEditsV57();
     };
-
-    wrap.addEventListener("pointerup",end,true);
-    wrap.addEventListener("pointercancel",end,true);
-    wrap.addEventListener("lostpointercapture",end,true);
-  }
-
-  function resetScoreAnswerV57(){
-    let canvas=document.getElementById("scoreAnswerCanvas");
-    if(!canvas)return;
-
-    /*
-      v11~v28 canvas에 달린 legacy touch/mouse listener를 전부 제거.
-      새 canvas는 pointer-events:none이며 필기는 wrapper의 pen handler 하나뿐.
-    */
-    const fresh=canvas.cloneNode(false);
-    canvas.replaceWith(fresh);
-
-    if(!sizeAnswerViewV57())return;
-    bindAnswerPenV57();
-    drawAnswerEditsV57();
-  }
-
-  /*
-    이후 어느 구버전 코드가 reset을 호출해도 v57 함수만 실행되게 통일.
-  */
-  try{resetScoreAnswerCanvasV28=resetScoreAnswerV57}catch{}
-  try{resetScoreAnswerCanvasV14=resetScoreAnswerV57}catch{}
-  try{resetScoreAnswerCanvasV13=resetScoreAnswerV57}catch{}
-  try{resetScoreAnswerCanvasV12=resetScoreAnswerV57}catch{}
-  try{resetScoreAnswerCanvasV11=resetScoreAnswerV57}catch{}
-
-  try{
-    scheduleScoreAnswerCanvasV28=function(){
-      clearTimeout(scheduleScoreAnswerCanvasV28._t);
-      scheduleScoreAnswerCanvasV28._t=setTimeout(resetScoreAnswerV57,50);
-    };
-  }catch{}
-
-  /*
-    답안 페이지 표시 후 page별 text/strokes가 확정된 다음 한 번만 정리.
-    빈 keyboard text가 있으면 빈 영역 자체를 만들지 않는다.
-  */
-  if(typeof renderScoreAnswerPageV11==="function"){
-    const originalRenderScoreAnswerV57=renderScoreAnswerPageV11;
-    renderScoreAnswerPageV11=function(index=0){
-      const result=originalRenderScoreAnswerV57(index);
-      setTimeout(resetScoreAnswerV57,40);
-      return result;
-    };
-  }
-
-  /*
-    채점 화면이 열리면 combined answer 문자열이 아니라
-    현재 answerPages의 실제 페이지를 다시 렌더링해서
-    '[1쪽]' 같은 합성 문자열이 내 답안칸에 남지 않게 한다.
-  */
-  const originalOpenScoreV57=openScore;
-  openScore=function(){
-    originalOpenScoreV57.apply(this,arguments);
-
-    setTimeout(()=>{
-      try{
-        if(typeof renderScoreAnswerPageV11==="function"){
-          renderScoreAnswerPageV11(state.scoreAnswerPageIndex||0);
-        }
-      }catch{}
-      resetScoreAnswerV57();
-    },60);
-  };
-
-  window.addEventListener("resize",()=>{
-    if(!document.getElementById("scoreOverlay")?.classList.contains("hidden")){
-      setTimeout(resetScoreAnswerV57,120);
-    }
   });
+}
 
-  setTimeout(()=>{
-    if(!document.getElementById("scoreOverlay")?.classList.contains("hidden")){
-      resetScoreAnswerV57();
-    }
-  },900);
-})();
-
-
-
-/* === v59: 문제풀이 필기 구조 안정화 ===
-   - v57의 추가 reset 연결/반복 reset 제거
-   - 기존 v13 문제/답안 필기 lifecycle 그대로 사용
-   - stroke 생성 조건만 pointerType=pen
-   - v58 자가채점 한 화면 비교는 그대로
-*/
-
-/* === v58: 내 답안 + 해설을 한 화면에 고정, DOM 이동 없음 === */
-(function essayOneScreenCompareV58(){
-  function applyV58(){
-    const overlay=document.getElementById("scoreOverlay");
-    if(!overlay || overlay.classList.contains("hidden"))return;
-
-    overlay.classList.add("v58-one-screen");
-
-    /*
-      DOM을 옮기거나 복제하지 않는다.
-      원래 score-grid의 두 score-box를 그대로 사용한다.
-      각 내부 viewer만 자기 박스 안에서 움직인다.
-    */
-    try{
-      if(typeof resetScoreAnswerCanvasV28==="function"){
-        resetScoreAnswerCanvasV28();
-      }
-    }catch{}
-
-    try{
-      if(typeof showExplanationPage==="function"){
-        // 현재 페이지는 바꾸지 않고 v47 viewer의 높이만 다시 계산시킨다.
-        const current=Number(state.expPage||0);
-        showExplanationPage(current);
-      }
-    }catch{}
-
-    try{
-      if(typeof resetScoreModelTextCanvasV26==="function"){
-        resetScoreModelTextCanvasV26();
-      }
-    }catch{}
-  }
-
-  const openScoreBeforeV58=openScore;
-  openScore=function(){
-    openScoreBeforeV58.apply(this,arguments);
-    requestAnimationFrame(applyV58);
-    setTimeout(applyV58,90);
-    setTimeout(applyV58,260);
-  };
-
-  /*
-    답안 수정으로 돌아가면 scoreOverlay가 숨겨지므로 실제 풀이화면은 전혀 건드리지 않는다.
-  */
-  window.addEventListener("resize",()=>{
-    const overlay=document.getElementById("scoreOverlay");
-    if(overlay && !overlay.classList.contains("hidden")){
-      setTimeout(applyV58,120);
-    }
+async function tx(storeName, mode, action) {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(storeName, mode);
+    const store = transaction.objectStore(storeName);
+    let result;
+    transaction.oncomplete = () => resolve(result);
+    transaction.onerror = () => reject(transaction.error);
+    result = action(store);
   });
-})();
+}
 
-/* === v73: PWA 설치 안정화 ===
-   - IndexedDB/localStorage/Firebase는 건드리지 않는다.
-   - 시작할 때 서비스워커를 강제 해제하지 않는다.
-   - 설치 이벤트는 DB 로딩보다 먼저 받는다.
-*/
-async function registerEssayServiceWorkerV73(){
-  if(!("serviceWorker" in navigator))return;
-  try{
-    const reg=await navigator.serviceWorker.register("./sw.js?v=73",{scope:"./"});
-    try{await reg.update()}catch{}
-    try{await navigator.serviceWorker.ready}catch{}
-  }catch(err){
-    console.warn("Service worker registration failed",err);
+function requestToPromise(request) {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function getAll(storeName) {
+  const db = await openDb();
+  const transaction = db.transaction(storeName, 'readonly');
+  const store = transaction.objectStore(storeName);
+  return requestToPromise(store.getAll());
+}
+
+async function put(storeName, value) {
+  const result = await tx(storeName, 'readwrite', (store) => store.put(value));
+  scheduleSyncForLocalChange(storeName);
+  return result;
+}
+
+async function remove(storeName, id) {
+  // v8: 동기화 기능을 제거했기 때문에 tombstone 기록 없이 즉시 삭제합니다.
+  const result = await tx(storeName, 'readwrite', (store) => store.delete(id));
+  return result;
+}
+
+async function clearStore(storeName) {
+  // v8: 동기화 기능을 제거했기 때문에 tombstone 기록 없이 즉시 초기화합니다.
+  const result = await tx(storeName, 'readwrite', (store) => store.clear());
+  return result;
+}
+
+function uid() {
+  if (crypto && crypto.randomUUID) return crypto.randomUUID();
+  return `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function showToast(message) {
+  els.toast.textContent = message;
+  els.toast.classList.remove('hidden');
+  clearTimeout(showToast._timer);
+  showToast._timer = setTimeout(() => els.toast.classList.add('hidden'), 2400);
+}
+
+function formatTime(ms) {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const min = Math.floor(total / 60).toString().padStart(2, '0');
+  const sec = (total % 60).toString().padStart(2, '0');
+  return `${min}:${sec}`;
+}
+
+function formatLongTime(ms) {
+  if (!ms) return '0초';
+  const total = Math.round(ms / 1000);
+  const min = Math.floor(total / 60);
+  const sec = total % 60;
+  if (min <= 0) return `${sec}초`;
+  return `${min}분 ${sec}초`;
+}
+
+function shuffle(items) {
+  const arr = [...items];
+  for (let i = arr.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
   }
+  return arr;
 }
 
-async function bootEssayV73(){
-  await registerEssayServiceWorkerV73();
-  await init();
+function tagsToArray(value) {
+  return String(value || '')
+    .split(',')
+    .map((v) => v.trim())
+    .filter(Boolean);
 }
 
-setupInstall();
-bootEssayV73().catch(err=>{
-  console.error(err);
-  alert(`앱 초기화 실패: ${err.message}`);
-});
+const FORM_PREF_KEY = 'psat-form-preferences-v12';
 
-/* === v2 스타일러스 필기 레이어 === */
-state.inkTool = "pen";
-state.inkSize = 3;
-state.currentStroke = null;
-state.inkData = {};
-try {
-  state.inkData = JSON.parse(localStorage.getItem("essayPsatBaseInk_v2") || "{}");
-} catch {
-  state.inkData = {};
-}
-
-function inkKey() {
-  const p = currentProblem?.();
-  if (!p) return "";
-  return `${p.id}:${state.qPage || 0}`;
-}
-function saveInkData() {
+function readFormPreferences() {
   try {
-    localStorage.setItem("essayPsatBaseInk_v2", JSON.stringify(state.inkData));
+    return JSON.parse(localStorage.getItem(FORM_PREF_KEY) || '{}') || {};
   } catch (err) {
-    console.warn(err);
-    toast("필기 저장공간이 부족할 수 있어");
-  }
-}
-function resizeInkCanvas() {
-  const img = $("questionImageView");
-  const canvas = $("inkCanvas");
-  const wrap = $("imageCanvasWrap");
-  if (!img || !canvas || !wrap || !img.naturalWidth) return;
-
-  const rect = img.getBoundingClientRect();
-  if (!rect.width || !rect.height) return;
-
-  wrap.style.width = `${rect.width}px`;
-  wrap.style.height = `${rect.height}px`;
-
-  const dpr = window.devicePixelRatio || 1;
-  const nextW = Math.max(1, Math.round(rect.width * dpr));
-  const nextH = Math.max(1, Math.round(rect.height * dpr));
-
-  if (canvas.width !== nextW || canvas.height !== nextH) {
-    canvas.width = nextW;
-    canvas.height = nextH;
-    canvas.style.width = `${rect.width}px`;
-    canvas.style.height = `${rect.height}px`;
-  }
-  drawInk();
-}
-function drawInk() {
-  const canvas = $("inkCanvas");
-  if (!canvas) return;
-  const rect = canvas.getBoundingClientRect();
-  if (!rect.width || !rect.height) return;
-
-  const dpr = window.devicePixelRatio || 1;
-  const ctx = canvas.getContext("2d");
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, rect.width, rect.height);
-
-  const strokes = state.inkData[inkKey()] || [];
-  for (const stroke of strokes) {
-    if (!stroke.points || stroke.points.length < 1) continue;
-    ctx.save();
-    ctx.globalCompositeOperation = stroke.tool === "eraser" ? "destination-out" : "source-over";
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.strokeStyle = stroke.tool === "eraser" ? "rgba(0,0,0,1)" : "#0ea5e9";
-    ctx.lineWidth = Number(stroke.size || 3);
-    ctx.beginPath();
-    stroke.points.forEach((pt, i) => {
-      const x = pt.x * rect.width;
-      const y = pt.y * rect.height;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    });
-    ctx.stroke();
-    ctx.restore();
-  }
-}
-function canvasPoint(event) {
-  const canvas = $("inkCanvas");
-  const rect = canvas.getBoundingClientRect();
-  return {
-    x: Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)),
-    y: Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height))
-  };
-}
-function setInkTool(tool) {
-  state.inkTool = tool === "eraser" ? "eraser" : "pen";
-  $("penToolBtn")?.classList.toggle("ink-active", state.inkTool === "pen");
-  $("eraserToolBtn")?.classList.toggle("ink-active", state.inkTool === "eraser");
-  toast(state.inkTool === "pen" ? "펜 모드" : "지우개 모드");
-}
-function clearCurrentInk() {
-  const key = inkKey();
-  if (!key) return;
-  if (!confirm("현재 문제의 현재 쪽 필기를 지울까?")) return;
-  state.inkData[key] = [];
-  saveInkData();
-  drawInk();
-}
-function setupInkLayer() {
-  const canvas = $("inkCanvas");
-  if (!canvas || canvas.dataset.ready) return;
-  canvas.dataset.ready = "1";
-
-  canvas.addEventListener("pointerdown", (event) => {
-    // 손가락은 스크롤/확대용, 스타일러스와 마우스만 필기
-    if (event.pointerType === "touch") return;
-    const key = inkKey();
-    if (!key) return;
-    event.preventDefault();
-    canvas.setPointerCapture?.(event.pointerId);
-
-    const stroke = {
-      tool: state.inkTool || "pen",
-      size: Number(state.inkSize || 3) * (state.inkTool === "eraser" ? 3 : 1),
-      points: [canvasPoint(event)]
-    };
-    state.currentStroke = stroke;
-    if (!state.inkData[key]) state.inkData[key] = [];
-    state.inkData[key].push(stroke);
-    drawInk();
-  });
-
-  canvas.addEventListener("pointermove", (event) => {
-    if (!state.currentStroke) return;
-    if (event.pointerType === "touch") return;
-    event.preventDefault();
-    state.currentStroke.points.push(canvasPoint(event));
-    drawInk();
-  });
-
-  const endStroke = (event) => {
-    if (!state.currentStroke) return;
-    if (event.pointerType !== "touch") event.preventDefault();
-    state.currentStroke = null;
-    saveInkData();
-  };
-  canvas.addEventListener("pointerup", endStroke);
-  canvas.addEventListener("pointercancel", endStroke);
-  canvas.addEventListener("pointerleave", endStroke);
-
-  $("penToolBtn")?.addEventListener("click", () => setInkTool("pen"));
-  $("eraserToolBtn")?.addEventListener("click", () => setInkTool("eraser"));
-  $("clearInkBtn")?.addEventListener("click", clearCurrentInk);
-  $("inkSizeInput")?.addEventListener("input", (event) => {
-    state.inkSize = Number(event.target.value || 3);
-  });
-
-  window.addEventListener("resize", () => setTimeout(resizeInkCanvas, 100));
-  setInkTool("pen");
-}
-
-const originalApplyZoomForInk = applyZoom;
-applyZoom = function() {
-  originalApplyZoomForInk();
-  requestAnimationFrame(resizeInkCanvas);
-};
-
-const originalShowQuestionPageForInk = showQuestionPage;
-showQuestionPage = function(index) {
-  originalShowQuestionPageForInk(index);
-  setTimeout(() => {
-    setupInkLayer();
-    resizeInkCanvas();
-    drawInk();
-  }, 80);
-};
-
-const originalOpenCurrentProblemForInk = openCurrentProblem;
-openCurrentProblem = function() {
-  originalOpenCurrentProblemForInk();
-  setTimeout(() => {
-    setupInkLayer();
-    resizeInkCanvas();
-    drawInk();
-  }, 120);
-};
-
-setTimeout(() => {
-  setupInkLayer();
-  resizeInkCanvas();
-}, 300);
-
-
-/* === v6 페이지 슬롯/빈페이지 수정 === */
-function isRealPage(src) {
-  return typeof src === "string" && /^data:image\//.test(src);
-}
-function realPages(arr) {
-  return Array.isArray(arr) ? arr.filter(isRealPage) : [];
-}
-function selectedIndexFor(target) {
-  return target === "explanation" ? state.selectedExplanationPage : state.selectedQuestionPage;
-}
-function setSelectedIndex(target, index) {
-  if (target === "explanation") state.selectedExplanationPage = index;
-  else state.selectedQuestionPage = index;
-}
-function pageArray(target) {
-  return target === "explanation" ? state.explanationPages : state.questionPages;
-}
-function addBlankPage(target) {
-  const arr = pageArray(target);
-  arr.push("");
-  setSelectedIndex(target, arr.length - 1);
-  setPasteTarget(target);
-  renderPageLists();
-  toast(`${target === "explanation" ? "해설" : "문제"} 빈 페이지 추가. 이제 스샷 붙여넣기를 눌러줘.`);
-}
-async function addImageFiles(files, target) {
-  const arrFiles = Array.from(files || []).filter(file => file && file.type && file.type.startsWith("image/"));
-  if (!arrFiles.length) { toast("이미지 파일이 없어"); return; }
-
-  const arr = pageArray(target);
-  let selected = selectedIndexFor(target);
-  if (selected < 0 || selected >= arr.length) selected = arr.findIndex(x => !isRealPage(x));
-
-  let added = 0, size = 0;
-  for (const file of arrFiles) {
-    const data = await imageBlobToDataUrl(file);
-    if (selected >= 0 && selected < arr.length && !isRealPage(arr[selected])) {
-      arr[selected] = data;
-      setSelectedIndex(target, selected);
-      selected = arr.findIndex((x, idx) => idx > selected && !isRealPage(x));
-    } else {
-      arr.push(data);
-      setSelectedIndex(target, arr.length - 1);
-      selected = arr.findIndex((x, idx) => idx > arr.length - 1 && !isRealPage(x));
-    }
-    size += dataUrlBytes(data);
-    added++;
-  }
-  renderPageLists();
-  setPasteTarget(target);
-  toast(`${target === "explanation" ? "해설" : "문제"} 이미지 ${added}장 추가 · ${formatBytes(size)}`);
-}
-function movePage(target,index,dir){
-  const arr=pageArray(target), next=index+dir;
-  if(next<0||next>=arr.length)return;
-  [arr[index],arr[next]]=[arr[next],arr[index]];
-  const selected=selectedIndexFor(target);
-  if(selected===index)setSelectedIndex(target,next);
-  else if(selected===next)setSelectedIndex(target,index);
-  renderPageLists();
-}
-function deletePage(target,index){
-  const arr=pageArray(target);
-  arr.splice(index,1);
-  const selected=selectedIndexFor(target);
-  if(selected===index)setSelectedIndex(target,Math.min(index,arr.length-1));
-  else if(selected>index)setSelectedIndex(target,selected-1);
-  renderPageLists();
-}
-function renderPageList(id,arr,target){
-  const box=$(id);
-  box.innerHTML="";
-  if(!arr.length){box.innerHTML='<p class="hint">아직 페이지가 없어. “빈 페이지 추가”를 누른 뒤 스샷을 붙여넣어.</p>';return}
-  const selected=selectedIndexFor(target);
-  arr.forEach((src,index)=>{
-    const div=document.createElement("div");
-    div.className="page-item"+(selected===index?" selected-page":"");
-    div.addEventListener("click",()=>{setSelectedIndex(target,index);setPasteTarget(target);renderPageLists();});
-    const thumb=isRealPage(src)
-      ? `<img src="${src}" alt="${index+1}쪽" />`
-      : `<div class="blank-thumb">빈 페이지<br/>붙여넣기</div>`;
-    div.innerHTML=`${thumb}<div><strong>${index+1}쪽 ${selected===index?"· 선택됨":""}</strong><p class="hint">${isRealPage(src) ? (target==="explanation"?"해설 이미지":"문제 이미지") : "이 페이지 선택 후 스샷 붙여넣기"}</p><div class="page-actions"></div></div>`;
-    const actions=div.querySelector(".page-actions");
-    actions.append(makeButton("선택",()=>{setSelectedIndex(target,index);setPasteTarget(target);renderPageLists();},"secondary small"));
-    actions.append(makeButton("위",()=>movePage(target,index,-1),"secondary small"));
-    actions.append(makeButton("아래",()=>movePage(target,index,1),"secondary small"));
-    actions.append(makeButton("삭제",()=>deletePage(target,index),"danger small"));
-    box.append(div);
-  });
-}
-function showQuestionPage(index){
-  const p=currentProblem(), pages=realPages(p?.questionPages||[]);
-  state.qPage=Math.max(0,Math.min(index,pages.length-1));
-  const img=$("questionImageView");
-  if(pages.length){
-    img.classList.remove("hidden");
-    img.src=pages[state.qPage]||"";
-    $("questionPageBadge").textContent=`문제 ${state.qPage+1}/${pages.length}쪽`;
-  } else {
-    img.classList.add("hidden");
-    $("questionPageBadge").textContent="문제 이미지 없음";
-  }
-  fitImage();
-  saveDraft();
-}
-function showExplanationPage(index){
-  const p=currentProblem(),pages=realPages(p?.explanationPages||[]);
-  state.expPage=Math.max(0,Math.min(index,pages.length-1));
-  if(pages.length){
-    $("explanationImageView").src=pages[state.expPage];
-    $("explanationImageView").classList.remove("hidden");
-    $("explanationPageBadge").textContent=`해설 ${state.expPage+1}/${pages.length}쪽`;
-  }else{
-    $("explanationImageView").classList.add("hidden");
-    $("explanationPageBadge").textContent="해설 이미지 없음";
-  }
-}
-
-
-/* === v7 기존 빈페이지/구버전 데이터 정리 === */
-function collectImagePagesFromProblem(p, kind) {
-  const candidates = [];
-  if (kind === "question") {
-    if (Array.isArray(p.questionPages)) candidates.push(...p.questionPages);
-    if (Array.isArray(p.questionImages)) candidates.push(...p.questionImages);
-    candidates.push(p.questionImage, p.questionImageData, p.problemImage, p.problemImageData, p.imageData, p.image);
-  } else {
-    if (Array.isArray(p.explanationPages)) candidates.push(...p.explanationPages);
-    if (Array.isArray(p.explanationImages)) candidates.push(...p.explanationImages);
-    if (Array.isArray(p.modelPages)) candidates.push(...p.modelPages);
-    if (Array.isArray(p.modelImages)) candidates.push(...p.modelImages);
-    candidates.push(p.explanationImage, p.explanationImageData, p.modelImage, p.modelImageData, p.answerImageData);
-  }
-  return candidates.filter((x, idx, arr) => isRealPage(x) && arr.indexOf(x) === idx);
-}
-async function normalizeStoredProblems() {
-  let changed = false;
-  for (const p of state.problems) {
-    const q = collectImagePagesFromProblem(p, "question");
-    const e = collectImagePagesFromProblem(p, "explanation");
-
-    if (JSON.stringify(p.questionPages || []) !== JSON.stringify(q)) {
-      p.questionPages = q;
-      changed = true;
-    }
-    if (JSON.stringify(p.explanationPages || []) !== JSON.stringify(e)) {
-      p.explanationPages = e;
-      changed = true;
-    }
-    if (!Array.isArray(p.points) && p.pointsText) p.points = pointsFromText(p.pointsText);
-  }
-  if (changed) {
-    for (const p of state.problems) await put(STORE_PROBLEMS, p);
-    await loadData();
-    toast("기존 빈 페이지/구버전 이미지 데이터를 정리했어");
-  }
-}
-function hasQuestionImage(p) {
-  return realPages(p?.questionPages || []).length > 0 || collectImagePagesFromProblem(p || {}, "question").length > 0;
-}
-const originalStartSolveV7 = startSolve;
-startSolve = function(ids, mode) {
-  const first = state.problems.find((p) => p.id === ids?.[0]);
-  if (!hasQuestionImage(first)) {
-    toast("이 문제는 실제 문제 이미지가 없어. 목록→수정에서 빈 페이지에 스샷을 붙여넣고 다시 저장해줘.");
-    showView("listView");
-    return;
-  }
-  originalStartSolveV7(ids, mode);
-};
-const originalShowQuestionPageV7 = showQuestionPage;
-showQuestionPage = function(index) {
-  const p = currentProblem();
-  const pages = realPages(p?.questionPages || []);
-  const scroller = $("questionImageScroller");
-  let note = $("emptyQuestionNote");
-  if (!note && scroller) {
-    note = document.createElement("div");
-    note.id = "emptyQuestionNote";
-    note.className = "empty-image-note hidden";
-    note.textContent = "문제 이미지가 없습니다. 목록에서 이 문제를 수정해서 빈 페이지에 스크린샷을 붙여넣고 저장하세요.";
-    scroller.appendChild(note);
-  }
-
-  if (!pages.length) {
-    $("questionImageView").classList.add("hidden");
-    if (note) note.classList.remove("hidden");
-    $("questionPageBadge").textContent = "문제 이미지 없음";
-    return;
-  }
-
-  if (note) note.classList.add("hidden");
-  $("questionImageView").classList.remove("hidden");
-  originalShowQuestionPageV7(index);
-};
-
-
-/* === v8 문제 이미지 표시 + 답안 손글씨/키보드 이원화 === */
-state.answerInkTool = "pen";
-state.answerInkSize = 3;
-state.answerInkStrokes = [];
-state.answerInkCurrentStroke = null;
-state.answerInputMode = "handwriting";
-
-function dataUrlFromAnswerCanvas() {
-  const canvas = $("answerInkCanvas");
-  if (!canvas) return "";
-  try {
-    return canvas.toDataURL("image/png");
-  } catch {
-    return "";
-  }
-}
-function answerHasInk() {
-  return Array.isArray(state.answerInkStrokes) && state.answerInkStrokes.length > 0;
-}
-function resizeAnswerCanvas() {
-  const canvas = $("answerInkCanvas");
-  const wrap = $("handwritingWrap");
-  if (!canvas || !wrap) return;
-  const rect = wrap.getBoundingClientRect();
-  if (!rect.width || !rect.height) return;
-
-  const old = dataUrlFromAnswerCanvas();
-  const dpr = window.devicePixelRatio || 1;
-  const w = Math.max(1, Math.round(rect.width * dpr));
-  const h = Math.max(1, Math.round(rect.height * dpr));
-  if (canvas.width !== w || canvas.height !== h) {
-    canvas.width = w;
-    canvas.height = h;
-    canvas.style.width = `${rect.width}px`;
-    canvas.style.height = `${rect.height}px`;
-    drawAnswerInk();
-  }
-}
-function answerPoint(event) {
-  const canvas = $("answerInkCanvas");
-  const rect = canvas.getBoundingClientRect();
-  return {
-    x: Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)),
-    y: Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height))
-  };
-}
-function drawAnswerInk() {
-  const canvas = $("answerInkCanvas");
-  const wrap = $("handwritingWrap");
-  if (!canvas) return;
-  const rect = canvas.getBoundingClientRect();
-  if (!rect.width || !rect.height) return;
-
-  const dpr = window.devicePixelRatio || 1;
-  const ctx = canvas.getContext("2d");
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, rect.width, rect.height);
-
-  for (const stroke of state.answerInkStrokes || []) {
-    if (!stroke.points || !stroke.points.length) continue;
-    ctx.save();
-    ctx.globalCompositeOperation = stroke.tool === "eraser" ? "destination-out" : "source-over";
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.strokeStyle = stroke.tool === "eraser" ? "rgba(0,0,0,1)" : "#111827";
-    ctx.lineWidth = Number(stroke.size || 3);
-    ctx.beginPath();
-    stroke.points.forEach((pt, i) => {
-      const x = pt.x * rect.width;
-      const y = pt.y * rect.height;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    });
-    ctx.stroke();
-    ctx.restore();
-  }
-  if (wrap) wrap.classList.toggle("has-ink", answerHasInk());
-}
-function saveAnswerDraftInk() {
-  if (!state.solve) return;
-  state.solve.answerInkStrokes = state.answerInkStrokes || [];
-  state.solve.answerInkData = answerHasInk() ? dataUrlFromAnswerCanvas() : "";
-  state.solve.answerInputMode = state.answerInputMode || "handwriting";
-  saveDraft();
-}
-function setAnswerInkTool(tool) {
-  state.answerInkTool = tool === "eraser" ? "eraser" : "pen";
-  $("answerPenBtn")?.classList.toggle("ink-active", state.answerInkTool === "pen");
-  $("answerEraserBtn")?.classList.toggle("ink-active", state.answerInkTool === "eraser");
-}
-function clearAnswerInk() {
-  if (!confirm("답안 손글씨를 모두 지울까?")) return;
-  state.answerInkStrokes = [];
-  drawAnswerInk();
-  saveAnswerDraftInk();
-}
-function setAnswerInputMode(mode) {
-  state.answerInputMode = mode === "keyboard" ? "keyboard" : "handwriting";
-  const canvasWrap = $("handwritingWrap");
-  const text = $("answerText");
-  const btn = $("keyboardToggleBtn");
-  if (!canvasWrap || !text || !btn) return;
-  canvasWrap.classList.toggle("hidden", state.answerInputMode === "keyboard");
-  text.classList.toggle("hidden", state.answerInputMode !== "keyboard");
-  btn.textContent = state.answerInputMode === "keyboard" ? "손글씨 입력" : "키보드 입력";
-  if (state.answerInputMode === "keyboard") setTimeout(() => text.focus(), 0);
-  else setTimeout(() => { resizeAnswerCanvas(); drawAnswerInk(); }, 50);
-  if (state.solve) state.solve.answerInputMode = state.answerInputMode;
-  saveDraft();
-}
-function setupAnswerInkLayer() {
-  const canvas = $("answerInkCanvas");
-  if (!canvas || canvas.dataset.ready) return;
-  canvas.dataset.ready = "1";
-
-  canvas.addEventListener("pointerdown", (event) => {
-    // 손가락은 스크롤, S펜/마우스는 필기
-    if (event.pointerType === "touch") return;
-    event.preventDefault();
-    canvas.setPointerCapture?.(event.pointerId);
-    const stroke = {
-      tool: state.answerInkTool || "pen",
-      size: Number(state.answerInkSize || 3) * (state.answerInkTool === "eraser" ? 4 : 1),
-      points: [answerPoint(event)]
-    };
-    state.answerInkCurrentStroke = stroke;
-    state.answerInkStrokes.push(stroke);
-    drawAnswerInk();
-  });
-  canvas.addEventListener("pointermove", (event) => {
-    if (!state.answerInkCurrentStroke) return;
-    if (event.pointerType === "touch") return;
-    event.preventDefault();
-    state.answerInkCurrentStroke.points.push(answerPoint(event));
-    drawAnswerInk();
-  });
-  const endStroke = (event) => {
-    if (!state.answerInkCurrentStroke) return;
-    if (event.pointerType !== "touch") event.preventDefault();
-    state.answerInkCurrentStroke = null;
-    saveAnswerDraftInk();
-  };
-  canvas.addEventListener("pointerup", endStroke);
-  canvas.addEventListener("pointercancel", endStroke);
-  canvas.addEventListener("pointerleave", endStroke);
-
-  $("keyboardToggleBtn")?.addEventListener("click", () => setAnswerInputMode(state.answerInputMode === "keyboard" ? "handwriting" : "keyboard"));
-  $("answerPenBtn")?.addEventListener("click", () => setAnswerInkTool("pen"));
-  $("answerEraserBtn")?.addEventListener("click", () => setAnswerInkTool("eraser"));
-  $("clearAnswerInkBtn")?.addEventListener("click", clearAnswerInk);
-  $("answerInkSizeInput")?.addEventListener("input", (event) => { state.answerInkSize = Number(event.target.value || 3); });
-  window.addEventListener("resize", () => setTimeout(() => { resizeAnswerCanvas(); drawAnswerInk(); resizeInkCanvas?.(); }, 120));
-}
-
-/* 문제 이미지가 0px로 보이는 문제 수정: percent가 아니라 실제 px로 표시 */
-function applyZoom() {
-  const img = $("questionImageView");
-  if (!img) return;
-  if (img.naturalWidth) img.style.width = `${Math.max(1, Math.round(img.naturalWidth * (state.zoom || 1)))}px`;
-  else img.style.width = "auto";
-  requestAnimationFrame(() => { try { resizeInkCanvas(); } catch(_) {} });
-}
-function fitImage() {
-  const img = $("questionImageView");
-  const scroller = $("questionImageScroller");
-  if (!img || !scroller) return;
-  const run = () => {
-    if (!img.naturalWidth || !scroller.clientWidth) {
-      img.style.width = "auto";
-      return;
-    }
-    state.zoom = Math.max(0.2, Math.min(1, (scroller.clientWidth - 20) / img.naturalWidth));
-    applyZoom();
-  };
-  run();
-  setTimeout(run, 80);
-}
-
-/* 문제 이미지 없는 경우 빈 회색창 대신 안내 */
-function showQuestionPage(index) {
-  const p = currentProblem();
-  const pages = realPages(p?.questionPages || []);
-  const scroller = $("questionImageScroller");
-  let note = $("emptyQuestionNote");
-  if (!note && scroller) {
-    note = document.createElement("div");
-    note.id = "emptyQuestionNote";
-    note.className = "empty-image-note hidden";
-    note.textContent = "문제 이미지가 없습니다. 목록에서 수정해 문제 빈 페이지에 스크린샷을 붙여넣고 저장하세요.";
-    scroller.appendChild(note);
-  }
-  state.qPage = Math.max(0, Math.min(index, pages.length - 1));
-  if (!pages.length) {
-    $("questionImageView")?.classList.add("hidden");
-    if (note) note.classList.remove("hidden");
-    $("questionPageBadge").textContent = "문제 이미지 없음";
-    return;
-  }
-  if (note) note.classList.add("hidden");
-  const img = $("questionImageView");
-  img.classList.remove("hidden");
-  img.src = pages[state.qPage] || "";
-  $("questionPageBadge").textContent = `문제 ${state.qPage + 1}/${pages.length}쪽`;
-  fitImage();
-  saveDraft();
-}
-
-/* 문제풀이 열 때 손글씨 답안 복구 */
-const openCurrentProblem_v8 = openCurrentProblem;
-openCurrentProblem = function() {
-  openCurrentProblem_v8();
-  if (!state.solve) return;
-  state.answerInkStrokes = Array.isArray(state.solve.answerInkStrokes) ? state.solve.answerInkStrokes : [];
-  state.answerInputMode = state.solve.answerInputMode || "handwriting";
-  setupAnswerInkLayer();
-  setAnswerInkTool("pen");
-  setAnswerInputMode(state.answerInputMode);
-  setTimeout(() => { resizeAnswerCanvas(); drawAnswerInk(); fitImage(); }, 120);
-};
-
-/* 초안 저장 시 손글씨 데이터도 포함 */
-const saveDraft_v8 = saveDraft;
-saveDraft = function() {
-  if (state.solve) {
-    state.solve.answer = $("answerText")?.value ?? state.solve.answer;
-    state.solve.answerInkStrokes = state.answerInkStrokes || [];
-    state.solve.answerInkData = answerHasInk() ? dataUrlFromAnswerCanvas() : "";
-    state.solve.answerInputMode = state.answerInputMode || "handwriting";
-  }
-  saveDraft_v8();
-};
-
-/* 제출/채점 저장에 손글씨 포함 */
-const submitAnswer_v8 = submitAnswer;
-submitAnswer = function() {
-  if (state.solve) {
-    state.solve.answerInkStrokes = state.answerInkStrokes || [];
-    state.solve.answerInkData = answerHasInk() ? dataUrlFromAnswerCanvas() : "";
-    state.solve.answerInputMode = state.answerInputMode || "handwriting";
-  }
-  submitAnswer_v8();
-  const ink = $("ownAnswerInkView");
-  if (ink) {
-    if (state.solve?.answerInkData) {
-      ink.src = state.solve.answerInkData;
-      ink.classList.remove("hidden");
-    } else {
-      ink.classList.add("hidden");
-    }
-  }
-};
-const saveAttempt_v8 = saveAttempt;
-saveAttempt = async function() {
-  if (state.solve) {
-    state.solve.answerInkData = answerHasInk() ? dataUrlFromAnswerCanvas() : "";
-    state.solve.answerInkStrokes = state.answerInkStrokes || [];
-  }
-  const attempt = await saveAttempt_v8();
-  if (attempt) {
-    attempt.answerInkData = state.solve?.answerInkData || "";
-    attempt.answerInkStrokes = state.solve?.answerInkStrokes || [];
-    attempt.answerInputMode = state.solve?.answerInputMode || "handwriting";
-    await put(STORE_ATTEMPTS, attempt);
-    await loadData();
-  }
-  return attempt;
-};
-
-setTimeout(() => {
-  setupAnswerInkLayer();
-  resizeAnswerCanvas();
-  drawAnswerInk();
-  fitImage();
-}, 500);
-
-
-/* === v9 화면맞춤/가로이동/필기/지우개 안정화 === */
-function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
-
-function applyZoom() {
-  const img = $("questionImageView");
-  const wrap = $("imageCanvasWrap");
-  if (!img || !wrap) return;
-  if (!img.naturalWidth) return;
-
-  const width = Math.max(1, Math.round(img.naturalWidth * (state.zoom || 1)));
-  const height = Math.max(1, Math.round(img.naturalHeight * (state.zoom || 1)));
-
-  img.style.width = `${width}px`;
-  img.style.height = `${height}px`;
-  wrap.style.width = `${width}px`;
-  wrap.style.height = `${height}px`;
-
-  requestAnimationFrame(() => {
-    resizeInkCanvasV9();
-    drawInkV9();
-  });
-}
-
-function fitImage() {
-  const img = $("questionImageView");
-  const scroller = $("questionImageScroller");
-  if (!img || !scroller) return;
-
-  const run = () => {
-    if (!img.naturalWidth || !scroller.clientWidth) return;
-    const widthRatio = Math.max(0.05, (scroller.clientWidth - 4) / img.naturalWidth);
-    state.zoom = clamp(widthRatio, 0.05, 1);
-    applyZoom();
-    scroller.scrollLeft = 0;
-    scroller.scrollTop = 0;
-  };
-
-  if (!img.naturalWidth) img.onload = run;
-  run();
-  setTimeout(run, 80);
-  setTimeout(run, 250);
-}
-
-function showQuestionPage(index) {
-  const p = currentProblem();
-  const pages = realPages(p?.questionPages || []);
-  const scroller = $("questionImageScroller");
-  let note = $("emptyQuestionNote");
-  if (!note && scroller) {
-    note = document.createElement("div");
-    note.id = "emptyQuestionNote";
-    note.className = "empty-image-note hidden";
-    note.textContent = "문제 이미지가 없습니다. 목록에서 수정해 문제 빈 페이지에 스크린샷을 붙여넣고 저장하세요.";
-    scroller.appendChild(note);
-  }
-
-  state.qPage = Math.max(0, Math.min(index, pages.length - 1));
-  const img = $("questionImageView");
-
-  if (!pages.length) {
-    img?.classList.add("hidden");
-    if (note) note.classList.remove("hidden");
-    $("questionPageBadge").textContent = "문제 이미지 없음";
-    return;
-  }
-
-  if (note) note.classList.add("hidden");
-  img.classList.remove("hidden");
-  img.onload = () => {
-    fitImage();
-    resetProblemInkLayerV9();
-  };
-  img.src = pages[state.qPage] || "";
-  $("questionPageBadge").textContent = `문제 ${state.qPage + 1}/${pages.length}쪽`;
-  saveDraft();
-}
-
-/* 문제 이미지 위 필기 */
-function problemInkKeyV9() {
-  const p = currentProblem?.();
-  if (!p) return "";
-  return `${p.id}:${state.qPage || 0}`;
-}
-function resizeInkCanvasV9() {
-  const img = $("questionImageView");
-  const canvas = $("inkCanvas");
-  const wrap = $("imageCanvasWrap");
-  if (!img || !canvas || !wrap || img.classList.contains("hidden")) return;
-
-  const w = img.offsetWidth || Math.round((img.naturalWidth || 1) * (state.zoom || 1));
-  const h = img.offsetHeight || Math.round((img.naturalHeight || 1) * (state.zoom || 1));
-  if (!w || !h) return;
-
-  wrap.style.width = `${w}px`;
-  wrap.style.height = `${h}px`;
-
-  const dpr = window.devicePixelRatio || 1;
-  const cw = Math.max(1, Math.round(w * dpr));
-  const ch = Math.max(1, Math.round(h * dpr));
-
-  if (canvas.width !== cw || canvas.height !== ch) {
-    canvas.width = cw;
-    canvas.height = ch;
-  }
-  canvas.style.width = `${w}px`;
-  canvas.style.height = `${h}px`;
-}
-function drawInkV9() {
-  const canvas = $("inkCanvas");
-  if (!canvas) return;
-  const rect = canvas.getBoundingClientRect();
-  if (!rect.width || !rect.height) return;
-
-  const dpr = window.devicePixelRatio || 1;
-  const ctx = canvas.getContext("2d");
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, rect.width, rect.height);
-
-  const strokes = state.inkData?.[problemInkKeyV9()] || [];
-  for (const stroke of strokes) {
-    if (!stroke.points || !stroke.points.length) continue;
-    ctx.save();
-    ctx.globalCompositeOperation = stroke.tool === "eraser" ? "destination-out" : "source-over";
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.strokeStyle = stroke.tool === "eraser" ? "rgba(0,0,0,1)" : "#0ea5e9";
-    ctx.lineWidth = Number(stroke.size || 3);
-    ctx.beginPath();
-    stroke.points.forEach((pt, i) => {
-      const x = pt.x * rect.width;
-      const y = pt.y * rect.height;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    });
-    ctx.stroke();
-    ctx.restore();
-  }
-}
-function canvasPointV9(event, canvas) {
-  const rect = canvas.getBoundingClientRect();
-  return {
-    x: clamp((event.clientX - rect.left) / rect.width, 0, 1),
-    y: clamp((event.clientY - rect.top) / rect.height, 0, 1)
-  };
-}
-function setInkTool(tool) {
-  state.inkTool = tool === "eraser" ? "eraser" : "pen";
-  $("penToolBtn")?.classList.toggle("ink-active", state.inkTool === "pen");
-  $("eraserToolBtn")?.classList.toggle("ink-active", state.inkTool === "eraser");
-}
-function saveInkDataV9() {
-  try {
-    localStorage.setItem("essayPsatBaseInk_v2", JSON.stringify(state.inkData || {}));
-  } catch (err) {
-    console.warn(err);
-  }
-}
-function clearCurrentInk() {
-  const key = problemInkKeyV9();
-  if (!key) return;
-  if (!confirm("현재 문제의 현재 쪽 필기를 지울까?")) return;
-  if (!state.inkData) state.inkData = {};
-  state.inkData[key] = [];
-  saveInkDataV9();
-  drawInkV9();
-}
-function resetProblemInkLayerV9() {
-  let canvas = $("inkCanvas");
-  if (!canvas) return;
-  const fresh = canvas.cloneNode(false);
-  canvas.replaceWith(fresh);
-  canvas = fresh;
-
-  resizeInkCanvasV9();
-  drawInkV9();
-
-  canvas.addEventListener("pointerdown", (event) => {
-    // 손가락은 이미지 이동/스크롤용. S펜/마우스만 문제 위 필기.
-    if (event.pointerType === "touch") return;
-    const key = problemInkKeyV9();
-    if (!key) return;
-    event.preventDefault();
-    canvas.setPointerCapture?.(event.pointerId);
-
-    if (!state.inkData) state.inkData = {};
-    if (!state.inkData[key]) state.inkData[key] = [];
-
-    const stroke = {
-      tool: state.inkTool === "eraser" ? "eraser" : "pen",
-      size: Number(state.inkSize || 3) * (state.inkTool === "eraser" ? 5 : 1),
-      points: [canvasPointV9(event, canvas)]
-    };
-    state.currentStroke = stroke;
-    state.inkData[key].push(stroke);
-    drawInkV9();
-  });
-
-  canvas.addEventListener("pointermove", (event) => {
-    if (!state.currentStroke) return;
-    if (event.pointerType === "touch") return;
-    event.preventDefault();
-    state.currentStroke.points.push(canvasPointV9(event, canvas));
-    drawInkV9();
-  });
-
-  const end = (event) => {
-    if (!state.currentStroke) return;
-    if (event.pointerType !== "touch") event.preventDefault();
-    state.currentStroke = null;
-    saveInkDataV9();
-  };
-  canvas.addEventListener("pointerup", end);
-  canvas.addEventListener("pointercancel", end);
-  canvas.addEventListener("pointerleave", end);
-
-  $("penToolBtn") && ($("penToolBtn").onclick = () => setInkTool("pen"));
-  $("eraserToolBtn") && ($("eraserToolBtn").onclick = () => setInkTool("eraser"));
-  $("clearInkBtn") && ($("clearInkBtn").onclick = clearCurrentInk);
-  $("inkSizeInput") && ($("inkSizeInput").oninput = (event) => { state.inkSize = Number(event.target.value || 3); });
-
-  setInkTool(state.inkTool || "pen");
-}
-
-/* 답안 손글씨: 손가락/S펜 모두 필기 가능, 지우개 정상화 */
-function resizeAnswerCanvasV9() {
-  const canvas = $("answerInkCanvas");
-  const wrap = $("handwritingWrap");
-  if (!canvas || !wrap || wrap.classList.contains("hidden")) return;
-  const rect = wrap.getBoundingClientRect();
-  if (!rect.width || !rect.height) return;
-
-  const dpr = window.devicePixelRatio || 1;
-  const w = Math.max(1, Math.round(rect.width * dpr));
-  const h = Math.max(1, Math.round(rect.height * dpr));
-
-  if (canvas.width !== w || canvas.height !== h) {
-    canvas.width = w;
-    canvas.height = h;
-  }
-  canvas.style.width = `${rect.width}px`;
-  canvas.style.height = `${rect.height}px`;
-  drawAnswerInkV9();
-}
-function drawAnswerInkV9() {
-  const canvas = $("answerInkCanvas");
-  const wrap = $("handwritingWrap");
-  if (!canvas) return;
-  const rect = canvas.getBoundingClientRect();
-  if (!rect.width || !rect.height) return;
-
-  const dpr = window.devicePixelRatio || 1;
-  const ctx = canvas.getContext("2d");
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, rect.width, rect.height);
-
-  for (const stroke of state.answerInkStrokes || []) {
-    if (!stroke.points || !stroke.points.length) continue;
-    ctx.save();
-    ctx.globalCompositeOperation = stroke.tool === "eraser" ? "destination-out" : "source-over";
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.strokeStyle = stroke.tool === "eraser" ? "rgba(0,0,0,1)" : "#111827";
-    ctx.lineWidth = Number(stroke.size || 3);
-    ctx.beginPath();
-    stroke.points.forEach((pt, i) => {
-      const x = pt.x * rect.width;
-      const y = pt.y * rect.height;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    });
-    ctx.stroke();
-    ctx.restore();
-  }
-  if (wrap) wrap.classList.toggle("has-ink", (state.answerInkStrokes || []).length > 0);
-}
-function setAnswerInkTool(tool) {
-  state.answerInkTool = tool === "eraser" ? "eraser" : "pen";
-  $("answerPenBtn")?.classList.toggle("ink-active", state.answerInkTool === "pen");
-  $("answerEraserBtn")?.classList.toggle("ink-active", state.answerInkTool === "eraser");
-}
-function resetAnswerInkLayerV9() {
-  let canvas = $("answerInkCanvas");
-  if (!canvas) return;
-  const fresh = canvas.cloneNode(false);
-  canvas.replaceWith(fresh);
-  canvas = fresh;
-
-  resizeAnswerCanvasV9();
-  drawAnswerInkV9();
-
-  canvas.addEventListener("pointerdown", (event) => {
-    // 답안칸은 필기앱처럼 손가락/S펜 모두 필기
-    event.preventDefault();
-    canvas.setPointerCapture?.(event.pointerId);
-    const stroke = {
-      tool: state.answerInkTool === "eraser" ? "eraser" : "pen",
-      size: Number(state.answerInkSize || 3) * (state.answerInkTool === "eraser" ? 5 : 1),
-      points: [canvasPointV9(event, canvas)]
-    };
-    state.answerInkCurrentStroke = stroke;
-    if (!Array.isArray(state.answerInkStrokes)) state.answerInkStrokes = [];
-    state.answerInkStrokes.push(stroke);
-    drawAnswerInkV9();
-  });
-  canvas.addEventListener("pointermove", (event) => {
-    if (!state.answerInkCurrentStroke) return;
-    event.preventDefault();
-    state.answerInkCurrentStroke.points.push(canvasPointV9(event, canvas));
-    drawAnswerInkV9();
-  });
-  const end = (event) => {
-    if (!state.answerInkCurrentStroke) return;
-    event.preventDefault();
-    state.answerInkCurrentStroke = null;
-    saveAnswerDraftInk?.();
-  };
-  canvas.addEventListener("pointerup", end);
-  canvas.addEventListener("pointercancel", end);
-  canvas.addEventListener("pointerleave", end);
-
-  $("answerPenBtn") && ($("answerPenBtn").onclick = () => setAnswerInkTool("pen"));
-  $("answerEraserBtn") && ($("answerEraserBtn").onclick = () => setAnswerInkTool("eraser"));
-  $("clearAnswerInkBtn") && ($("clearAnswerInkBtn").onclick = () => {
-    if (!confirm("답안 손글씨를 모두 지울까?")) return;
-    state.answerInkStrokes = [];
-    drawAnswerInkV9();
-    saveAnswerDraftInk?.();
-  });
-  $("answerInkSizeInput") && ($("answerInkSizeInput").oninput = (event) => {
-    state.answerInkSize = Number(event.target.value || 3);
-  });
-
-  setAnswerInkTool(state.answerInkTool || "pen");
-}
-
-const openCurrentProblem_v9 = openCurrentProblem;
-openCurrentProblem = function() {
-  openCurrentProblem_v9();
-  setTimeout(() => {
-    fitImage();
-    resetProblemInkLayerV9();
-    resetAnswerInkLayerV9();
-    resizeAnswerCanvasV9();
-  }, 160);
-};
-
-const originalSetAnswerInputModeV9 = typeof setAnswerInputMode === "function" ? setAnswerInputMode : null;
-if (originalSetAnswerInputModeV9) {
-  setAnswerInputMode = function(mode) {
-    originalSetAnswerInputModeV9(mode);
-    setTimeout(() => {
-      resizeAnswerCanvasV9();
-      resetAnswerInkLayerV9();
-    }, 80);
-  };
-}
-
-window.addEventListener("resize", () => {
-  setTimeout(() => {
-    fitImage();
-    resizeInkCanvasV9();
-    drawInkV9();
-    resizeAnswerCanvasV9();
-    drawAnswerInkV9();
-  }, 160);
-});
-
-setTimeout(() => {
-  fitImage();
-  resetProblemInkLayerV9();
-  resetAnswerInkLayerV9();
-}, 700);
-
-
-/* === v10 레이아웃/폭맞춤/답안쪽 추가 최종 수정 === */
-function clampV10(v, min, max) { return Math.max(min, Math.min(max, v)); }
-function realProblemPagesV10() {
-  const p = currentProblem?.();
-  return realPages(p?.questionPages || []);
-}
-function problemScrollerV10() { return $("questionImageScroller"); }
-
-function applyZoom() {
-  const img = $("questionImageView");
-  const wrap = $("imageCanvasWrap");
-  if (!img || !wrap || !img.naturalWidth) return;
-
-  const width = Math.max(1, Math.floor(img.naturalWidth * (state.zoom || 1)));
-  const height = Math.max(1, Math.floor(img.naturalHeight * (state.zoom || 1)));
-
-  img.style.width = width + "px";
-  img.style.height = height + "px";
-  wrap.style.width = width + "px";
-  wrap.style.height = height + "px";
-  wrap.style.minWidth = width + "px";
-  wrap.style.minHeight = height + "px";
-
-  requestAnimationFrame(() => {
-    resizeInkCanvasV10();
-    drawInkV10();
-  });
-}
-function fitImage() {
-  const img = $("questionImageView");
-  const scroller = problemScrollerV10();
-  if (!img || !scroller) return;
-
-  const run = () => {
-    if (!img.naturalWidth || !scroller.clientWidth) return;
-    // 화면 폭 100%에 맞춤. 패딩 0 기준.
-    state.zoom = clampV10(scroller.clientWidth / img.naturalWidth, 0.05, 2);
-    applyZoom();
-    scroller.scrollLeft = 0;
-    scroller.scrollTop = 0;
-  };
-  if (!img.naturalWidth) img.onload = run;
-  run();
-  setTimeout(run, 80);
-  setTimeout(run, 250);
-}
-function zoomByV10(delta) {
-  const scroller = problemScrollerV10();
-  const oldZoom = state.zoom || 1;
-  const oldLeft = scroller ? scroller.scrollLeft : 0;
-  const oldTop = scroller ? scroller.scrollTop : 0;
-  state.zoom = clampV10(oldZoom + delta, 0.05, 4);
-  applyZoom();
-  if (scroller) {
-    scroller.scrollLeft = Math.round(oldLeft * (state.zoom / oldZoom));
-    scroller.scrollTop = Math.round(oldTop * (state.zoom / oldZoom));
-  }
-}
-function showQuestionPage(index) {
-  const pages = realProblemPagesV10();
-  const scroller = problemScrollerV10();
-  let note = $("emptyQuestionNote");
-  if (!note && scroller) {
-    note = document.createElement("div");
-    note.id = "emptyQuestionNote";
-    note.className = "empty-image-note hidden";
-    note.textContent = "문제 이미지가 없습니다. 목록에서 수정해 문제 빈 페이지에 스크린샷을 붙여넣고 저장하세요.";
-    scroller.appendChild(note);
-  }
-
-  state.qPage = Math.max(0, Math.min(index, pages.length - 1));
-  const img = $("questionImageView");
-  if (!pages.length) {
-    img?.classList.add("hidden");
-    if (note) note.classList.remove("hidden");
-    $("questionPageBadge").textContent = "문제 없음";
-    return;
-  }
-
-  if (note) note.classList.add("hidden");
-  img.classList.remove("hidden");
-  img.onload = () => {
-    fitImage();
-    resetProblemInkLayerV10();
-  };
-  img.src = pages[state.qPage] || "";
-  $("questionPageBadge").textContent = `문제 ${state.qPage + 1}/${pages.length}`;
-  saveDraft();
-}
-
-/* 문제 위 필기: S펜/마우스만, 손가락은 가로/세로 이동 */
-function problemInkKeyV10() {
-  const p = currentProblem?.();
-  return p ? `${p.id}:${state.qPage || 0}` : "";
-}
-function resizeInkCanvasV10() {
-  const img = $("questionImageView"), canvas = $("inkCanvas"), wrap = $("imageCanvasWrap");
-  if (!img || !canvas || !wrap || img.classList.contains("hidden")) return;
-  const w = img.offsetWidth || Math.floor((img.naturalWidth || 1) * (state.zoom || 1));
-  const h = img.offsetHeight || Math.floor((img.naturalHeight || 1) * (state.zoom || 1));
-  if (!w || !h) return;
-
-  const dpr = window.devicePixelRatio || 1;
-  canvas.width = Math.max(1, Math.floor(w * dpr));
-  canvas.height = Math.max(1, Math.floor(h * dpr));
-  canvas.style.width = w + "px";
-  canvas.style.height = h + "px";
-}
-function drawInkV10() {
-  const canvas = $("inkCanvas");
-  if (!canvas) return;
-  const rect = canvas.getBoundingClientRect();
-  if (!rect.width || !rect.height) return;
-  const dpr = window.devicePixelRatio || 1;
-  const ctx = canvas.getContext("2d");
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, rect.width, rect.height);
-
-  const strokes = state.inkData?.[problemInkKeyV10()] || [];
-  strokes.forEach(stroke => {
-    if (!stroke.points || !stroke.points.length) return;
-    ctx.save();
-    ctx.globalCompositeOperation = stroke.tool === "eraser" ? "destination-out" : "source-over";
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.strokeStyle = stroke.tool === "eraser" ? "rgba(0,0,0,1)" : "#0ea5e9";
-    ctx.lineWidth = Number(stroke.size || 3);
-    ctx.beginPath();
-    stroke.points.forEach((pt, i) => {
-      const x = pt.x * rect.width;
-      const y = pt.y * rect.height;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    });
-    ctx.stroke();
-    ctx.restore();
-  });
-}
-function pointV10(event, canvas) {
-  const rect = canvas.getBoundingClientRect();
-  return {
-    x: clampV10((event.clientX - rect.left) / rect.width, 0, 1),
-    y: clampV10((event.clientY - rect.top) / rect.height, 0, 1)
-  };
-}
-function setInkTool(tool) {
-  state.inkTool = tool === "eraser" ? "eraser" : "pen";
-  $("penToolBtn")?.classList.toggle("ink-active", state.inkTool === "pen");
-  $("eraserToolBtn")?.classList.toggle("ink-active", state.inkTool === "eraser");
-}
-function saveProblemInkV10() {
-  try { localStorage.setItem("essayPsatBaseInk_v2", JSON.stringify(state.inkData || {})); } catch {}
-}
-function clearCurrentInk() {
-  const key = problemInkKeyV10();
-  if (!key) return;
-  if (!confirm("현재 문제의 현재 쪽 필기를 지울까?")) return;
-  if (!state.inkData) state.inkData = {};
-  state.inkData[key] = [];
-  saveProblemInkV10();
-  drawInkV10();
-}
-function resetProblemInkLayerV10() {
-  let canvas = $("inkCanvas");
-  if (!canvas) return;
-  const fresh = canvas.cloneNode(false);
-  canvas.replaceWith(fresh);
-  canvas = fresh;
-  resizeInkCanvasV10();
-  drawInkV10();
-
-  canvas.addEventListener("pointerdown", event => {
-    if (event.pointerType === "touch") return;
-    event.preventDefault();
-    const key = problemInkKeyV10();
-    if (!key) return;
-    canvas.setPointerCapture?.(event.pointerId);
-    if (!state.inkData) state.inkData = {};
-    if (!state.inkData[key]) state.inkData[key] = [];
-    const stroke = {
-      tool: state.inkTool === "eraser" ? "eraser" : "pen",
-      size: Number(state.inkSize || 3) * (state.inkTool === "eraser" ? 5 : 1),
-      points: [pointV10(event, canvas)]
-    };
-    state.currentStroke = stroke;
-    state.inkData[key].push(stroke);
-    drawInkV10();
-  });
-  canvas.addEventListener("pointermove", event => {
-    if (!state.currentStroke || event.pointerType === "touch") return;
-    event.preventDefault();
-    state.currentStroke.points.push(pointV10(event, canvas));
-    drawInkV10();
-  });
-  const end = event => {
-    if (!state.currentStroke) return;
-    if (event.pointerType !== "touch") event.preventDefault();
-    state.currentStroke = null;
-    saveProblemInkV10();
-  };
-  canvas.addEventListener("pointerup", end);
-  canvas.addEventListener("pointercancel", end);
-  canvas.addEventListener("pointerleave", end);
-
-  $("penToolBtn") && ($("penToolBtn").onclick = () => setInkTool("pen"));
-  $("eraserToolBtn") && ($("eraserToolBtn").onclick = () => setInkTool("eraser"));
-  $("clearInkBtn") && ($("clearInkBtn").onclick = clearCurrentInk);
-  $("inkSizeInput") && ($("inkSizeInput").oninput = event => { state.inkSize = Number(event.target.value || 3); });
-  setInkTool(state.inkTool || "pen");
-}
-
-/* 답안 페이지 */
-function ensureAnswerPagesV10() {
-  if (!state.solve) return;
-  if (!Array.isArray(state.solve.answerPages) || !state.solve.answerPages.length) {
-    state.solve.answerPages = [{
-      text: state.solve.answer || "",
-      strokes: Array.isArray(state.solve.answerInkStrokes) ? state.solve.answerInkStrokes : []
-    }];
-  }
-  if (typeof state.solve.answerPageIndex !== "number") state.solve.answerPageIndex = 0;
-  state.solve.answerPageIndex = clampV10(state.solve.answerPageIndex, 0, state.solve.answerPages.length - 1);
-}
-function currentAnswerPageV10() {
-  ensureAnswerPagesV10();
-  return state.solve.answerPages[state.solve.answerPageIndex];
-}
-function saveCurrentAnswerPageV10() {
-  if (!state.solve) return;
-  ensureAnswerPagesV10();
-  const page = currentAnswerPageV10();
-  page.text = $("answerText")?.value || "";
-  page.strokes = Array.isArray(state.answerInkStrokes) ? state.answerInkStrokes : [];
-
-  /* v66: 실제 문제풀이 답안칸 비율 저장 */
-  try {
-    const wrapV66 = $("handwritingWrap");
-    const rectV66 = wrapV66?.getBoundingClientRect?.();
-    if (rectV66?.width > 1 && rectV66?.height > 1) {
-      page.canvasWidthV66 = Math.round(rectV66.width);
-      page.canvasHeightV66 = Math.round(rectV66.height);
-      page.canvasAspectV66 = rectV66.width / rectV66.height;
-    }
-  } catch {}
-
-  state.solve.answer = state.solve.answerPages.map((p, i) => `[${i+1}쪽]\n${p.text || ""}`).join("\n\n");
-  state.solve.answerInkStrokes = state.answerInkStrokes || [];
-  state.solve.answerInkData = answerHasInk?.() ? dataUrlFromAnswerCanvas?.() : "";
-  localStorage.setItem("essayPsatBaseDraft", JSON.stringify(state.solve));
-  renderAnswerPageBadgeV10();
-}
-function loadAnswerPageV10(index) {
-  if (!state.solve) return;
-  ensureAnswerPagesV10();
-  state.solve.answerPageIndex = clampV10(index, 0, state.solve.answerPages.length - 1);
-  const page = currentAnswerPageV10();
-  $("answerText").value = page.text || "";
-  state.answerInkStrokes = Array.isArray(page.strokes) ? page.strokes : [];
-  renderAnswerPageBadgeV10();
-  setTimeout(() => {
-    resizeAnswerCanvasV10();
-    drawAnswerInkV10();
-  }, 40);
-}
-function renderAnswerPageBadgeV10() {
-  const badge = $("answerPageBadge");
-  if (!badge || !state.solve) return;
-  ensureAnswerPagesV10();
-  badge.textContent = `답안 ${state.solve.answerPageIndex + 1}/${state.solve.answerPages.length}쪽`;
-}
-function addAnswerPageV10() {
-  if (!state.solve) return;
-  saveCurrentAnswerPageV10();
-  state.solve.answerPages.push({ text: "", strokes: [] });
-  loadAnswerPageV10(state.solve.answerPages.length - 1);
-}
-function nextAnswerPageV10(delta) {
-  if (!state.solve) return;
-  saveCurrentAnswerPageV10();
-  loadAnswerPageV10((state.solve.answerPageIndex || 0) + delta);
-}
-
-/* 답안 손글씨: 답안칸은 손가락/S펜 모두 필기 */
-function resizeAnswerCanvasV10() {
-  const canvas = $("answerInkCanvas"), wrap = $("handwritingWrap");
-  if (!canvas || !wrap || wrap.classList.contains("hidden")) return;
-  const rect = wrap.getBoundingClientRect();
-  if (!rect.width || !rect.height) return;
-  const dpr = window.devicePixelRatio || 1;
-  canvas.width = Math.max(1, Math.floor(rect.width * dpr));
-  canvas.height = Math.max(1, Math.floor(rect.height * dpr));
-  canvas.style.width = rect.width + "px";
-  canvas.style.height = rect.height + "px";
-  drawAnswerInkV10();
-}
-function drawAnswerInkV10() {
-  const canvas = $("answerInkCanvas"), wrap = $("handwritingWrap");
-  if (!canvas) return;
-  const rect = canvas.getBoundingClientRect();
-  if (!rect.width || !rect.height) return;
-  const dpr = window.devicePixelRatio || 1;
-  const ctx = canvas.getContext("2d");
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, rect.width, rect.height);
-  (state.answerInkStrokes || []).forEach(stroke => {
-    if (!stroke.points || !stroke.points.length) return;
-    ctx.save();
-    ctx.globalCompositeOperation = stroke.tool === "eraser" ? "destination-out" : "source-over";
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.strokeStyle = stroke.tool === "eraser" ? "rgba(0,0,0,1)" : "#111827";
-    ctx.lineWidth = Number(stroke.size || 3);
-    ctx.beginPath();
-    stroke.points.forEach((pt, i) => {
-      const x = pt.x * rect.width;
-      const y = pt.y * rect.height;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    });
-    ctx.stroke();
-    ctx.restore();
-  });
-  if (wrap) wrap.classList.toggle("has-ink", (state.answerInkStrokes || []).length > 0);
-}
-function setAnswerInkTool(tool) {
-  state.answerInkTool = tool === "eraser" ? "eraser" : "pen";
-  $("answerPenBtn")?.classList.toggle("ink-active", state.answerInkTool === "pen");
-  $("answerEraserBtn")?.classList.toggle("ink-active", state.answerInkTool === "eraser");
-}
-function resetAnswerInkLayerV10() {
-  let canvas = $("answerInkCanvas");
-  if (!canvas) return;
-  const fresh = canvas.cloneNode(false);
-  canvas.replaceWith(fresh);
-  canvas = fresh;
-  resizeAnswerCanvasV10();
-  drawAnswerInkV10();
-
-  canvas.addEventListener("pointerdown", event => {
-    event.preventDefault();
-    canvas.setPointerCapture?.(event.pointerId);
-    const stroke = {
-      tool: state.answerInkTool === "eraser" ? "eraser" : "pen",
-      size: Number(state.answerInkSize || 3) * (state.answerInkTool === "eraser" ? 5 : 1),
-      points: [pointV10(event, canvas)]
-    };
-    state.answerInkCurrentStroke = stroke;
-    if (!Array.isArray(state.answerInkStrokes)) state.answerInkStrokes = [];
-    state.answerInkStrokes.push(stroke);
-    drawAnswerInkV10();
-  });
-  canvas.addEventListener("pointermove", event => {
-    if (!state.answerInkCurrentStroke) return;
-    event.preventDefault();
-    state.answerInkCurrentStroke.points.push(pointV10(event, canvas));
-    drawAnswerInkV10();
-  });
-  const end = event => {
-    if (!state.answerInkCurrentStroke) return;
-    event.preventDefault();
-    state.answerInkCurrentStroke = null;
-    saveCurrentAnswerPageV10();
-  };
-  canvas.addEventListener("pointerup", end);
-  canvas.addEventListener("pointercancel", end);
-  canvas.addEventListener("pointerleave", end);
-
-  $("answerPenBtn") && ($("answerPenBtn").onclick = () => setAnswerInkTool("pen"));
-  $("answerEraserBtn") && ($("answerEraserBtn").onclick = () => setAnswerInkTool("eraser"));
-  $("clearAnswerInkBtn") && ($("clearAnswerInkBtn").onclick = () => {
-    if (!confirm("현재 답안쪽 필기를 지울까?")) return;
-    state.answerInkStrokes = [];
-    drawAnswerInkV10();
-    saveCurrentAnswerPageV10();
-  });
-  $("answerInkSizeInput") && ($("answerInkSizeInput").oninput = event => { state.answerInkSize = Number(event.target.value || 3); });
-  $("prevAnswerPageBtn") && ($("prevAnswerPageBtn").onclick = () => nextAnswerPageV10(-1));
-  $("nextAnswerPageBtn") && ($("nextAnswerPageBtn").onclick = () => nextAnswerPageV10(1));
-  $("addAnswerPageBtn") && ($("addAnswerPageBtn").onclick = addAnswerPageV10);
-  setAnswerInkTool(state.answerInkTool || "pen");
-}
-
-/* 기존 함수 덮어쓰기 */
-const openCurrentProblem_v10 = openCurrentProblem;
-openCurrentProblem = function() {
-  openCurrentProblem_v10();
-  if (!state.solve) return;
-  ensureAnswerPagesV10();
-  loadAnswerPageV10(state.solve.answerPageIndex || 0);
-  setTimeout(() => {
-    fitImage();
-    resetProblemInkLayerV10();
-    resetAnswerInkLayerV10();
-    resizeAnswerCanvasV10();
-  }, 140);
-};
-const saveDraft_v10 = saveDraft;
-saveDraft = function() {
-  if (state.solve) saveCurrentAnswerPageV10();
-  else saveDraft_v10();
-};
-const submitAnswer_v10 = submitAnswer;
-submitAnswer = function() {
-  if (state.solve) saveCurrentAnswerPageV10();
-  submitAnswer_v10();
-};
-const saveAttempt_v10 = saveAttempt;
-saveAttempt = async function() {
-  if (state.solve) saveCurrentAnswerPageV10();
-  const attempt = await saveAttempt_v10();
-  if (attempt && state.solve?.answerPages) {
-    attempt.answerPages = state.solve.answerPages;
-    await put(STORE_ATTEMPTS, attempt);
-    await loadData();
-  }
-  return attempt;
-};
-
-/* 버튼 재연결 */
-setTimeout(() => {
-  $("fitBtn") && ($("fitBtn").onclick = fitImage);
-  $("zoomInBtn") && ($("zoomInBtn").onclick = () => zoomByV10(0.15));
-  $("zoomOutBtn") && ($("zoomOutBtn").onclick = () => zoomByV10(-0.15));
-  $("prevQuestionPageBtn") && ($("prevQuestionPageBtn").onclick = () => showQuestionPage((state.qPage || 0) - 1));
-  $("nextQuestionPageBtn") && ($("nextQuestionPageBtn").onclick = () => showQuestionPage((state.qPage || 0) + 1));
-  resetProblemInkLayerV10();
-  resetAnswerInkLayerV10();
-  fitImage();
-}, 600);
-
-window.addEventListener("resize", () => {
-  setTimeout(() => {
-    fitImage();
-    resizeAnswerCanvasV10();
-    drawAnswerInkV10();
-  }, 160);
-});
-
-
-/* === v11 해설화면 수정/답안페이지/분할크기 조절 === */
-function clampV11(v, min, max) { return Math.max(min, Math.min(max, v)); }
-
-/* 문제/답안 화면 크기 손가락 슬라이드 조절 */
-function setSplitRatioV11(ratio) {
-  ratio = clampV11(ratio, 25, 75);
-  const shell = $("solveShell");
-  if (!shell) return;
-  shell.style.gridTemplateRows = `${ratio}dvh 10px calc(${100 - ratio}dvh - 10px)`;
-  localStorage.setItem("essaySplitRatioV11", String(ratio));
-  setTimeout(() => {
-    try { fitImage(); } catch {}
-    try { resizeAnswerCanvasV10(); drawAnswerInkV10(); } catch {}
-  }, 80);
-}
-function setupSplitHandleV11() {
-  const handle = $("splitHandle");
-  if (!handle || handle.dataset.ready) return;
-  handle.dataset.ready = "1";
-  const saved = Number(localStorage.getItem("essaySplitRatioV11") || 48);
-  setSplitRatioV11(saved);
-  const move = (clientY) => {
-    const ratio = clientY / window.innerHeight * 100;
-    setSplitRatioV11(ratio);
-  };
-  handle.addEventListener("pointerdown", (event) => {
-    event.preventDefault();
-    handle.setPointerCapture?.(event.pointerId);
-    const onMove = (e) => move(e.clientY);
-    const onUp = () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onUp);
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onUp);
-  });
-}
-
-/* v10 함수가 없을 수 있는 경우 대비: 문제 폭맞춤/이동 */
-function problemScrollerV11(){ return $("questionImageScroller"); }
-function applyZoom() {
-  const img = $("questionImageView"), wrap = $("imageCanvasWrap");
-  if (!img || !wrap || !img.naturalWidth) return;
-  const w = Math.max(1, Math.floor(img.naturalWidth * (state.zoom || 1)));
-  const h = Math.max(1, Math.floor(img.naturalHeight * (state.zoom || 1)));
-  img.style.width = w + "px"; img.style.height = h + "px";
-  wrap.style.width = w + "px"; wrap.style.height = h + "px";
-  wrap.style.minWidth = w + "px"; wrap.style.minHeight = h + "px";
-  requestAnimationFrame(() => { try { resizeInkCanvasV10(); drawInkV10(); } catch {} });
-}
-function fitImage() {
-  const img = $("questionImageView"), scroller = problemScrollerV11();
-  if (!img || !scroller) return;
-  const run = () => {
-    if (!img.naturalWidth || !scroller.clientWidth) return;
-    state.zoom = clampV11(scroller.clientWidth / img.naturalWidth, 0.05, 2);
-    applyZoom();
-    scroller.scrollLeft = 0; scroller.scrollTop = 0;
-  };
-  img.onload = run;
-  run(); setTimeout(run, 80); setTimeout(run, 250);
-}
-function zoomByV11(delta) {
-  const scroller = problemScrollerV11();
-  const oldZoom = state.zoom || 1;
-  const oldLeft = scroller ? scroller.scrollLeft : 0;
-  const oldTop = scroller ? scroller.scrollTop : 0;
-  state.zoom = clampV11(oldZoom + delta, 0.05, 4);
-  applyZoom();
-  if (scroller) {
-    scroller.scrollLeft = Math.round(oldLeft * (state.zoom / oldZoom));
-    scroller.scrollTop = Math.round(oldTop * (state.zoom / oldZoom));
-  }
-}
-
-/* 해설화면: 내답안 페이지 넘김 */
-state.scoreAnswerPageIndex = 0;
-state.scoreAnswerEditTool = "pen";
-state.scoreExpEditTool = "pen";
-state.scoreAnswerEdits = {};
-state.scoreExpEdits = {};
-
-function ensureAnswerPagesForScoreV11() {
-  if (!state.solve) return [{ text: state.solve?.answer || "", strokes: state.solve?.answerInkStrokes || [] }];
-  if (Array.isArray(state.solve.answerPages) && state.solve.answerPages.length) return state.solve.answerPages;
-  return [{ text: state.solve.answer || "", strokes: state.solve.answerInkStrokes || [] }];
-}
-function renderScoreAnswerPageV11(index=0) {
-  const pages = ensureAnswerPagesForScoreV11();
-  state.scoreAnswerPageIndex = clampV11(index, 0, pages.length - 1);
-  const page = pages[state.scoreAnswerPageIndex] || {};
-  $("scoreAnswerPageBadge") && ($("scoreAnswerPageBadge").textContent = `답안 ${state.scoreAnswerPageIndex + 1}/${pages.length}쪽`);
-  const ownText=$("ownAnswerView");
-  if(ownText){
-    const hasKeyboardText=String(page.text||"").trim().length>0;
-    ownText.textContent=hasKeyboardText?page.text:"";
-    ownText.classList.toggle("keyboard-answer-empty-v50",!hasKeyboardText);
-  }
-  const img = $("ownAnswerInkView");
-  if (img) {
-    const temp = makeAnswerPageImageV11(page);
-    if (temp) { img.src = temp; img.classList.remove("hidden"); }
-    else img.classList.add("hidden");
-  }
-  setTimeout(() => resetScoreAnswerCanvasV11(), 80);
-}
-function makeAnswerPageImageV11(page) {
-  if (!page || !Array.isArray(page.strokes) || !page.strokes.length) return "";
-
-  /*
-    v66:
-    예전처럼 무조건 900x1200으로 재생성하지 않는다.
-    실제 문제풀이 답안칸의 가로/세로 비율 그대로 preview를 만든다.
-  */
-  let sourceW = Number(page.canvasWidthV66 || 0);
-  let sourceH = Number(page.canvasHeightV66 || 0);
-  let aspect = Number(page.canvasAspectV66 || 0);
-
-  if (!(sourceW > 1 && sourceH > 1 && aspect > 0)) {
-    try {
-      const wrap = $("handwritingWrap");
-      const rect = wrap?.getBoundingClientRect?.();
-      if (rect?.width > 1 && rect?.height > 1) {
-        sourceW = rect.width;
-        sourceH = rect.height;
-        aspect = rect.width / rect.height;
-      }
-    } catch {}
-  }
-
-  if (!(aspect > 0)) {
-    // 마지막 fallback만 기존 3:4 비율
-    sourceW = 900;
-    sourceH = 1200;
-    aspect = sourceW / sourceH;
-  }
-
-  /*
-    preview bitmap은 충분한 해상도로 만들되,
-    화면에서 보이는 비율은 실제 답안칸과 동일.
-  */
-  const canvas = document.createElement("canvas");
-  canvas.width = 1200;
-  canvas.height = Math.max(1, Math.round(canvas.width / aspect));
-
-  const ctx = canvas.getContext("2d");
-  ctx.fillStyle = "#fff";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  const scale = canvas.width / Math.max(1, sourceW);
-
-  // 문제풀이 답안지의 줄 간격(32px)도 같은 비율로 재현
-  ctx.strokeStyle = "#eef2f7";
-  ctx.lineWidth = Math.max(1, scale);
-  const firstLine = Math.max(1, 28 * scale);
-  const lineGap = Math.max(8, 32 * scale);
-
-  for (let y = firstLine; y < canvas.height; y += lineGap) {
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(canvas.width, y);
-    ctx.stroke();
-  }
-
-  for (const stroke of page.strokes) {
-    if (!stroke.points || !stroke.points.length) continue;
-
-    ctx.save();
-    ctx.globalCompositeOperation =
-      stroke.tool === "eraser" ? "destination-out" : "source-over";
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.strokeStyle =
-      stroke.tool === "eraser" ? "rgba(0,0,0,1)" : "#111827";
-
-    // 원래 답안칸에서 보이던 펜 굵기 비율 그대로
-    ctx.lineWidth = Math.max(1, Number(stroke.size || 3) * scale);
-    ctx.beginPath();
-
-    stroke.points.forEach((pt, i) => {
-      const x = pt.x * canvas.width;
-      const y = pt.y * canvas.height;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    });
-
-    if (stroke.points.length === 1) {
-      const pt = stroke.points[0];
-      ctx.lineTo(pt.x * canvas.width + 0.01, pt.y * canvas.height + 0.01);
-    }
-
-    ctx.stroke();
-    ctx.restore();
-  }
-
-  return canvas.toDataURL("image/png");
-}
-
-/* 해설/답안 수정 필기 캔버스 */
-function scoreKeyV11(kind) {
-  const p = currentProblem?.();
-  const pid = p?.id || "unknown";
-  if (kind === "answer") return `${pid}:answer:${state.scoreAnswerPageIndex || 0}`;
-  return `${pid}:exp:${state.expPage || 0}`;
-}
-function loadScoreEditsV11() {
-  try { state.scoreAnswerEdits = JSON.parse(localStorage.getItem("essayScoreAnswerEditsV11") || "{}"); } catch { state.scoreAnswerEdits = {}; }
-  try { state.scoreExpEdits = JSON.parse(localStorage.getItem("essayScoreExpEditsV11") || "{}"); } catch { state.scoreExpEdits = {}; }
-}
-function saveScoreEditsV11() {
-  try { localStorage.setItem("essayScoreAnswerEditsV11", JSON.stringify(state.scoreAnswerEdits || {})); } catch {}
-  try { localStorage.setItem("essayScoreExpEditsV11", JSON.stringify(state.scoreExpEdits || {})); } catch {}
-}
-function setupScoreCanvasV11(canvasId, wrapId, kind) {
-  let canvas = $(canvasId), wrap = $(wrapId);
-  if (!canvas || !wrap) return;
-  const fresh = canvas.cloneNode(false);
-  canvas.replaceWith(fresh);
-  canvas = fresh;
-
-  const rect = wrap.getBoundingClientRect();
-  const dpr = window.devicePixelRatio || 1;
-  canvas.width = Math.max(1, Math.floor(rect.width * dpr));
-  canvas.height = Math.max(1, Math.floor(rect.height * dpr));
-  canvas.style.width = rect.width + "px";
-  canvas.style.height = rect.height + "px";
-
-  drawScoreCanvasV11(canvas, kind);
-
-  let current = null;
-  const toolGetter = () => kind === "answer" ? state.scoreAnswerEditTool : state.scoreExpEditTool;
-  canvas.addEventListener("pointerdown", (event) => {
-    event.preventDefault();
-    canvas.setPointerCapture?.(event.pointerId);
-    const rect = canvas.getBoundingClientRect();
-    const tool = toolGetter();
-    current = {
-      tool,
-      size: tool === "eraser" ? 22 : 4,
-      points: [{ x: clampV11((event.clientX-rect.left)/rect.width,0,1), y: clampV11((event.clientY-rect.top)/rect.height,0,1) }]
-    };
-    const store = kind === "answer" ? state.scoreAnswerEdits : state.scoreExpEdits;
-    const key = scoreKeyV11(kind);
-    if (!store[key]) store[key] = [];
-    store[key].push(current);
-    drawScoreCanvasV11(canvas, kind);
-  });
-  canvas.addEventListener("pointermove", (event) => {
-    if (!current) return;
-    event.preventDefault();
-    const rect = canvas.getBoundingClientRect();
-    current.points.push({ x: clampV11((event.clientX-rect.left)/rect.width,0,1), y: clampV11((event.clientY-rect.top)/rect.height,0,1) });
-    drawScoreCanvasV11(canvas, kind);
-  });
-  const end = (event) => { if (current) { event.preventDefault(); current = null; saveScoreEditsV11(); } };
-  canvas.addEventListener("pointerup", end);
-  canvas.addEventListener("pointercancel", end);
-  canvas.addEventListener("pointerleave", end);
-}
-function drawScoreCanvasV11(canvas, kind) {
-  if (!canvas) return;
-  const rect = canvas.getBoundingClientRect();
-  if (!rect.width || !rect.height) return;
-  const dpr = window.devicePixelRatio || 1;
-  const ctx = canvas.getContext("2d");
-  ctx.setTransform(dpr,0,0,dpr,0,0);
-  ctx.clearRect(0,0,rect.width,rect.height);
-  const store = kind === "answer" ? state.scoreAnswerEdits : state.scoreExpEdits;
-  const strokes = store?.[scoreKeyV11(kind)] || [];
-  strokes.forEach(stroke => {
-    if (!stroke.points || !stroke.points.length) return;
-    ctx.save();
-    ctx.globalCompositeOperation = stroke.tool === "eraser" ? "destination-out" : "source-over";
-    ctx.lineCap = "round"; ctx.lineJoin = "round";
-    ctx.strokeStyle = stroke.tool === "eraser" ? "rgba(0,0,0,1)" : (kind === "answer" ? "#ef4444" : "#0ea5e9");
-    ctx.lineWidth = Number(stroke.size || 4);
-    ctx.beginPath();
-    stroke.points.forEach((pt,i)=> {
-      const x=pt.x*rect.width, y=pt.y*rect.height;
-      if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
-    });
-    ctx.stroke();
-    ctx.restore();
-  });
-}
-function setScoreToolV11(kind, tool) {
-  if (kind === "answer") {
-    state.scoreAnswerEditTool = tool === "eraser" ? "eraser" : "pen";
-    $("scoreAnswerPenBtn")?.classList.toggle("ink-active", state.scoreAnswerEditTool === "pen");
-    $("scoreAnswerEraserBtn")?.classList.toggle("ink-active", state.scoreAnswerEditTool === "eraser");
-  } else {
-    state.scoreExpEditTool = tool === "eraser" ? "eraser" : "pen";
-    $("scoreExpPenBtn")?.classList.toggle("ink-active", state.scoreExpEditTool === "pen");
-    $("scoreExpEraserBtn")?.classList.toggle("ink-active", state.scoreExpEditTool === "eraser");
-  }
-}
-function clearScoreEditV11(kind) {
-  if (!confirm(kind === "answer" ? "현재 답안 수정필기를 지울까?" : "현재 해설 필기를 지울까?")) return;
-  const store = kind === "answer" ? state.scoreAnswerEdits : state.scoreExpEdits;
-  delete store[scoreKeyV11(kind)];
-  saveScoreEditsV11();
-  if (kind === "answer") resetScoreAnswerCanvasV11();
-  else resetScoreExplanationCanvasV11();
-}
-function resetScoreAnswerCanvasV11() { setupScoreCanvasV11("scoreAnswerCanvas", "scoreAnswerEditWrap", "answer"); }
-function resetScoreExplanationCanvasV11() { setupScoreCanvasV11("scoreExplanationCanvas", "scoreExplanationEditWrap", "exp"); }
-
-/* 기존 해설 페이지 넘김에도 필기 캔버스 동기화 */
-const showExplanationPage_v11 = showExplanationPage;
-showExplanationPage = function(index) {
-  showExplanationPage_v11(index);
-  setTimeout(() => resetScoreExplanationCanvasV11(), 120);
-};
-
-const openScore_v11 = openScore;
-openScore = function() {
-  openScore_v11();
-  loadScoreEditsV11();
-  renderScoreAnswerPageV11(0);
-  setTimeout(() => {
-    resetScoreAnswerCanvasV11();
-    resetScoreExplanationCanvasV11();
-  }, 160);
-};
-
-/* 버튼 연결 */
-setTimeout(() => {
-  setupSplitHandleV11();
-
-  $("fitBtn") && ($("fitBtn").onclick = fitImage);
-  $("zoomInBtn") && ($("zoomInBtn").onclick = () => zoomByV11(0.15));
-  $("zoomOutBtn") && ($("zoomOutBtn").onclick = () => zoomByV11(-0.15));
-  $("prevQuestionPageBtn") && ($("prevQuestionPageBtn").onclick = () => showQuestionPage((state.qPage || 0) - 1));
-  $("nextQuestionPageBtn") && ($("nextQuestionPageBtn").onclick = () => showQuestionPage((state.qPage || 0) + 1));
-
-  $("prevScoreAnswerPageBtn") && ($("prevScoreAnswerPageBtn").onclick = () => renderScoreAnswerPageV11((state.scoreAnswerPageIndex || 0) - 1));
-  $("nextScoreAnswerPageBtn") && ($("nextScoreAnswerPageBtn").onclick = () => renderScoreAnswerPageV11((state.scoreAnswerPageIndex || 0) + 1));
-  $("scoreAnswerPenBtn") && ($("scoreAnswerPenBtn").onclick = () => setScoreToolV11("answer", "pen"));
-  $("scoreAnswerEraserBtn") && ($("scoreAnswerEraserBtn").onclick = () => setScoreToolV11("answer", "eraser"));
-  $("clearScoreAnswerInkBtn") && ($("clearScoreAnswerInkBtn").onclick = () => clearScoreEditV11("answer"));
-
-  $("scoreExpPenBtn") && ($("scoreExpPenBtn").onclick = () => setScoreToolV11("exp", "pen"));
-  $("scoreExpEraserBtn") && ($("scoreExpEraserBtn").onclick = () => setScoreToolV11("exp", "eraser"));
-  $("clearScoreExpInkBtn") && ($("clearScoreExpInkBtn").onclick = () => clearScoreEditV11("exp"));
-}, 700);
-
-window.addEventListener("resize", () => setTimeout(() => {
-  setupSplitHandleV11();
-  try { fitImage(); } catch {}
-  try { resetScoreAnswerCanvasV11(); resetScoreExplanationCanvasV11(); } catch {}
-}, 180));
-
-
-/* === v12 최종 보정: 해설폭/펜크기/상단축소/문제 손가락 슬라이드 === */
-state.scoreAnswerSize = 4;
-state.scoreExpSize = 4;
-
-function clampV12(v, min, max) { return Math.max(min, Math.min(max, v)); }
-function getPointV12(event, canvas) {
-  const rect = canvas.getBoundingClientRect();
-  return {
-    x: clampV12((event.clientX - rect.left) / rect.width, 0, 1),
-    y: clampV12((event.clientY - rect.top) / rect.height, 0, 1)
-  };
-}
-
-/* 문제 이미지 손가락 슬라이드: 캔버스가 터치를 먹어도 직접 스크롤 */
-function resetProblemInkLayerV12() {
-  let canvas = $("inkCanvas");
-  if (!canvas) return;
-  const fresh = canvas.cloneNode(false);
-  canvas.replaceWith(fresh);
-  canvas = fresh;
-
-  try { resizeInkCanvasV10?.(); drawInkV10?.(); } catch {}
-  try { resizeInkCanvasV9?.(); drawInkV9?.(); } catch {}
-
-  let pan = null;
-  canvas.addEventListener("pointerdown", event => {
-    const scroller = $("questionImageScroller");
-    if (event.pointerType === "touch") {
-      if (!scroller) return;
-      event.preventDefault();
-      canvas.setPointerCapture?.(event.pointerId);
-      pan = { x: event.clientX, y: event.clientY, left: scroller.scrollLeft, top: scroller.scrollTop };
-      return;
-    }
-
-    event.preventDefault();
-    canvas.setPointerCapture?.(event.pointerId);
-    const key = (typeof problemInkKeyV10 === "function" ? problemInkKeyV10() : (typeof problemInkKeyV9 === "function" ? problemInkKeyV9() : ""));
-    if (!key) return;
-    if (!state.inkData) state.inkData = {};
-    if (!state.inkData[key]) state.inkData[key] = [];
-    const tool = state.inkTool === "eraser" ? "eraser" : "pen";
-    const stroke = {
-      tool,
-      size: Number(state.inkSize || 3) * (tool === "eraser" ? 5 : 1),
-      points: [getPointV12(event, canvas)]
-    };
-    state.currentStroke = stroke;
-    state.inkData[key].push(stroke);
-    try { drawInkV10?.(); } catch {}
-    try { drawInkV9?.(); } catch {}
-  });
-
-  canvas.addEventListener("pointermove", event => {
-    const scroller = $("questionImageScroller");
-    if (event.pointerType === "touch") {
-      if (!pan || !scroller) return;
-      event.preventDefault();
-      scroller.scrollLeft = pan.left - (event.clientX - pan.x);
-      scroller.scrollTop = pan.top - (event.clientY - pan.y);
-      return;
-    }
-
-    if (!state.currentStroke) return;
-    event.preventDefault();
-    state.currentStroke.points.push(getPointV12(event, canvas));
-    try { drawInkV10?.(); } catch {}
-    try { drawInkV9?.(); } catch {}
-  });
-
-  const end = event => {
-    if (event.pointerType === "touch") {
-      pan = null;
-      return;
-    }
-    if (!state.currentStroke) return;
-    event.preventDefault();
-    state.currentStroke = null;
-    try { saveProblemInkV10?.(); } catch {
-      try { localStorage.setItem("essayPsatBaseInk_v2", JSON.stringify(state.inkData || {})); } catch {}
-    }
-  };
-  canvas.addEventListener("pointerup", end);
-  canvas.addEventListener("pointercancel", end);
-  canvas.addEventListener("pointerleave", end);
-
-  $("penToolBtn") && ($("penToolBtn").onclick = () => { state.inkTool = "pen"; setInkTool?.("pen"); });
-  $("eraserToolBtn") && ($("eraserToolBtn").onclick = () => { state.inkTool = "eraser"; setInkTool?.("eraser"); });
-  $("clearInkBtn") && ($("clearInkBtn").onclick = () => {
-    const key = (typeof problemInkKeyV10 === "function" ? problemInkKeyV10() : (typeof problemInkKeyV9 === "function" ? problemInkKeyV9() : ""));
-    if (!key) return;
-    if (!confirm("현재 문제의 현재 쪽 필기를 지울까?")) return;
-    if (!state.inkData) state.inkData = {};
-    state.inkData[key] = [];
-    try { localStorage.setItem("essayPsatBaseInk_v2", JSON.stringify(state.inkData || {})); } catch {}
-    try { drawInkV10?.(); } catch {}
-    try { drawInkV9?.(); } catch {}
-  });
-  $("inkSizeInput") && ($("inkSizeInput").oninput = event => { state.inkSize = Number(event.target.value || 3); });
-}
-
-/* 해설 이미지 폭 맞춤 + 캔버스 높이 동기화 */
-function fitScoreExplanationV12() {
-  const wrap = $("scoreExplanationEditWrap");
-  const img = $("explanationImageView");
-  if (!wrap || !img) return;
-  const run = () => {
-    if (!img.naturalWidth) return;
-    const available = Math.max(1, wrap.clientWidth);
-    const scale = available / img.naturalWidth;
-    const h = Math.max(180, Math.round(img.naturalHeight * scale));
-    img.style.width = available + "px";
-    img.style.height = h + "px";
-    wrap.style.height = Math.min(Math.max(h, 220), Math.floor(window.innerHeight * 0.62)) + "px";
-    resetScoreExplanationCanvasV12();
-  };
-  img.onload = run;
-  run();
-  setTimeout(run, 120);
-}
-
-/* 채점 화면 필기: 펜크기 반영 */
-function setupScoreCanvasV12(canvasId, wrapId, kind) {
-  let canvas = $(canvasId), wrap = $(wrapId);
-  if (!canvas || !wrap) return;
-  const fresh = canvas.cloneNode(false);
-  canvas.replaceWith(fresh);
-  canvas = fresh;
-
-  const rect = wrap.getBoundingClientRect();
-  const dpr = window.devicePixelRatio || 1;
-  canvas.width = Math.max(1, Math.floor(rect.width * dpr));
-  canvas.height = Math.max(1, Math.floor(rect.height * dpr));
-  canvas.style.width = rect.width + "px";
-  canvas.style.height = rect.height + "px";
-
-  drawScoreCanvasV12(canvas, kind);
-
-  let current = null;
-  canvas.addEventListener("pointerdown", event => {
-    event.preventDefault();
-    canvas.setPointerCapture?.(event.pointerId);
-    const tool = kind === "answer" ? state.scoreAnswerEditTool : state.scoreExpEditTool;
-    const size = kind === "answer" ? state.scoreAnswerSize : state.scoreExpSize;
-    current = {
-      tool: tool === "eraser" ? "eraser" : "pen",
-      size: Number(size || 4) * (tool === "eraser" ? 5 : 1),
-      points: [getPointV12(event, canvas)]
-    };
-    const store = kind === "answer" ? state.scoreAnswerEdits : state.scoreExpEdits;
-    const key = scoreKeyV11(kind);
-    if (!store[key]) store[key] = [];
-    store[key].push(current);
-    drawScoreCanvasV12(canvas, kind);
-  });
-
-  canvas.addEventListener("pointermove", event => {
-    if (!current) return;
-    event.preventDefault();
-    current.points.push(getPointV12(event, canvas));
-    drawScoreCanvasV12(canvas, kind);
-  });
-
-  const end = event => {
-    if (!current) return;
-    event.preventDefault();
-    current = null;
-    try { saveScoreEditsV11?.(); } catch {}
-  };
-  canvas.addEventListener("pointerup", end);
-  canvas.addEventListener("pointercancel", end);
-  canvas.addEventListener("pointerleave", end);
-}
-
-function drawScoreCanvasV12(canvas, kind) {
-  if (!canvas) return;
-  const rect = canvas.getBoundingClientRect();
-  if (!rect.width || !rect.height) return;
-  const dpr = window.devicePixelRatio || 1;
-  const ctx = canvas.getContext("2d");
-  ctx.setTransform(dpr,0,0,dpr,0,0);
-  ctx.clearRect(0,0,rect.width,rect.height);
-
-  const store = kind === "answer" ? state.scoreAnswerEdits : state.scoreExpEdits;
-  const strokes = store?.[scoreKeyV11(kind)] || [];
-  strokes.forEach(stroke => {
-    if (!stroke.points || !stroke.points.length) return;
-    ctx.save();
-    ctx.globalCompositeOperation = stroke.tool === "eraser" ? "destination-out" : "source-over";
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.strokeStyle = stroke.tool === "eraser" ? "rgba(0,0,0,1)" : (kind === "answer" ? "#ef4444" : "#0ea5e9");
-    ctx.lineWidth = Number(stroke.size || 4);
-    ctx.beginPath();
-    stroke.points.forEach((pt,i)=> {
-      const x = pt.x * rect.width, y = pt.y * rect.height;
-      if (i === 0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
-    });
-    ctx.stroke();
-    ctx.restore();
-  });
-}
-
-function resetScoreAnswerCanvasV12() { setupScoreCanvasV12("scoreAnswerCanvas", "scoreAnswerEditWrap", "answer"); }
-function resetScoreExplanationCanvasV12() { setupScoreCanvasV12("scoreExplanationCanvas", "scoreExplanationEditWrap", "exp"); }
-
-function connectV12Buttons() {
-  $("scoreAnswerSizeInput") && ($("scoreAnswerSizeInput").oninput = e => { state.scoreAnswerSize = Number(e.target.value || 4); });
-  $("scoreExpSizeInput") && ($("scoreExpSizeInput").oninput = e => { state.scoreExpSize = Number(e.target.value || 4); });
-
-  $("scoreAnswerPenBtn") && ($("scoreAnswerPenBtn").onclick = () => { state.scoreAnswerEditTool = "pen"; setScoreToolV11?.("answer","pen"); });
-  $("scoreAnswerEraserBtn") && ($("scoreAnswerEraserBtn").onclick = () => { state.scoreAnswerEditTool = "eraser"; setScoreToolV11?.("answer","eraser"); });
-  $("scoreExpPenBtn") && ($("scoreExpPenBtn").onclick = () => { state.scoreExpEditTool = "pen"; setScoreToolV11?.("exp","pen"); });
-  $("scoreExpEraserBtn") && ($("scoreExpEraserBtn").onclick = () => { state.scoreExpEditTool = "eraser"; setScoreToolV11?.("exp","eraser"); });
-}
-
-/* 기존 함수 위에 최종 덮어쓰기 */
-const openCurrentProblem_v12 = openCurrentProblem;
-openCurrentProblem = function() {
-  openCurrentProblem_v12();
-  setTimeout(() => {
-    resetProblemInkLayerV12();
-    try { fitImage?.(); } catch {}
-  }, 180);
-};
-
-const showExplanationPage_v12 = showExplanationPage;
-showExplanationPage = function(index) {
-  showExplanationPage_v12(index);
-  setTimeout(() => {
-    fitScoreExplanationV12();
-    resetScoreExplanationCanvasV12();
-  }, 180);
-};
-
-const openScore_v12 = openScore;
-openScore = function() {
-  openScore_v12();
-  setTimeout(() => {
-    connectV12Buttons();
-    fitScoreExplanationV12();
-    resetScoreAnswerCanvasV12();
-    resetScoreExplanationCanvasV12();
-  }, 220);
-};
-
-setTimeout(() => {
-  connectV12Buttons();
-  resetProblemInkLayerV12();
-}, 800);
-
-window.addEventListener("resize", () => setTimeout(() => {
-  try { fitScoreExplanationV12(); } catch {}
-  try { resetProblemInkLayerV12(); } catch {}
-}, 200));
-
-
-/* === v13: 손가락은 이동만, 필기는 스타일러스펜 전용 === */
-function clampV13(v, min, max) { return Math.max(min, Math.min(max, v)); }
-function pointV13(event, canvas) {
-  const rect = canvas.getBoundingClientRect();
-  return {
-    x: clampV13((event.clientX - rect.left) / rect.width, 0, 1),
-    y: clampV13((event.clientY - rect.top) / rect.height, 0, 1)
-  };
-}
-function isStylusOrMouseV13(event) {
-  return event?.pointerType === "pen";
-}
-function currentProblemInkKeyV13() {
-  if (typeof problemInkKeyV10 === "function") return problemInkKeyV10();
-  if (typeof problemInkKeyV9 === "function") return problemInkKeyV9();
-  const p = currentProblem?.();
-  return p ? `${p.id}:${state.qPage || 0}` : "";
-}
-function drawProblemInkV13() {
-  try { if (typeof drawInkV10 === "function") { drawInkV10(); return; } } catch {}
-  try { if (typeof drawInkV9 === "function") { drawInkV9(); return; } } catch {}
-}
-function resizeProblemInkCanvasV13() {
-  try { if (typeof resizeInkCanvasV10 === "function") { resizeInkCanvasV10(); return; } } catch {}
-  try { if (typeof resizeInkCanvasV9 === "function") { resizeInkCanvasV9(); return; } } catch {}
-}
-function saveProblemInkV13() {
-  try { if (typeof saveProblemInkV10 === "function") { saveProblemInkV10(); return; } } catch {}
-  try { localStorage.setItem("essayPsatBaseInk_v2", JSON.stringify(state.inkData || {})); } catch {}
-}
-
-/* 문제 이미지: 손가락 드래그로 스크롤, S펜으로만 필기 */
-function resetProblemInkLayerV13() {
-  let canvas = $("inkCanvas");
-  if (!canvas) return;
-
-  const fresh = canvas.cloneNode(false);
-  canvas.replaceWith(fresh);
-  canvas = fresh;
-
-  resizeProblemInkCanvasV13();
-  drawProblemInkV13();
-
-  let pan = null;
-
-  canvas.addEventListener("pointerdown", (event) => {
-    const scroller = $("questionImageScroller");
-
-    if (event.pointerType === "touch") {
-      if (!scroller) return;
-      event.preventDefault();
-      canvas.classList.add("is-panning");
-      canvas.setPointerCapture?.(event.pointerId);
-      pan = {
-        x: event.clientX,
-        y: event.clientY,
-        left: scroller.scrollLeft,
-        top: scroller.scrollTop
-      };
-      return;
-    }
-
-    if (!isStylusOrMouseV13(event)) return;
-
-    event.preventDefault();
-    canvas.setPointerCapture?.(event.pointerId);
-
-    const key = currentProblemInkKeyV13();
-    if (!key) return;
-
-    if (!state.inkData) state.inkData = {};
-    if (!state.inkData[key]) state.inkData[key] = [];
-
-    const tool = state.inkTool === "eraser" ? "eraser" : "pen";
-    const stroke = {
-      tool,
-      size: Number(state.inkSize || 3) * (tool === "eraser" ? 5 : 1),
-      points: [pointV13(event, canvas)]
-    };
-    state.currentStroke = stroke;
-    state.inkData[key].push(stroke);
-    drawProblemInkV13();
-  });
-
-  canvas.addEventListener("pointermove", (event) => {
-    const scroller = $("questionImageScroller");
-
-    if (event.pointerType === "touch") {
-      if (!pan || !scroller) return;
-      event.preventDefault();
-      scroller.scrollLeft = pan.left - (event.clientX - pan.x);
-      scroller.scrollTop = pan.top - (event.clientY - pan.y);
-      return;
-    }
-
-    if (!state.currentStroke || !isStylusOrMouseV13(event)) return;
-    event.preventDefault();
-    state.currentStroke.points.push(pointV13(event, canvas));
-    drawProblemInkV13();
-  });
-
-  const end = (event) => {
-    if (event.pointerType === "touch") {
-      canvas.classList.remove("is-panning");
-      pan = null;
-      return;
-    }
-    if (!state.currentStroke) return;
-    if (isStylusOrMouseV13(event)) event.preventDefault();
-    state.currentStroke = null;
-    saveProblemInkV13();
-  };
-
-  canvas.addEventListener("pointerup", end);
-  canvas.addEventListener("pointercancel", end);
-  canvas.addEventListener("pointerleave", end);
-
-  $("penToolBtn") && ($("penToolBtn").onclick = () => {
-    state.inkTool = "pen";
-    try { if (typeof setInkTool === "function") setInkTool("pen"); } catch {}
-  });
-  $("eraserToolBtn") && ($("eraserToolBtn").onclick = () => {
-    state.inkTool = "eraser";
-    try { if (typeof setInkTool === "function") setInkTool("eraser"); } catch {}
-  });
-  $("clearInkBtn") && ($("clearInkBtn").onclick = () => {
-    const key = currentProblemInkKeyV13();
-    if (!key) return;
-    if (!confirm("현재 문제의 현재 쪽 필기를 지울까?")) return;
-    if (!state.inkData) state.inkData = {};
-    state.inkData[key] = [];
-    saveProblemInkV13();
-    drawProblemInkV13();
-  });
-  $("inkSizeInput") && ($("inkSizeInput").oninput = (event) => {
-    state.inkSize = Number(event.target.value || 3);
-  });
-}
-
-/* 답안 필기: 손가락은 필기 금지, S펜/마우스만 필기 */
-function resetAnswerInkLayerV13() {
-  let canvas = $("answerInkCanvas");
-  if (!canvas) return;
-
-  const fresh = canvas.cloneNode(false);
-  canvas.replaceWith(fresh);
-  canvas = fresh;
-
-  try { if (typeof resizeAnswerCanvasV10 === "function") resizeAnswerCanvasV10(); if (typeof drawAnswerInkV10 === "function") drawAnswerInkV10(); } catch {}
-  try { if (typeof resizeAnswerCanvasV9 === "function") resizeAnswerCanvasV9(); if (typeof drawAnswerInkV9 === "function") drawAnswerInkV9(); } catch {}
-
-  canvas.addEventListener("pointerdown", (event) => {
-    if (event.pointerType === "touch") return;
-    if (!isStylusOrMouseV13(event)) return;
-
-    event.preventDefault();
-    canvas.setPointerCapture?.(event.pointerId);
-
-    const tool = state.answerInkTool === "eraser" ? "eraser" : "pen";
-    const stroke = {
-      tool,
-      size: Number(state.answerInkSize || 3) * (tool === "eraser" ? 5 : 1),
-      points: [pointV13(event, canvas)]
-    };
-    state.answerInkCurrentStroke = stroke;
-    if (!Array.isArray(state.answerInkStrokes)) state.answerInkStrokes = [];
-    state.answerInkStrokes.push(stroke);
-
-    try { if (typeof drawAnswerInkV10 === "function") drawAnswerInkV10(); } catch {}
-    try { if (typeof drawAnswerInkV9 === "function") drawAnswerInkV9(); } catch {}
-  });
-
-  canvas.addEventListener("pointermove", (event) => {
-    if (event.pointerType === "touch") return;
-    if (!state.answerInkCurrentStroke || !isStylusOrMouseV13(event)) return;
-
-    event.preventDefault();
-    state.answerInkCurrentStroke.points.push(pointV13(event, canvas));
-
-    try { if (typeof drawAnswerInkV10 === "function") drawAnswerInkV10(); } catch {}
-    try { if (typeof drawAnswerInkV9 === "function") drawAnswerInkV9(); } catch {}
-  });
-
-  const end = (event) => {
-    if (!state.answerInkCurrentStroke) return;
-    if (isStylusOrMouseV13(event)) event.preventDefault();
-    state.answerInkCurrentStroke = null;
-    try { if (typeof saveCurrentAnswerPageV10 === "function") saveCurrentAnswerPageV10(); else if (typeof saveAnswerDraftInk === "function") saveAnswerDraftInk(); } catch {}
-  };
-
-  canvas.addEventListener("pointerup", end);
-  canvas.addEventListener("pointercancel", end);
-  canvas.addEventListener("pointerleave", end);
-
-  $("answerPenBtn") && ($("answerPenBtn").onclick = () => {
-    state.answerInkTool = "pen";
-    try { if (typeof setAnswerInkTool === "function") setAnswerInkTool("pen"); } catch {}
-  });
-  $("answerEraserBtn") && ($("answerEraserBtn").onclick = () => {
-    state.answerInkTool = "eraser";
-    try { if (typeof setAnswerInkTool === "function") setAnswerInkTool("eraser"); } catch {}
-  });
-  $("clearAnswerInkBtn") && ($("clearAnswerInkBtn").onclick = () => {
-    if (!confirm("현재 답안쪽 필기를 지울까?")) return;
-    state.answerInkStrokes = [];
-    try { if (typeof drawAnswerInkV10 === "function") drawAnswerInkV10(); } catch {}
-    try { if (typeof drawAnswerInkV9 === "function") drawAnswerInkV9(); } catch {}
-    try { if (typeof saveCurrentAnswerPageV10 === "function") saveCurrentAnswerPageV10(); else if (typeof saveAnswerDraftInk === "function") saveAnswerDraftInk(); } catch {}
-  });
-  $("answerInkSizeInput") && ($("answerInkSizeInput").oninput = (event) => {
-    state.answerInkSize = Number(event.target.value || 3);
-  });
-}
-
-/* 채점/해설 수정필기도 손가락 금지, S펜/마우스만 */
-function setupScoreCanvasV13(canvasId, wrapId, kind) {
-  let canvas = $(canvasId), wrap = $(wrapId);
-  if (!canvas || !wrap) return;
-
-  const fresh = canvas.cloneNode(false);
-  canvas.replaceWith(fresh);
-  canvas = fresh;
-
-  const rect = wrap.getBoundingClientRect();
-  const dpr = window.devicePixelRatio || 1;
-  canvas.width = Math.max(1, Math.floor(rect.width * dpr));
-  canvas.height = Math.max(1, Math.floor(rect.height * dpr));
-  canvas.style.width = rect.width + "px";
-  canvas.style.height = rect.height + "px";
-
-  try { if (typeof drawScoreCanvasV12 === "function") drawScoreCanvasV12(canvas, kind); else if (typeof drawScoreCanvasV11 === "function") drawScoreCanvasV11(canvas, kind); } catch {}
-
-  let current = null;
-
-  canvas.addEventListener("pointerdown", (event) => {
-    if (event.pointerType === "touch") return;
-    if (!isStylusOrMouseV13(event)) return;
-
-    event.preventDefault();
-    canvas.setPointerCapture?.(event.pointerId);
-
-    const tool = kind === "answer" ? state.scoreAnswerEditTool : state.scoreExpEditTool;
-    const size = kind === "answer" ? state.scoreAnswerSize : state.scoreExpSize;
-
-    current = {
-      tool: tool === "eraser" ? "eraser" : "pen",
-      size: Number(size || 4) * (tool === "eraser" ? 5 : 1),
-      points: [pointV13(event, canvas)]
-    };
-
-    const store = kind === "answer" ? state.scoreAnswerEdits : state.scoreExpEdits;
-    const key = scoreKeyV11(kind);
-    if (!store[key]) store[key] = [];
-    store[key].push(current);
-
-    try { if (typeof drawScoreCanvasV12 === "function") drawScoreCanvasV12(canvas, kind); else if (typeof drawScoreCanvasV11 === "function") drawScoreCanvasV11(canvas, kind); } catch {}
-  });
-
-  canvas.addEventListener("pointermove", (event) => {
-    if (event.pointerType === "touch") return;
-    if (!current || !isStylusOrMouseV13(event)) return;
-
-    event.preventDefault();
-    current.points.push(pointV13(event, canvas));
-
-    try { if (typeof drawScoreCanvasV12 === "function") drawScoreCanvasV12(canvas, kind); else if (typeof drawScoreCanvasV11 === "function") drawScoreCanvasV11(canvas, kind); } catch {}
-  });
-
-  const end = (event) => {
-    if (!current) return;
-    if (isStylusOrMouseV13(event)) event.preventDefault();
-    current = null;
-    try { if (typeof saveScoreEditsV11 === "function") saveScoreEditsV11(); } catch {}
-  };
-
-  canvas.addEventListener("pointerup", end);
-  canvas.addEventListener("pointercancel", end);
-  canvas.addEventListener("pointerleave", end);
-}
-
-function resetScoreAnswerCanvasV13() { setupScoreCanvasV13("scoreAnswerCanvas", "scoreAnswerEditWrap", "answer"); }
-function resetScoreExplanationCanvasV13() { setupScoreCanvasV13("scoreExplanationCanvas", "scoreExplanationEditWrap", "exp"); }
-
-/* 기존 함수 위에 최종 덮어쓰기 */
-const openCurrentProblem_v13 = openCurrentProblem;
-openCurrentProblem = function() {
-  openCurrentProblem_v13();
-  setTimeout(() => {
-    resetProblemInkLayerV13();
-    resetAnswerInkLayerV13();
-  }, 220);
-};
-
-const showQuestionPage_v13 = showQuestionPage;
-showQuestionPage = function(index) {
-  showQuestionPage_v13(index);
-  setTimeout(() => resetProblemInkLayerV13(), 180);
-};
-
-const openScore_v13 = openScore;
-openScore = function() {
-  openScore_v13();
-  setTimeout(() => {
-    resetScoreAnswerCanvasV13();
-    resetScoreExplanationCanvasV13();
-  }, 260);
-};
-
-const showExplanationPage_v13 = showExplanationPage;
-showExplanationPage = function(index) {
-  showExplanationPage_v13(index);
-  setTimeout(() => resetScoreExplanationCanvasV13(), 220);
-};
-
-setTimeout(() => {
-  resetProblemInkLayerV13();
-  resetAnswerInkLayerV13();
-}, 900);
-
-window.addEventListener("resize", () => setTimeout(() => {
-  try { resetProblemInkLayerV13(); } catch {}
-  try { resetAnswerInkLayerV13(); } catch {}
-  try { resetScoreAnswerCanvasV13(); resetScoreExplanationCanvasV13(); } catch {}
-}, 240));
-
-
-/* === v14: 해설/채점 화면 필기 최종 수정 ===
-   - 손가락은 절대 필기하지 않음
-   - 손가락은 해설/답안 화면 이동만 함
-   - S펜(pointerType pen)만 필기
-   - 해설 이미지 전체 높이에 맞춰 캔버스 생성
-*/
-function clampV14(v, min, max) { return Math.max(min, Math.min(max, v)); }
-function isRealPenV14(event) {
-  return event.pointerType === "pen";
-}
-function scorePointV14(event, canvas) {
-  const rect = canvas.getBoundingClientRect();
-  return {
-    x: clampV14((event.clientX - rect.left) / rect.width, 0, 1),
-    y: clampV14((event.clientY - rect.top) / rect.height, 0, 1)
-  };
-}
-function scoreKeyV14(kind) {
-  if (typeof scoreKeyV11 === "function") return scoreKeyV11(kind);
-  const p = currentProblem?.();
-  const pid = p?.id || "unknown";
-  if (kind === "answer") return `${pid}:answer:${state.scoreAnswerPageIndex || 0}`;
-  return `${pid}:exp:${state.expPage || 0}`;
-}
-function getScoreStoreV14(kind) {
-  if (kind === "answer") {
-    if (!state.scoreAnswerEdits) state.scoreAnswerEdits = {};
-    return state.scoreAnswerEdits;
-  }
-  if (!state.scoreExpEdits) state.scoreExpEdits = {};
-  return state.scoreExpEdits;
-}
-function saveScoreEditsV14() {
-  try { localStorage.setItem("essayScoreAnswerEditsV11", JSON.stringify(state.scoreAnswerEdits || {})); } catch {}
-  try { localStorage.setItem("essayScoreExpEditsV11", JSON.stringify(state.scoreExpEdits || {})); } catch {}
-}
-function drawScoreCanvasV14(canvas, kind) {
-  if (!canvas) return;
-  const rect = canvas.getBoundingClientRect();
-  if (!rect.width || !rect.height) return;
-
-  const dpr = window.devicePixelRatio || 1;
-  const ctx = canvas.getContext("2d");
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, rect.width, rect.height);
-
-  const store = getScoreStoreV14(kind);
-  const strokes = store[scoreKeyV14(kind)] || [];
-  strokes.forEach(stroke => {
-    if (!stroke.points || !stroke.points.length) return;
-    ctx.save();
-    ctx.globalCompositeOperation = stroke.tool === "eraser" ? "destination-out" : "source-over";
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.strokeStyle = stroke.tool === "eraser" ? "rgba(0,0,0,1)" : (kind === "answer" ? "#ef4444" : "#0ea5e9");
-    ctx.lineWidth = Number(stroke.size || 4);
-    ctx.beginPath();
-    stroke.points.forEach((pt, i) => {
-      const x = pt.x * rect.width;
-      const y = pt.y * rect.height;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    });
-    ctx.stroke();
-    ctx.restore();
-  });
-}
-function sizeScoreCanvasV14(canvas, wrap, kind) {
-  const dpr = window.devicePixelRatio || 1;
-
-  let width = Math.max(1, wrap.clientWidth || wrap.getBoundingClientRect().width || 1);
-  let height = Math.max(220, wrap.scrollHeight || wrap.getBoundingClientRect().height || 220);
-
-  if (kind === "exp") {
-    const img = $("explanationImageView");
-    if (img && img.naturalWidth) {
-      width = Math.max(1, wrap.clientWidth || window.innerWidth - 24);
-      const scale = width / img.naturalWidth;
-      height = Math.max(220, Math.round(img.naturalHeight * scale));
-
-      img.style.width = width + "px";
-      img.style.height = height + "px";
-      wrap.style.height = Math.min(height, Math.floor(window.innerHeight * 0.62)) + "px";
-    }
-  } else {
-    const pre = $("ownAnswerView");
-    const ink = $("ownAnswerInkView");
-    height = Math.max(
-      220,
-      pre ? pre.scrollHeight + 40 : 0,
-      ink && !ink.classList.contains("hidden") ? ink.offsetHeight + 60 : 0,
-      wrap.clientHeight || 0
-    );
-    wrap.style.height = Math.min(height, Math.floor(window.innerHeight * 0.48)) + "px";
-  }
-
-  canvas.width = Math.max(1, Math.floor(width * dpr));
-  canvas.height = Math.max(1, Math.floor(height * dpr));
-  canvas.style.width = width + "px";
-  canvas.style.height = height + "px";
-}
-function setupScoreCanvasV14(canvasId, wrapId, kind) {
-  let canvas = $(canvasId);
-  const wrap = $(wrapId);
-  if (!canvas || !wrap) return;
-
-  // 이전 버전 리스너를 완전히 제거
-  const fresh = canvas.cloneNode(false);
-  canvas.replaceWith(fresh);
-  canvas = fresh;
-
-  sizeScoreCanvasV14(canvas, wrap, kind);
-  drawScoreCanvasV14(canvas, kind);
-
-  let current = null;
-  let pan = null;
-
-  const block = (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    event.stopImmediatePropagation();
-  };
-
-  canvas.addEventListener("pointerdown", (event) => {
-    block(event);
-
-    if (!isRealPenV14(event)) {
-      canvas.classList.add("is-panning");
-      canvas.setPointerCapture?.(event.pointerId);
-      pan = {
-        x: event.clientX,
-        y: event.clientY,
-        left: wrap.scrollLeft,
-        top: wrap.scrollTop
-      };
-      return;
-    }
-
-    canvas.setPointerCapture?.(event.pointerId);
-
-    const tool = kind === "answer" ? state.scoreAnswerEditTool : state.scoreExpEditTool;
-    const size = kind === "answer" ? state.scoreAnswerSize : state.scoreExpSize;
-    const stroke = {
-      tool: tool === "eraser" ? "eraser" : "pen",
-      size: Number(size || 4) * (tool === "eraser" ? 5 : 1),
-      points: [scorePointV14(event, canvas)]
-    };
-
-    const store = getScoreStoreV14(kind);
-    const key = scoreKeyV14(kind);
-    if (!store[key]) store[key] = [];
-    store[key].push(stroke);
-    current = stroke;
-    drawScoreCanvasV14(canvas, kind);
-  }, true);
-
-  canvas.addEventListener("pointermove", (event) => {
-    block(event);
-
-    if (!isRealPenV14(event)) {
-      if (!pan) return;
-      wrap.scrollLeft = pan.left - (event.clientX - pan.x);
-      wrap.scrollTop = pan.top - (event.clientY - pan.y);
-      return;
-    }
-
-    if (!current) return;
-    current.points.push(scorePointV14(event, canvas));
-    drawScoreCanvasV14(canvas, kind);
-  }, true);
-
-  const end = (event) => {
-    block(event);
-
-    if (!isRealPenV14(event)) {
-      pan = null;
-      canvas.classList.remove("is-panning");
-      return;
-    }
-
-    if (!current) return;
-    current = null;
-    saveScoreEditsV14();
-  };
-
-  canvas.addEventListener("pointerup", end, true);
-  canvas.addEventListener("pointercancel", end, true);
-  canvas.addEventListener("pointerleave", end, true);
-}
-function resetScoreAnswerCanvasV14() {
-  setupScoreCanvasV14("scoreAnswerCanvas", "scoreAnswerEditWrap", "answer");
-}
-function resetScoreExplanationCanvasV14() {
-  setupScoreCanvasV14("scoreExplanationCanvas", "scoreExplanationEditWrap", "exp");
-}
-function connectScoreToolsV14() {
-  $("scoreAnswerSizeInput") && ($("scoreAnswerSizeInput").oninput = e => {
-    state.scoreAnswerSize = Number(e.target.value || 4);
-  });
-  $("scoreExpSizeInput") && ($("scoreExpSizeInput").oninput = e => {
-    state.scoreExpSize = Number(e.target.value || 4);
-  });
-
-  $("scoreAnswerPenBtn") && ($("scoreAnswerPenBtn").onclick = () => {
-    state.scoreAnswerEditTool = "pen";
-    try { setScoreToolV11?.("answer", "pen"); } catch {}
-  });
-  $("scoreAnswerEraserBtn") && ($("scoreAnswerEraserBtn").onclick = () => {
-    state.scoreAnswerEditTool = "eraser";
-    try { setScoreToolV11?.("answer", "eraser"); } catch {}
-  });
-  $("scoreExpPenBtn") && ($("scoreExpPenBtn").onclick = () => {
-    state.scoreExpEditTool = "pen";
-    try { setScoreToolV11?.("exp", "pen"); } catch {}
-  });
-  $("scoreExpEraserBtn") && ($("scoreExpEraserBtn").onclick = () => {
-    state.scoreExpEditTool = "eraser";
-    try { setScoreToolV11?.("exp", "eraser"); } catch {}
-  });
-  $("clearScoreAnswerInkBtn") && ($("clearScoreAnswerInkBtn").onclick = () => {
-    if (!confirm("현재 답안 수정필기를 지울까?")) return;
-    const store = getScoreStoreV14("answer");
-    delete store[scoreKeyV14("answer")];
-    saveScoreEditsV14();
-    resetScoreAnswerCanvasV14();
-  });
-  $("clearScoreExpInkBtn") && ($("clearScoreExpInkBtn").onclick = () => {
-    if (!confirm("현재 해설 필기를 지울까?")) return;
-    const store = getScoreStoreV14("exp");
-    delete store[scoreKeyV14("exp")];
-    saveScoreEditsV14();
-    resetScoreExplanationCanvasV14();
-  });
-}
-
-/* 해설 이미지 로드 후 캔버스 재배치 */
-function fitExplanationAndCanvasV14() {
-  const img = $("explanationImageView");
-  if (!img) return;
-  const run = () => {
-    resetScoreExplanationCanvasV14();
-  };
-  img.onload = run;
-  run();
-  setTimeout(run, 150);
-  setTimeout(run, 400);
-}
-
-/* 이전 버전보다 늦게 실행해서 이전 리스너를 확실히 덮어씀 */
-const openScore_v14 = openScore;
-openScore = function() {
-  openScore_v14();
-  setTimeout(() => {
-    connectScoreToolsV14();
-    resetScoreAnswerCanvasV14();
-    fitExplanationAndCanvasV14();
-  }, 750);
-};
-
-const showExplanationPage_v14 = showExplanationPage;
-showExplanationPage = function(index) {
-  showExplanationPage_v14(index);
-  setTimeout(() => {
-    connectScoreToolsV14();
-    fitExplanationAndCanvasV14();
-  }, 750);
-};
-
-setTimeout(() => {
-  connectScoreToolsV14();
-  resetScoreAnswerCanvasV14();
-  fitExplanationAndCanvasV14();
-}, 1200);
-
-window.addEventListener("resize", () => setTimeout(() => {
-  resetScoreAnswerCanvasV14();
-  fitExplanationAndCanvasV14();
-}, 250));
-
-/* === v15: 폰 split-screen 방식 드래그 + 버튼 한 줄 === */
-function clampV15(v,min,max){return Math.max(min,Math.min(max,v));}
-function setSplitRatioV15(ratio){
-  ratio=clampV15(ratio,18,78);
-  const shell=$("solveShell"); if(!shell) return;
-  shell.style.gridTemplateRows=`${ratio}dvh 34px calc(${100-ratio}dvh - 34px)`;
-  localStorage.setItem("essaySplitRatioV15",String(ratio));
-  localStorage.setItem("essaySplitRatioV11",String(ratio));
-  setTimeout(()=>{try{fitImage();}catch{} try{resizeAnswerCanvasV10();drawAnswerInkV10();}catch{} try{resizeAnswerCanvasV9();drawAnswerInkV9();}catch{}},50);
-}
-function setupSplitHandleV15(){
-  const handle=$("splitHandle"); if(!handle || handle.dataset.v15ready) return;
-  handle.dataset.v15ready="1";
-  setSplitRatioV15(Number(localStorage.getItem("essaySplitRatioV15")||localStorage.getItem("essaySplitRatioV11")||48));
-  let active=false;
-  const moveTo=(clientY)=>setSplitRatioV15(clientY/Math.max(1,window.innerHeight)*100);
-  handle.addEventListener("pointerdown",(e)=>{e.preventDefault();e.stopPropagation();active=true;handle.classList.add("dragging");handle.setPointerCapture?.(e.pointerId);moveTo(e.clientY);},true);
-  handle.addEventListener("pointermove",(e)=>{if(!active)return;e.preventDefault();e.stopPropagation();moveTo(e.clientY);},true);
-  const end=(e)=>{if(!active)return;e.preventDefault();e.stopPropagation();active=false;handle.classList.remove("dragging");};
-  handle.addEventListener("pointerup",end,true);handle.addEventListener("pointercancel",end,true);handle.addEventListener("lostpointercapture",end,true);
-  handle.addEventListener("touchstart",(e)=>{e.preventDefault();active=true;handle.classList.add("dragging");if(e.touches&&e.touches[0])moveTo(e.touches[0].clientY);},{passive:false,capture:true});
-  handle.addEventListener("touchmove",(e)=>{if(!active)return;e.preventDefault();if(e.touches&&e.touches[0])moveTo(e.touches[0].clientY);},{passive:false,capture:true});
-  handle.addEventListener("touchend",()=>{active=false;handle.classList.remove("dragging");},{passive:false,capture:true});
-}
-function compactRuntimeLabelsV15(){
-  [["prevAnswerPageBtn","이전"],["nextAnswerPageBtn","다음"],["addAnswerPageBtn","추가"],["keyboardToggleBtn","키보드"],["answerPenBtn","펜"],["answerEraserBtn","지우개"],["clearAnswerInkBtn","필기삭제"],["scoreAnswerPenBtn","수정펜"],["scoreAnswerEraserBtn","수정지우개"],["clearScoreAnswerInkBtn","수정삭제"],["scoreExpPenBtn","해설펜"],["scoreExpEraserBtn","해설지우개"],["clearScoreExpInkBtn","해설삭제"]].forEach(([id,t])=>{const el=$(id); if(el) el.textContent=t;});
-  const k=$("keyboardToggleBtn"); if(k && state.answerInputMode==="keyboard") k.textContent="손글씨";
-}
-const openCurrentProblem_v15=openCurrentProblem;
-openCurrentProblem=function(){openCurrentProblem_v15();setTimeout(()=>{setupSplitHandleV15();compactRuntimeLabelsV15();},250);};
-const openScore_v15=openScore;
-openScore=function(){openScore_v15();setTimeout(()=>{compactRuntimeLabelsV15();},250);};
-setTimeout(()=>{setupSplitHandleV15();compactRuntimeLabelsV15();},1000);
-window.addEventListener("resize",()=>setTimeout(()=>{setupSplitHandleV15();setSplitRatioV15(Number(localStorage.getItem("essaySplitRatioV15")||48));},200));
-
-/* === v16: 빨간 핸들 손가락 세로 조절 강제 === */
-function clampV16(v,min,max){return Math.max(min,Math.min(max,v));}
-function setSplitRatioV16(r){
-  r=clampV16(r,16,82);
-  const shell=$("solveShell"); if(!shell)return;
-  shell.style.gridTemplateRows=`${r}dvh 42px calc(${100-r}dvh - 42px)`;
-  localStorage.setItem("essaySplitRatioV16",String(r));
-  localStorage.setItem("essaySplitRatioV15",String(r));
-  setTimeout(()=>{try{fitImage()}catch{} try{resizeAnswerCanvasV10();drawAnswerInkV10()}catch{} try{resizeAnswerCanvasV9();drawAnswerInkV9()}catch{}},30);
-}
-function setupSplitHandleV16(){
-  let h=$("splitHandle"); if(!h)return;
-  const fresh=h.cloneNode(true); h.replaceWith(fresh); h=fresh;
-  h.id="splitHandle"; h.classList.add("v16-resize-handle","phone-drag-handle");
-  setSplitRatioV16(Number(localStorage.getItem("essaySplitRatioV16")||localStorage.getItem("essaySplitRatioV15")||48));
-  let active=false, pid=null;
-  const ratio=(y)=>{const vv=window.visualViewport; const vh=vv?.height||window.innerHeight||1; const top=vv?.offsetTop||0; return (y-top)/vh*100};
-  const start=(y,id)=>{active=true;pid=id;h.classList.add("dragging");setSplitRatioV16(ratio(y));};
-  const move=(y)=>{if(active)setSplitRatioV16(ratio(y));};
-  const end=()=>{active=false;pid=null;h.classList.remove("dragging");};
-  h.addEventListener("pointerdown",e=>{e.preventDefault();e.stopPropagation();try{h.setPointerCapture(e.pointerId)}catch{};start(e.clientY,e.pointerId)},true);
-  h.addEventListener("pointermove",e=>{if(!active||pid!==e.pointerId)return;e.preventDefault();e.stopPropagation();move(e.clientY)},true);
-  h.addEventListener("pointerup",e=>{e.preventDefault();e.stopPropagation();end()},true);
-  h.addEventListener("pointercancel",e=>{e.preventDefault();e.stopPropagation();end()},true);
-  h.addEventListener("touchstart",e=>{e.preventDefault();e.stopPropagation();if(e.touches&&e.touches[0])start(e.touches[0].clientY,"touch")},{passive:false,capture:true});
-  h.addEventListener("touchmove",e=>{if(!active)return;e.preventDefault();e.stopPropagation();if(e.touches&&e.touches[0])move(e.touches[0].clientY)},{passive:false,capture:true});
-  h.addEventListener("touchend",e=>{e.preventDefault();e.stopPropagation();end()},{passive:false,capture:true});
-}
-function forceOneLineLabelsV16(){
- [["prevAnswerPageBtn","이전"],["nextAnswerPageBtn","다음"],["addAnswerPageBtn","추가"],["keyboardToggleBtn",state.answerInputMode==="keyboard"?"손글씨":"키보드"],["answerPenBtn","펜"],["answerEraserBtn","지우개"],["clearAnswerInkBtn","삭제"],["prevExplanationPageBtn","이전"],["nextExplanationPageBtn","다음"],["scoreExpPenBtn","펜"],["scoreExpEraserBtn","지우개"],["clearScoreExpInkBtn","삭제"]].forEach(([id,t])=>{const e=$(id);if(e)e.textContent=t});
-}
-const openCurrentProblem_v16=openCurrentProblem;
-openCurrentProblem=function(){openCurrentProblem_v16();setTimeout(()=>{setupSplitHandleV16();forceOneLineLabelsV16()},350)};
-const openScore_v16=openScore;
-openScore=function(){openScore_v16();setTimeout(forceOneLineLabelsV16,350)};
-setTimeout(()=>{setupSplitHandleV16();forceOneLineLabelsV16()},1200);
-window.addEventListener("resize",()=>setTimeout(()=>setSplitRatioV16(Number(localStorage.getItem("essaySplitRatioV16")||48)),160));
-
-/* === v17: 버튼식 크기조절 확정판 === */
-function clampV17(v,min,max){return Math.max(min,Math.min(max,v));}
-function setSplitRatioV17(r){
-  r=clampV17(r,18,82);
-  const shell=$("solveShell");
-  if(!shell) return;
-  shell.style.gridTemplateRows=`${r}dvh 46px calc(${100-r}dvh - 46px)`;
-  localStorage.setItem("essaySplitRatioV17",String(r));
-  localStorage.setItem("essaySplitRatioV16",String(r));
-  localStorage.setItem("essaySplitRatioV15",String(r));
-  setTimeout(()=>{
-    try{fitImage()}catch{}
-    try{resizeAnswerCanvasV10();drawAnswerInkV10()}catch{}
-    try{resizeAnswerCanvasV9();drawAnswerInkV9()}catch{}
-  },50);
-}
-function currentSplitRatioV17(){
-  return Number(localStorage.getItem("essaySplitRatioV17") || localStorage.getItem("essaySplitRatioV16") || 48);
-}
-function connectResizeButtonsV17(){
-  const handle=$("splitHandle");
-  if(!handle) return;
-
-  // 기존 드래그 리스너가 꼬여도 버튼은 onclick으로 독립 작동
-  const saved=currentSplitRatioV17();
-  setSplitRatioV17(saved);
-
-  const problemMore=$("problemMoreBtn");
-  const half=$("halfSplitBtn");
-  const answerMore=$("answerMoreBtn");
-
-  if(problemMore) {
-    problemMore.onclick=(e)=>{e.preventDefault();e.stopPropagation();setSplitRatioV17(clampV17(currentSplitRatioV17()+10,18,82));};
-  }
-  if(half) {
-    half.onclick=(e)=>{e.preventDefault();e.stopPropagation();setSplitRatioV17(48);};
-  }
-  if(answerMore) {
-    answerMore.onclick=(e)=>{e.preventDefault();e.stopPropagation();setSplitRatioV17(clampV17(currentSplitRatioV17()-10,18,82));};
-  }
-
-  // 그래도 드래그도 최대한 유지
-  let active=false;
-  const ratio=(y)=>{
-    const vv=window.visualViewport;
-    const vh=vv?.height||window.innerHeight||1;
-    const top=vv?.offsetTop||0;
-    return (y-top)/vh*100;
-  };
-  const start=(y)=>{active=true;handle.classList.add("dragging");setSplitRatioV17(ratio(y));};
-  const move=(y)=>{if(active)setSplitRatioV17(ratio(y));};
-  const end=()=>{active=false;handle.classList.remove("dragging");};
-
-  const pill=handle.querySelector(".v17-pill") || handle;
-  pill.onpointerdown=(e)=>{e.preventDefault();e.stopPropagation();try{pill.setPointerCapture(e.pointerId)}catch{};start(e.clientY);};
-  pill.onpointermove=(e)=>{if(!active)return;e.preventDefault();e.stopPropagation();move(e.clientY);};
-  pill.onpointerup=(e)=>{e.preventDefault();e.stopPropagation();end();};
-  pill.onpointercancel=(e)=>{e.preventDefault();e.stopPropagation();end();};
-}
-const openCurrentProblem_v17=openCurrentProblem;
-openCurrentProblem=function(){
-  openCurrentProblem_v17();
-  setTimeout(connectResizeButtonsV17,350);
-};
-setTimeout(connectResizeButtonsV17,1200);
-window.addEventListener("resize",()=>setTimeout(()=>setSplitRatioV17(currentSplitRatioV17()),160));
-
-/* === v18: 크기조절 버튼 실제 반영 수정 ===
-   원인: CSS의 grid-template-rows: ... !important 가 inline style을 덮어서
-   v17 버튼을 눌러도 화면이 안 변했음.
-   해결: style.setProperty(..., "important")로 강제 반영.
-*/
-function clampV18(v, min, max) { return Math.max(min, Math.min(max, v)); }
-
-function setSplitRatioV18(r) {
-  r = clampV18(Number(r) || 48, 18, 82);
-  const shell = $("solveShell");
-  if (!shell) return;
-
-  const rows = `${r}dvh 46px calc(${100 - r}dvh - 46px)`;
-  shell.style.setProperty("grid-template-rows", rows, "important");
-
-  localStorage.setItem("essaySplitRatioV18", String(r));
-  localStorage.setItem("essaySplitRatioV17", String(r));
-  localStorage.setItem("essaySplitRatioV16", String(r));
-
-  setTimeout(() => {
-    try { fitImage(); } catch {}
-    try { resizeAnswerCanvasV10(); drawAnswerInkV10(); } catch {}
-    try { resizeAnswerCanvasV9(); drawAnswerInkV9(); } catch {}
-  }, 40);
-}
-
-function currentSplitRatioV18() {
-  return Number(
-    localStorage.getItem("essaySplitRatioV18") ||
-    localStorage.getItem("essaySplitRatioV17") ||
-    localStorage.getItem("essaySplitRatioV16") ||
-    48
-  );
-}
-
-function connectResizeButtonsV18() {
-  const problemMore = $("problemMoreBtn");
-  const half = $("halfSplitBtn");
-  const answerMore = $("answerMoreBtn");
-  const handle = $("splitHandle");
-
-  setSplitRatioV18(currentSplitRatioV18());
-
-  if (problemMore) {
-    problemMore.onclick = (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setSplitRatioV18(currentSplitRatioV18() + 12);
-    };
-  }
-  if (half) {
-    half.onclick = (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setSplitRatioV18(48);
-    };
-  }
-  if (answerMore) {
-    answerMore.onclick = (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setSplitRatioV18(currentSplitRatioV18() - 12);
-    };
-  }
-
-  // 파란 막대 드래그도 같은 강제 방식으로 처리
-  const pill = document.querySelector("#splitHandle .v17-pill, #splitHandle .drag-pill");
-  if (handle && pill && !pill.dataset.v18ready) {
-    pill.dataset.v18ready = "1";
-    let active = false;
-
-    const toRatio = (y) => {
-      const vv = window.visualViewport;
-      const vh = vv?.height || window.innerHeight || 1;
-      const top = vv?.offsetTop || 0;
-      return ((y - top) / vh) * 100;
-    };
-
-    pill.addEventListener("pointerdown", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      active = true;
-      handle.classList.add("dragging");
-      try { pill.setPointerCapture(e.pointerId); } catch {}
-      setSplitRatioV18(toRatio(e.clientY));
-    }, true);
-
-    pill.addEventListener("pointermove", (e) => {
-      if (!active) return;
-      e.preventDefault();
-      e.stopPropagation();
-      setSplitRatioV18(toRatio(e.clientY));
-    }, true);
-
-    const end = (e) => {
-      if (!active) return;
-      e.preventDefault();
-      e.stopPropagation();
-      active = false;
-      handle.classList.remove("dragging");
-    };
-
-    pill.addEventListener("pointerup", end, true);
-    pill.addEventListener("pointercancel", end, true);
-  }
-}
-
-const openCurrentProblem_v18 = openCurrentProblem;
-openCurrentProblem = function() {
-  openCurrentProblem_v18();
-  setTimeout(connectResizeButtonsV18, 500);
-};
-
-setTimeout(connectResizeButtonsV18, 1500);
-window.addEventListener("resize", () => {
-  setTimeout(() => setSplitRatioV18(currentSplitRatioV18()), 160);
-});
-
-/* === v19: 중간바/크기조절 기능 비활성화 === */
-function forceNoMiddleBarV19() {
-  const h = $("splitHandle");
-  if (h) h.remove();
-
-  const shell = $("solveShell");
-  if (shell) {
-    shell.style.setProperty("grid-template-rows", "48dvh 52dvh", "important");
-    shell.style.setProperty("grid-template-columns", "1fr", "important");
-  }
-
-  setTimeout(() => {
-    try { fitImage(); } catch {}
-    try { resizeAnswerCanvasV10(); drawAnswerInkV10(); } catch {}
-    try { resizeAnswerCanvasV9(); drawAnswerInkV9(); } catch {}
-  }, 80);
-}
-
-function setupSplitHandleV11() {}
-function setupSplitHandleV15() {}
-function setupSplitHandleV16() {}
-function connectResizeButtonsV17() {}
-function connectResizeButtonsV18() {}
-function setSplitRatioV11() { forceNoMiddleBarV19(); }
-function setSplitRatioV15() { forceNoMiddleBarV19(); }
-function setSplitRatioV16() { forceNoMiddleBarV19(); }
-function setSplitRatioV17() { forceNoMiddleBarV19(); }
-function setSplitRatioV18() { forceNoMiddleBarV19(); }
-
-const openCurrentProblem_v19 = openCurrentProblem;
-openCurrentProblem = function() {
-  openCurrentProblem_v19();
-  setTimeout(forceNoMiddleBarV19, 300);
-};
-
-setTimeout(forceNoMiddleBarV19, 1000);
-window.addEventListener("resize", () => setTimeout(forceNoMiddleBarV19, 160));
-
-/* === v20: 문제등록 이미지 선택 방식 - 이전 선택 그대로 유지 === */
-function v20PageArray(target) {
-  return target === "explanation" ? state.explanationPages : state.questionPages;
-}
-function selectedIndexFor(target) {
-  return target === "explanation" ? state.selectedExplanationPage : state.selectedQuestionPage;
-}
-function setSelectedIndex(target, index) {
-  if (target === "explanation") state.selectedExplanationPage = Number(index);
-  else state.selectedQuestionPage = Number(index);
-}
-function normalizeSelectionV20(target) {
-  const arr = v20PageArray(target);
-  let selected = selectedIndexFor(target);
-  if (!arr.length) {
-    setSelectedIndex(target, -1);
-    return -1;
-  }
-  if (selected < 0 || selected >= arr.length) {
-    selected = 0;
-    setSelectedIndex(target, selected);
-  }
-  return selected;
-}
-function addBlankPage(target) {
-  const arr = v20PageArray(target);
-  arr.push("");
-  setSelectedIndex(target, arr.length - 1);
-  setPasteTarget(target);
-  renderPageLists();
-  toast(`${target === "explanation" ? "해설" : "문제"} 빈 페이지 추가 · 새 페이지 선택 유지`);
-}
-async function addImageFiles(files, target) {
-  const arrFiles = Array.from(files || []).filter(file => file && file.type && file.type.startsWith("image/"));
-  if (!arrFiles.length) {
-    toast("이미지 파일이 없어");
-    return;
-  }
-
-  const arr = v20PageArray(target);
-  const originalSelected = selectedIndexFor(target);
-  let insertAt = originalSelected;
-
-  if (insertAt < 0 || insertAt >= arr.length) {
-    insertAt = arr.length;
-  }
-
-  let added = 0, size = 0;
-  for (const file of arrFiles) {
-    const data = await imageBlobToDataUrl(file);
-
-    if (added === 0 && insertAt >= 0 && insertAt < arr.length) {
-      // 선택한 페이지가 빈 페이지든 기존 이미지든 그 자리에 그대로 넣기
-      arr[insertAt] = data;
-    } else if (insertAt >= 0 && insertAt < arr.length) {
-      // 여러 장이면 선택한 페이지 뒤에 순서대로 추가
-      arr.splice(insertAt + added, 0, data);
-    } else {
-      arr.push(data);
-      if (added === 0) insertAt = arr.length - 1;
-    }
-
-    size += dataUrlBytes(data);
-    added++;
-  }
-
-  // 핵심: 사용자가 선택했던 페이지를 그대로 유지
-  if (insertAt >= 0 && insertAt < arr.length) setSelectedIndex(target, insertAt);
-  else setSelectedIndex(target, arr.length ? arr.length - 1 : -1);
-
-  setPasteTarget(target);
-  renderPageLists();
-  toast(`${target === "explanation" ? "해설" : "문제"} 이미지 ${added}장 추가 · 선택 페이지 유지`);
-}
-function movePage(target, index, dir) {
-  const arr = v20PageArray(target), next = index + dir;
-  if (next < 0 || next >= arr.length) return;
-
-  [arr[index], arr[next]] = [arr[next], arr[index]];
-
-  const selected = selectedIndexFor(target);
-  if (selected === index) setSelectedIndex(target, next);
-  else if (selected === next) setSelectedIndex(target, index);
-
-  renderPageLists();
-}
-function deletePage(target, index) {
-  const arr = v20PageArray(target);
-  arr.splice(index, 1);
-
-  let selected = selectedIndexFor(target);
-  if (!arr.length) selected = -1;
-  else if (selected === index) selected = Math.min(index, arr.length - 1);
-  else if (selected > index) selected -= 1;
-
-  setSelectedIndex(target, selected);
-  renderPageLists();
-}
-function renderPageList(id, arr, target) {
-  const box = $(id);
-  if (!box) return;
-  box.innerHTML = "";
-  if (!arr.length) {
-    box.innerHTML = '<p class="hint">아직 페이지가 없어. “빈 페이지 추가”를 누른 뒤 스샷을 붙여넣어.</p>';
-    return;
-  }
-
-  normalizeSelectionV20(target);
-  const selected = selectedIndexFor(target);
-
-  arr.forEach((src, index) => {
-    const div = document.createElement("div");
-    div.className = "page-item" + (selected === index ? " selected-page" : "");
-    div.addEventListener("click", () => {
-      setSelectedIndex(target, index);
-      setPasteTarget(target);
-      renderPageLists();
-    });
-
-    const isReal = isRealPage(src);
-    const thumb = isReal
-      ? `<img src="${src}" alt="${index + 1}쪽" />`
-      : `<div class="blank-thumb">빈 페이지<br/>붙여넣기</div>`;
-
-    div.innerHTML = `${thumb}<div><strong>${index + 1}쪽${selected === index ? " · 선택됨" : ""}</strong><p class="hint">${selected === index ? "여기에 이미지가 들어갑니다" : (isReal ? "이미지 페이지" : "빈 페이지")}</p><div class="page-actions"></div></div>`;
-
-    const actions = div.querySelector(".page-actions");
-    actions.append(makeButton("선택", () => {
-      setSelectedIndex(target, index);
-      setPasteTarget(target);
-      renderPageLists();
-    }, "secondary small"));
-    actions.append(makeButton("위", () => movePage(target, index, -1), "secondary small"));
-    actions.append(makeButton("아래", () => movePage(target, index, 1), "secondary small"));
-    actions.append(makeButton("삭제", () => deletePage(target, index), "danger small"));
-    box.append(div);
-  });
-}
-function renderPageLists() {
-  renderPageList("questionPageList", state.questionPages, "question");
-  renderPageList("explanationPageList", state.explanationPages, "explanation");
-}
-function fillForm(p) {
-  $("formTitle").textContent = "문제 수정";
-  $("editId").value = p.id;
-  $("subjectInput").value = p.subject || "형법";
-  $("sessionInput").value = p.session || "";
-  $("titleInput").value = p.title || "";
-  $("scoreInput").value = p.maxScore || 20;
-  $("timeInput").value = p.timeLimit || 30;
-  $("pointsInput").value = p.pointsText || (p.points || []).join("\n");
-  $("modelTextInput").value = p.modelText || "";
-  state.questionPages = [...(p.questionPages || [])];
-  state.explanationPages = [...(p.explanationPages || [])];
-
-  // 수정 화면에서는 기존 첫 페이지 선택. 이후 사용자가 선택한 페이지는 계속 유지.
-  setSelectedIndex("question", state.questionPages.length ? 0 : -1);
-  setSelectedIndex("explanation", state.explanationPages.length ? 0 : -1);
-  setPasteTarget("question");
-  renderPageLists();
-  showView("addView");
-  window.scrollTo(0, 0);
-}
-function resetForm() {
-  $("formTitle").textContent = "문제 등록";
-  $("problemForm").reset();
-  $("editId").value = "";
-  $("scoreInput").value = 20;
-  $("timeInput").value = 30;
-  $("qualityInput").value = "sharp";
-  state.questionPages = [];
-  state.explanationPages = [];
-  setSelectedIndex("question", -1);
-  setSelectedIndex("explanation", -1);
-  setPasteTarget("question");
-  renderPageLists();
-}
-setTimeout(() => {
-  const cq = $("clearQuestionBtn");
-  if (cq) cq.onclick = () => {
-    state.questionPages = [];
-    setSelectedIndex("question", -1);
-    renderPageLists();
-  };
-  const ce = $("clearExplanationBtn");
-  if (ce) ce.onclick = () => {
-    state.explanationPages = [];
-    setSelectedIndex("explanation", -1);
-    renderPageLists();
-  };
-}, 500);
-
-
-/* === v21: 바로전 대분류/이미지저장방식 유지 + 붙여넣기 자동 다음페이지 === */
-const V21_PREF_KEY = "essayPsatBaseV21LastFormPrefs";
-
-function getV21Prefs() {
-  try {
-    return JSON.parse(localStorage.getItem(V21_PREF_KEY) || "{}") || {};
-  } catch {
     return {};
   }
 }
-function saveV21Prefs() {
-  const subject = $("subjectInput")?.value || "형법";
-  const quality = $("qualityInput")?.value || "sharp";
-  localStorage.setItem(V21_PREF_KEY, JSON.stringify({ subject, quality }));
+
+function saveFormPreferences() {
+  const prefs = {
+    subject: els.subjectInput?.value || '언어',
+    year: normalizedYear(els.yearInput?.value),
+    imageQuality: els.imageQualityInput?.value || 'sharp'
+  };
+  localStorage.setItem(FORM_PREF_KEY, JSON.stringify(prefs));
 }
-function applyV21Prefs() {
-  const prefs = getV21Prefs();
-  if ($("subjectInput")) $("subjectInput").value = prefs.subject || $("subjectInput").value || "형법";
-  if ($("qualityInput")) $("qualityInput").value = prefs.quality || $("qualityInput").value || "sharp";
+
+function applyFormPreferences() {
+  const prefs = readFormPreferences();
+  if (els.subjectInput) {
+    const subject = SUBJECT_GROUPS.includes(canonicalSubject(prefs.subject)) ? canonicalSubject(prefs.subject) : '언어';
+    els.subjectInput.value = subject;
+  }
+  if (els.yearInput) els.yearInput.value = normalizedYear(prefs.year);
+  if (els.imageQualityInput) {
+    const quality = ['sharp', 'bulk', 'original'].includes(prefs.imageQuality) ? prefs.imageQuality : 'sharp';
+    els.imageQualityInput.value = quality;
+  }
 }
-function ensureNextBlankPageV21(target) {
-  const arr = target === "explanation" ? state.explanationPages : state.questionPages;
-  let selected = selectedIndexFor(target);
-  if (selected < 0) {
-    arr.push("");
-    setSelectedIndex(target, 0);
-    setPasteTarget(target);
-    return;
-  }
-  const next = selected + 1;
 
-  if (next < arr.length) {
-    setSelectedIndex(target, next);
-    setPasteTarget(target);
-    return;
-  }
-
-  arr.push("");
-  setSelectedIndex(target, arr.length - 1);
-  setPasteTarget(target);
+function choiceLabel(value) {
+  return ['①', '②', '③', '④', '⑤'][Number(value) - 1] || value;
 }
-async function addImageFilesV21(files, target, options = {}) {
-  const arrFiles = Array.from(files || []).filter(file => file && file.type && file.type.startsWith("image/"));
-  if (!arrFiles.length) {
-    toast("이미지 파일이 없어");
-    return;
+
+function averageTime(problem) {
+  return problem.attempts ? Math.round((problem.totalTimeMs || 0) / problem.attempts) : 0;
+}
+
+function accuracy(problem) {
+  return problem.attempts ? Math.round(((problem.correct || 0) / problem.attempts) * 100) : 0;
+}
+
+
+function reviewBaselineFor(problem, label = '복습') {
+  return {
+    problemId: problem.id,
+    label,
+    previousLastTimeMs: problem.lastTimeMs || 0,
+    previousAvgTimeMs: averageTime(problem),
+    previousAttempts: problem.attempts || 0,
+    previousResult: problem.lastResult || ''
+  };
+}
+
+function formatTimeDelta(currentMs, previousMs) {
+  if (!previousMs) return '비교할 이전 풀이기록 없음';
+  const diff = currentMs - previousMs;
+  if (Math.abs(diff) < 1000) return '이전 최근 풀이와 거의 같음';
+  const direction = diff < 0 ? '단축' : '증가';
+  return `${formatLongTime(Math.abs(diff))} ${direction}`;
+}
+
+
+function isReviewSessionLabel(label) {
+  return /복습|다시풀기/.test(String(label || ''));
+}
+
+function clearReviewAnnotations(problem) {
+  if (!problem) return;
+  if (Array.isArray(problem.annotations) && problem.annotations.length) {
+    problem.annotations = [];
+    put(STORES.problems, problem).catch((err) => console.error('review ink clear failed', err));
   }
+}
 
-  const arr = v20PageArray(target);
-  const originalSelected = selectedIndexFor(target);
-  let insertAt = originalSelected;
+function comparisonHtml(currentMs, baseline) {
+  if (!baseline || baseline.problemId !== state.current?.id) return '';
+  const previousLast = baseline.previousLastTimeMs || 0;
+  const previousAvg = baseline.previousAvgTimeMs || 0;
+  const rows = [
+    `<span>이번 풀이: <strong>${formatLongTime(currentMs)}</strong></span>`,
+    `<span>이전 최근 풀이: <strong>${previousLast ? formatLongTime(previousLast) : '기록 없음'}</strong></span>`,
+    `<span>이전 평균 풀이: <strong>${previousAvg ? formatLongTime(previousAvg) : '기록 없음'}</strong></span>`,
+    `<span>시간 변화: <strong>${formatTimeDelta(currentMs, previousLast)}</strong></span>`
+  ];
+  return `<div class="review-compare-box"><strong>${escapeHtml(baseline.label || '복습')} 시간 비교</strong>${rows.join('')}</div>`;
+}
 
-  if (insertAt < 0 || insertAt >= arr.length) insertAt = arr.length;
+function escapeHtml(value) {
+  return String(value || '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
 
-  let added = 0;
-  for (const file of arrFiles) {
-    const data = await imageBlobToDataUrl(file);
+function canonicalSubject(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '미분류';
+  if (raw.includes('언어')) return '언어';
+  if (raw.includes('자료')) return '자료';
+  if (raw.includes('상황')) return '상황';
+  return raw;
+}
 
-    if (added === 0 && insertAt >= 0 && insertAt < arr.length) {
-      arr[insertAt] = data;
-    } else if (insertAt >= 0 && insertAt < arr.length) {
-      arr.splice(insertAt + added, 0, data);
-    } else {
-      arr.push(data);
-      if (added === 0) insertAt = arr.length - 1;
-    }
-    added++;
+function subjectMatches(problem, filter) {
+  if (!filter) return true;
+  return canonicalSubject(problem.subject) === filter || String(problem.subject || '').includes(filter);
+}
+
+function normalizedYear(value) {
+  return String(value || '').trim();
+}
+
+function yearCompare(a, b) {
+  return String(b || '').localeCompare(String(a || ''), 'ko', { numeric: true, sensitivity: 'base' });
+}
+
+function getYearSet() {
+  return [...new Set(state.problems.map((p) => normalizedYear(p.year)).filter(Boolean))]
+    .sort(yearCompare);
+}
+
+function fillYearSelect(select, keepValue = true) {
+  if (!select) return;
+  const current = keepValue ? select.value : '';
+  select.innerHTML = '<option value="">전체</option>';
+  for (const year of getYearSet()) {
+    const opt = document.createElement('option');
+    opt.value = year;
+    opt.textContent = year;
+    select.appendChild(opt);
   }
+  if (current && [...select.options].some((o) => o.value === current)) select.value = current;
+}
 
-  if (options.autoNextAfterPaste) {
-    // 첫 붙여넣기 완료 후 자동으로 다음 페이지로
-    if (insertAt >= 0 && insertAt < arr.length) setSelectedIndex(target, insertAt);
-    else setSelectedIndex(target, arr.length ? arr.length - 1 : -1);
-    ensureNextBlankPageV21(target);
+function problemOrderValue(problem) {
+  const order = Number(problem.order);
+  if (Number.isFinite(order)) return order;
+  return -(Number(problem.createdAt) || 0);
+}
+
+function sortProblemsForDisplay(items) {
+  return [...items].sort((a, b) => problemOrderValue(a) - problemOrderValue(b) || (b.createdAt || 0) - (a.createdAt || 0));
+}
+
+function nextOrderAtTop() {
+  if (Number.isFinite(state.minOrderV63)) return state.minOrderV63 - 1;
+  let min = Infinity;
+  for (const prob of state.problems) {
+    const value = Number(prob.order);
+    if (Number.isFinite(value) && value < min) min = value;
+  }
+  state.minOrderV63 = Number.isFinite(min) ? min : -Date.now();
+  return state.minOrderV63 - 1;
+}
+
+const LIST_BATCH_V63 = 60;
+
+function rebuildProblemIndexV63() {
+  state.problemMapV63 = new Map(state.problems.map((p) => [String(p.id), p]));
+  let min = Infinity;
+  for (const p of state.problems) {
+    const value = Number(p.order);
+    if (Number.isFinite(value) && value < min) min = value;
+  }
+  state.minOrderV63 = Number.isFinite(min) ? min : null;
+}
+
+function problemByIdV63(id) {
+  if (!id) return null;
+  return state.problemMapV63?.get(String(id)) || state.problems.find((p) => String(p.id) === String(id)) || null;
+}
+
+function upsertStateProblemV63(problem, resort = true) {
+  if (!problem?.id) return;
+  if (!state.problemMapV63) rebuildProblemIndexV63();
+  const key = String(problem.id);
+  const existing = state.problemMapV63.get(key);
+  if (existing) {
+    const index = state.problems.findIndex((p) => String(p.id) === key);
+    if (index >= 0) state.problems[index] = problem;
   } else {
-    if (insertAt >= 0 && insertAt < arr.length) setSelectedIndex(target, insertAt);
-    else setSelectedIndex(target, arr.length ? arr.length - 1 : -1);
+    state.problems.push(problem);
   }
+  state.problemMapV63.set(key, problem);
+  const order = Number(problem.order);
+  if (Number.isFinite(order)) state.minOrderV63 = Number.isFinite(state.minOrderV63) ? Math.min(state.minOrderV63, order) : order;
+  if (resort) {
+    state.problems = sortProblemsForDisplay(state.problems);
+    rebuildProblemIndexV63();
+  }
+}
 
-  setPasteTarget(target);
-  renderPageLists();
-  toast(`${target === "explanation" ? "해설" : "문제"} 이미지 ${added}장 추가`);
+function updateFilterOptionsV63() {
+  fillSubjectSelect(els.subjectFilter);
+  fillSubjectSelect(els.listSubjectFilter);
+  fillSubjectSelect(els.reviewSubjectFilter);
+  fillYearSelect(els.yearFilter);
+  fillYearSelect(els.listYearFilter);
+  fillYearSelect(els.reviewYearFilter);
+  fillYearSelect(els.bulkYearSource);
+  if (typeof populateCategoryFiltersV28 === 'function') {
+    try { populateCategoryFiltersV28(); } catch {}
+  }
 }
-async function addImageFiles(files, target) {
-  return addImageFilesV21(files, target, { autoNextAfterPaste: false });
+
+function activeViewIdV63() {
+  return els.views.find((v) => v.classList.contains('active'))?.id || '';
 }
-async function pasteImageFromClipboardEvent(event, explicitTarget = "") {
-  const items = event.clipboardData?.items ? Array.from(event.clipboardData.items) : [];
-  const files = items.filter(item => item.type?.startsWith("image/")).map(item => item.getAsFile()).filter(Boolean);
-  if (!files.length) return false;
-  if (event.preventDefault) event.preventDefault();
-  const target = explicitTarget || event.currentTarget?.dataset?.pasteTarget || state.activePasteTarget || "question";
-  toast("스크린샷 처리 중...");
-  await addImageFilesV21(files, target, { autoNextAfterPaste: true });
+
+function getSubjectSet() {
+  const found = new Set(state.problems.map((p) => canonicalSubject(p.subject || '미분류')));
+  const ordered = SUBJECT_GROUPS.filter((subject) => found.has(subject) || ['언어', '자료', '상황'].includes(subject));
+  const extra = [...found].filter((subject) => !SUBJECT_GROUPS.includes(subject)).sort((a, b) => a.localeCompare(b, 'ko'));
+  return [...ordered, ...extra];
+}
+
+function fillSubjectSelect(select, keepValue = true) {
+  const current = keepValue ? select.value : '';
+  select.innerHTML = '<option value="">전체</option>';
+  for (const subject of getSubjectSet()) {
+    const opt = document.createElement('option');
+    opt.value = subject;
+    opt.textContent = subject;
+    select.appendChild(opt);
+  }
+  if (current && [...select.options].some((o) => o.value === current)) select.value = current;
+}
+
+async function refresh() {
+  state.problems = sortProblemsForDisplay(await getAll(STORES.problems));
+  rebuildProblemIndexV63();
+  try{
+    const oldCount=Number(localStorage.getItem("psatLastKnownProblemCountV66")||0);
+    if(state.problems.length>oldCount)localStorage.setItem("psatLastKnownProblemCountV66",String(state.problems.length));
+  }catch{}
+  updateFilterOptionsV63();
+  renderEmptyState();
+  const active = activeViewIdV63();
+  if (active === 'listView') renderProblemList();
+  else if (active === 'wrongView') renderWrongList();
+  else if (active === 'statsView') renderStats();
+}
+
+function renderEmptyState() {
+  const has = state.problems.length > 0;
+  els.emptySolve.classList.toggle('hidden', has);
+}
+
+function switchView(viewId) {
+  els.views.forEach((v) => v.classList.toggle('active', v.id === viewId));
+  els.tabs.forEach((t) => t.classList.toggle('active', t.dataset.view === viewId));
+  if (viewId === 'listView') renderProblemList();
+  if (viewId === 'wrongView') renderWrongList();
+  if (viewId === 'statsView') renderStats();
+}
+
+function filterProblems(mode, subject, year = '') {
+  const targetYear = normalizedYear(year);
+  return state.problems.filter((p) => {
+    if (subject && !subjectMatches(p, subject)) return false;
+    if (targetYear && normalizedYear(p.year) !== targetYear) return false;
+    if (mode === 'wrong') return !!p.wrongActive;
+    if (mode === 'slow') return averageTime(p) >= SLOW_MS || (p.lastTimeMs || 0) >= SLOW_MS;
+    if (mode === 'unseen') return !p.attempts;
+    if (mode === 'flagged') return !!p.flagged;
+    return true;
+  });
+}
+
+function readPausedSession() {
+  try {
+    return JSON.parse(localStorage.getItem(PAUSED_SESSION_KEY) || 'null');
+  } catch (err) {
+    return null;
+  }
+}
+
+function clearPausedSession() {
+  localStorage.removeItem(PAUSED_SESSION_KEY);
+  updateContinueButton();
+}
+
+function updateContinueButton() {
+  if (!els.continueBtn) return;
+  const paused = readPausedSession();
+  els.continueBtn.textContent = paused ? '중단한 세트 이어풀기' : '마지막 문제 계속';
+}
+
+function buildPausedSessionSnapshot() {
+  if (!state.session || !state.current) return null;
+  const now = Date.now();
+  return {
+    savedAt: now,
+    queueIds: state.queue.map((p) => p.id),
+    queueIndex: state.queueIndex,
+    currentId: state.current.id,
+    questionElapsed: Math.max(0, now - state.questionStart),
+    sessionElapsed: Math.max(0, now - state.session.startedAt),
+    remainingMs: state.session.endAt ? Math.max(0, state.session.endAt - now) : 0,
+    session: {
+      label: state.session.label || '중단한 풀이',
+      total: state.session.total || state.queue.length,
+      answered: state.session.answered || 0,
+      correct: state.session.correct || 0,
+      problemIds: [...(state.session.problemIds || state.queue.map((p) => p.id))],
+      answeredIds: [...(state.session.answeredIds || [])],
+      wrongIds: [...(state.session.wrongIds || [])],
+      solveElapsedMsV49: Math.max(0, Number(state.session.solveElapsedMsV49 || 0))
+    }
+  };
+}
+
+async function pauseCurrentSession() {
+  if (!state.current) {
+    stopTimer();
+    await exitSolveFullscreen();
+    return;
+  }
+  stopTimer();
+  await saveInkToCurrentProblem(true);
+  const snapshot = buildPausedSessionSnapshot();
+  if (snapshot) localStorage.setItem(PAUSED_SESSION_KEY, JSON.stringify(snapshot));
+  state.questionStart = 0;
+  state.current = null;
+  state.session = null;
+  els.solvePanel.classList.add('hidden');
+  await exitSolveFullscreen();
+  updateContinueButton();
+  showToast('문제풀이를 중단했어. 푼 부분은 저장됐어.');
+}
+
+function resumePausedSession() {
+  const paused = readPausedSession();
+  if (!paused) return false;
+  const queue = (paused.queueIds || []).map((id) => problemByIdV63(id)).filter(Boolean);
+  if (!queue.length) {
+    clearPausedSession();
+    showToast('이어 풀 문제가 없어');
+    return true;
+  }
+  clearTimeout(state.autoNextTimer);
+  state.autoNextTimer = null;
+  state.queue = queue;
+  state.queueIndex = Math.min(Math.max(Number(paused.queueIndex || 0), 0), queue.length - 1);
+  const savedSession = paused.session || {};
+  const now = Date.now();
+  state.session = {
+    label: savedSession.label || '중단한 풀이',
+    startedAt: now - Math.max(0, Number(paused.sessionElapsed || 0)),
+    endAt: paused.remainingMs ? now + Math.max(0, Number(paused.remainingMs || 0)) : 0,
+    total: savedSession.total || queue.length,
+    answered: savedSession.answered || 0,
+    correct: savedSession.correct || 0,
+    elapsedOnFinish: 0,
+    problemIds: savedSession.problemIds?.length ? [...savedSession.problemIds] : queue.map((p) => p.id),
+    answeredIds: [...(savedSession.answeredIds || [])],
+    wrongIds: [...(savedSession.wrongIds || [])],
+    solveElapsedMsV49: Math.max(0, Number(savedSession.solveElapsedMsV49 || 0))
+  };
+  const current = problemByIdV63(paused.currentId) || queue[state.queueIndex];
+  loadCurrentProblem(current);
+  state.questionStart = Date.now() - Math.max(0, Number(paused.questionElapsed || 0));
+  updateTimers();
+  switchView('solveView');
+  showToast('중단한 부분부터 이어풀기');
   return true;
 }
-async function tryButtonPaste(target) {
+
+function startSession(problems, options = {}) {
+  clearPausedSession();
+  if (!problems.length) {
+    showToast('해당 조건의 문제가 없어');
+    return;
+  }
+  clearTimeout(state.autoNextTimer);
+  state.autoNextTimer = null;
+  if (els.sessionSummary) els.sessionSummary.classList.add('hidden');
+  const count = Number(options.count || 0);
+  const source = options.preserveOrder ? [...problems] : shuffle(problems);
+  state.queue = source.slice(0, count > 0 ? Math.min(count, source.length) : source.length);
+  if (isReviewSessionLabel(options.label)) state.queue.forEach(clearReviewAnnotations);
+  state.queueIndex = 0;
+  const minutes = Number(options.minutes || 0);
+  state.reviewBaseline = null;
+  state.session = {
+    label: options.label || '랜덤 풀이',
+    startedAt: Date.now(),
+    endAt: minutes > 0 ? Date.now() + minutes * 60 * 1000 : 0,
+    total: state.queue.length,
+    answered: 0,
+    correct: 0,
+    elapsedOnFinish: 0,
+    solveElapsedMsV49: 0,
+    problemIds: state.queue.map((p) => p.id),
+    answeredIds: [],
+    wrongIds: []
+  };
+  loadCurrentProblem(state.queue[0]);
+  switchView('solveView');
+}
+
+function startDirectProblem(problem) {
+  state.reviewBaseline = null;
+  clearPausedSession();
+  clearTimeout(state.autoNextTimer);
+  state.autoNextTimer = null;
+  if (els.sessionSummary) els.sessionSummary.classList.add('hidden');
+  state.queue = [problem];
+  state.queueIndex = 0;
+  state.session = {
+    label: '단일 문제',
+    startedAt: Date.now(),
+    endAt: 0,
+    total: 1,
+    answered: 0,
+    correct: 0,
+    elapsedOnFinish: 0,
+    solveElapsedMsV49: 0,
+    problemIds: [problem.id],
+    answeredIds: [],
+    wrongIds: []
+  };
+  loadCurrentProblem(problem);
+  switchView('solveView');
+}
+
+function startReviewProblem(problem, label = '복습') {
+  clearReviewAnnotations(problem);
+  state.reviewBaseline = reviewBaselineFor(problem, label);
+  clearPausedSession();
+  clearTimeout(state.autoNextTimer);
+  state.autoNextTimer = null;
+  if (els.sessionSummary) els.sessionSummary.classList.add('hidden');
+  state.queue = [problem];
+  state.queueIndex = 0;
+  state.session = {
+    label,
+    startedAt: Date.now(),
+    endAt: 0,
+    total: 1,
+    answered: 0,
+    correct: 0,
+    elapsedOnFinish: 0,
+    solveElapsedMsV49: 0,
+    problemIds: [problem.id],
+    answeredIds: [],
+    wrongIds: []
+  };
+  loadCurrentProblem(problem);
+  switchView('solveView');
+}
+
+function loadCurrentProblem(problem) {
+  saveInkToCurrentProblem(false);
+  state.current = problem;
+  if (state.session && isReviewSessionLabel(state.session.label)) {
+    state.reviewBaseline = reviewBaselineFor(problem, state.session.label);
+  } else if (state.reviewBaseline && state.reviewBaseline.problemId !== problem.id) {
+    state.reviewBaseline = null;
+  }
+  state.selectedAnswer = null;
+  state.checked = false;
+  state.answerPauseStartedAtV49 = 0;
+  state.questionStart = Date.now();
+  resetGestureState();
+  state.drawTool = 'pen';
+  state.zoom = 1;
+  state.autoFitOnImageLoad = true;
+  localStorage.setItem('psat-last-problem-id', problem.id);
+
+  els.solvePanel.classList.remove('hidden');
+  els.resultBox.classList.add('hidden');
+  els.explanationBox.classList.add('hidden');
+  els.nextBtn?.classList.add('hidden');
+  els.resultBox.className = 'result hidden';
+  els.explanationBox.textContent = '';
+  els.problemTitle.textContent = `문제 ${state.queueIndex + 1}/${state.queue.length}`;
+  const avg = averageTime(problem) ? `평균 ${formatLongTime(averageTime(problem))}` : '기록 없음';
+  const yearText = normalizedYear(problem.year) ? ` · ${normalizedYear(problem.year)}` : '';
+  const reviewMeta = state.reviewBaseline && state.reviewBaseline.problemId === problem.id
+    ? ` · 이전 최근 ${state.reviewBaseline.previousLastTimeMs ? formatLongTime(state.reviewBaseline.previousLastTimeMs) : '기록 없음'}`
+    : '';
+  els.problemMeta.textContent = `${canonicalSubject(problem.subject)}${yearText} · 정답률 ${accuracy(problem)}% · ${avg}${reviewMeta}`;
+  els.problemImage.src = problem.imageData;
+  els.flagBtn.textContent = problem.flagged ? '다시보기 해제' : '다시보기 지정';
+  setDrawTool('pen');
+  setZoom(1);
+  enterSolveFullscreen();
+  clearChoiceState();
+  updateTimers();
+  startTimer();
+}
+
+function startTimer() {
+  clearInterval(state.timerId);
+  state.timerId = setInterval(updateTimers, 300);
+}
+
+function stopTimer() {
+  clearInterval(state.timerId);
+  state.timerId = null;
+  clearTimeout(state.autoNextTimer);
+  state.autoNextTimer = null;
+}
+
+function updateTimers() {
+  if (!state.current || !state.questionStart) {
+    if (state.timerId) {
+      clearInterval(state.timerId);
+      state.timerId = null;
+    }
+    return;
+  }
+  const questionText = formatTime(Date.now() - state.questionStart);
+  if (els.questionTimer) els.questionTimer.textContent = questionText;
+  if (els.leftQuestionTimer) els.leftQuestionTimer.textContent = questionText;
+
+  const hasSessionTimer = state.session && state.session.endAt;
+  if (els.sessionTimer) els.sessionTimer.classList.toggle('hidden', !hasSessionTimer);
+  if (els.leftSessionTimer) els.leftSessionTimer.classList.toggle('hidden', !hasSessionTimer);
+  if (hasSessionTimer) {
+    const remain = state.session.endAt - Date.now();
+    const sessionText = `세션 ${formatTime(remain)}`;
+    if (els.sessionTimer) els.sessionTimer.textContent = sessionText;
+    if (els.leftSessionTimer) els.leftSessionTimer.textContent = sessionText;
+    if (remain <= 0 && !state.checked) finishSession(true);
+  }
+}
+
+function clearChoiceState() {
+  els.choices.forEach((btn) => {
+    btn.classList.remove('selected', 'correct', 'wrong');
+    btn.disabled = false;
+  });
+}
+
+function markChoiceButtons(correctAnswer, selectedAnswer) {
+  els.choices.forEach((btn) => {
+    btn.disabled = true;
+    const value = Number(btn.dataset.answer);
+    if (value === Number(correctAnswer)) btn.classList.add('correct');
+    if (value === Number(selectedAnswer) && value !== Number(correctAnswer)) btn.classList.add('wrong');
+  });
+}
+
+async function checkAnswer(options = {}) {
+  if (!state.current) return;
+  if (state.checked) {
+    if (options.autoAdvance) return;
+    showToast('이미 채점한 문제야');
+    return;
+  }
+  if (!state.selectedAnswer) {
+    showToast('정답 번호를 먼저 선택해줘');
+    return;
+  }
+  // v49: 정답 체크를 누른 그 순간 시간을 확정하고 타이머를 정지한다.
+  const answerCheckedAtV49 = Date.now();
+  const elapsed = Math.max(0, answerCheckedAtV49 - state.questionStart);
+  stopTimer();
+  state.answerPauseStartedAtV49 = answerCheckedAtV49;
+
+  await saveInkToCurrentProblem(true);
+  const p = state.current;
+  const isCorrect = Number(state.selectedAnswer) === Number(p.answer);
+
+  p.attempts = (p.attempts || 0) + 1;
+  p.totalTimeMs = (p.totalTimeMs || 0) + elapsed;
+  p.lastTimeMs = elapsed;
+  p.lastAnsweredAt = answerCheckedAtV49;
+  p.lastResult = isCorrect ? 'correct' : 'wrong';
+
+  if (isCorrect) {
+    p.correct = (p.correct || 0) + 1;
+    if (p.wrongActive) {
+      p.correctStreak = (p.correctStreak || 0) + 1;
+      if (p.correctStreak >= WRONG_CLEAR_STREAK) p.wrongActive = false;
+    }
+  } else {
+    p.wrong = (p.wrong || 0) + 1;
+    p.wrongActive = true;
+    p.correctStreak = 0;
+  }
+
+  await put(STORES.problems, p);
+  await put(STORES.history, {
+    id: uid(),
+    problemId: p.id,
+    selectedAnswer: Number(state.selectedAnswer),
+    correctAnswer: Number(p.answer),
+    isCorrect,
+    elapsedMs: elapsed,
+    createdAt: answerCheckedAtV49
+  });
+
+  state.checked = true;
+  if (state.session) {
+    state.session.solveElapsedMsV49 = Math.max(0, Number(state.session.solveElapsedMsV49 || 0)) + elapsed;
+    state.session.answered += 1;
+    if (!state.session.answeredIds.includes(p.id)) state.session.answeredIds.push(p.id);
+    if (isCorrect) state.session.correct += 1;
+    if (!isCorrect && !state.session.wrongIds.includes(p.id)) state.session.wrongIds.push(p.id);
+  }
+
+  markChoiceButtons(p.answer, state.selectedAnswer);
+  els.resultBox.className = `result ${isCorrect ? 'ok' : 'no'}`;
+  const clearText = isCorrect && !p.wrongActive && (p.correctStreak || 0) >= WRONG_CLEAR_STREAK
+    ? '<br>오답노트에서 자동 해제됨.'
+    : '';
+  const compareBlock = comparisonHtml(elapsed, state.reviewBaseline);
+  els.resultBox.innerHTML = `${isCorrect ? '정답입니다.' : '오답입니다.'}<br>선택: ${choiceLabel(state.selectedAnswer)} / 정답: ${choiceLabel(p.answer)}<br>풀이시간: ${formatLongTime(elapsed)}${clearText}${compareBlock}`;
+  els.resultBox.classList.remove('hidden');
+  if (options.autoAdvance) {
+    els.explanationBox.classList.add('hidden');
+  } else {
+    showExplanation();
+  }
+  // v63: 채점할 때 1만+ 문제 전체를 DB에서 다시 읽고 목록 DOM까지 재생성하지 않는다.
+  // 현재 문제 객체는 state/queue에서 같은 참조를 쓰므로 통계만 이미 반영되어 있다.
+  upsertStateProblemV63(p, false);
+
+  // v44: 채점 후 자동으로 다음 문제로 넘어가지 않는다.
+  clearTimeout(state.autoNextTimer);
+  state.autoNextTimer = null;
+
+  if (els.nextBtn) {
+    const isLast = !state.session || state.queueIndex + 1 >= state.queue.length;
+    els.nextBtn.textContent = isLast ? '풀이 완료' : '다음 문제';
+    els.nextBtn.classList.remove('hidden');
+  }
+}
+
+function showExplanation() {
+  if (!state.current) return;
+  const hasText = state.current.explanation && state.current.explanation.trim();
+  const hasImage = state.current.explanationImageData;
+  els.explanationBox.innerHTML = '';
+  if (!hasText && !hasImage) {
+    els.explanationBox.textContent = '등록된 해설이 없습니다.';
+  } else {
+    if (hasImage) {
+      const img = document.createElement('img');
+      img.src = state.current.explanationImageData;
+      img.alt = '해설 이미지';
+      img.className = 'explanation-image';
+      els.explanationBox.appendChild(img);
+    }
+    if (hasText) {
+      const text = document.createElement('div');
+      text.className = 'explanation-text';
+      text.textContent = state.current.explanation.trim();
+      els.explanationBox.appendChild(text);
+    }
+  }
+  els.explanationBox.classList.remove('hidden');
+}
+
+async function nextProblem() {
+  clearTimeout(state.autoNextTimer);
+  state.autoNextTimer = null;
+
+  // v49: 채점 후 다음 문제를 누르기까지 기다린 시간은 풀이시간/제한시간에서 제외.
+  if (state.answerPauseStartedAtV49) {
+    const pausedForV49 = Math.max(0, Date.now() - state.answerPauseStartedAtV49);
+    if (state.session?.endAt) state.session.endAt += pausedForV49;
+    state.answerPauseStartedAtV49 = 0;
+  }
+
+  els.nextBtn?.classList.add('hidden');
+  if (!state.current) return;
+  await saveInkToCurrentProblem(true);
+  if (state.queueIndex + 1 >= state.queue.length) {
+    finishSession(false);
+    return;
+  }
+  state.queueIndex += 1;
+  const next = problemByIdV63(state.queue[state.queueIndex].id) || state.queue[state.queueIndex];
+  loadCurrentProblem(next);
+}
+
+function finishSession(timeout) {
+  if (!state.session) return;
+  const session = state.session;
+  const elapsed = Date.now() - session.startedAt;
+  session.elapsedOnFinish = elapsed;
+  stopTimer();
+  state.current = null;
+  exitSolveFullscreen();
+  els.solvePanel.classList.add('hidden');
+  els.nextBtn?.classList.add('hidden');
+  state.lastSession = {
+    label: session.label || '랜덤 풀이',
+    timeout: !!timeout,
+    total: session.total,
+    answered: session.answered,
+    correct: session.correct,
+    elapsed,
+    problemIds: [...(session.problemIds || [])],
+    wrongIds: [...(session.wrongIds || [])]
+  };
+  state.session = null;
+  clearPausedSession();
+  renderSessionSummary();
+  showToast(timeout ? '제한시간이 끝났어' : '세션 완료');
+}
+
+function renderSessionSummary(showWrongList = false) {
+  if (!els.sessionSummary || !state.lastSession) return;
+  const s = state.lastSession;
+  const wrongCount = s.wrongIds.length;
+  const rate = s.answered ? Math.round(s.correct / s.answered * 100) : 0;
+  const wrongListHtml = showWrongList
+    ? `<div class="summary-wrong-list">${renderSummaryWrongItems(s.wrongIds)}</div>`
+    : '';
+  els.sessionSummary.innerHTML = `
+    <h2>${s.timeout ? '시간 종료' : '세트 완료'} · ${escapeHtml(s.label || '')}</h2>
+    <div class="summary-stats">
+      <div><span>풀이</span><strong>${s.answered}/${s.total}</strong></div>
+      <div><span>정답</span><strong>${s.correct}</strong></div>
+      <div><span>오답</span><strong>${wrongCount}</strong></div>
+      <div><span>정답률</span><strong>${rate}%</strong></div>
+      <div><span>시간</span><strong>${formatLongTime(s.elapsed)}</strong></div>
+    </div>
+    <div class="summary-actions">
+      <button data-summary-action="wrong-review" ${wrongCount ? '' : 'disabled'} type="button">틀린문제 다시풀기</button>
+      <button data-summary-action="wrong-list" ${wrongCount ? '' : 'disabled'} class="secondary" type="button">틀린문제 보기</button>
+      <button data-summary-action="all-review" class="secondary" type="button">전체 다시풀기</button>
+      <button data-summary-action="new-random" class="secondary" type="button">새 랜덤</button>
+    </div>
+    ${wrongListHtml}
+  `;
+  els.sessionSummary.classList.remove('hidden');
+}
+
+function renderSummaryWrongItems(ids) {
+  const items = ids.map((id) => state.problems.find((p) => String(p.id) === String(id))).filter(Boolean);
+  if (!items.length) return '<p class="hint">틀린 문제가 없어.</p>';
+  return items.map((p, idx) => `
+    <article class="summary-wrong-item">
+      <img src="${p.imageData}" alt="틀린 문제 ${idx + 1}">
+      <div>
+        <strong>${idx + 1}. ${escapeHtml(canonicalSubject(p.subject))}${normalizedYear(p.year) ? ` · ${escapeHtml(normalizedYear(p.year))}` : ''}</strong>
+        <span>정답 ${choiceLabel(p.answer)} · 최근 풀이 ${formatLongTime(p.lastTimeMs || 0)}</span>
+        <button data-action="solve" data-id="${p.id}" type="button">이 문제 풀기</button>
+      </div>
+    </article>
+  `).join('');
+}
+
+function startReviewByIds(ids, label) {
+  const list = ids.map((id) => state.problems.find((p) => String(p.id) === String(id))).filter(Boolean);
+  if (isReviewSessionLabel(label)) list.forEach(clearReviewAnnotations);
+  if (!list.length) {
+    showToast('다시 풀 문제가 없어');
+    return;
+  }
+  startSession(list, { preserveOrder: true, label });
+}
+
+function handleSessionSummaryClick(event) {
+  const actionBtn = event.target.closest('[data-summary-action]');
+  if (actionBtn) {
+    const action = actionBtn.dataset.summaryAction;
+    if (action === 'wrong-review') startReviewByIds(state.lastSession?.wrongIds || [], '틀린문제 다시풀기');
+    if (action === 'wrong-list') renderSessionSummary(true);
+    if (action === 'all-review') startReviewByIds(state.lastSession?.problemIds || [], '전체 다시풀기');
+    if (action === 'new-random') {
+      els.sessionSummary.classList.add('hidden');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+    return;
+  }
+  const solveBtn = event.target.closest('button[data-action="solve"]');
+  if (solveBtn) {
+    const p = state.problems.find((item) => item.id === solveBtn.dataset.id);
+    if (p) startDirectProblem(p);
+  }
+}
+
+function setDrawEnabled(enabled) {
+  // v4: 필기모드 토글 제거. 스타일러스/마우스는 항상 필기, 손가락은 이동/확대입니다.
+  els.inkCanvas.classList.add('drawing-enabled');
+}
+
+function updateSizeLabels() {
+  if (els.penSizeLabel) els.penSizeLabel.textContent = String(Number(els.penSize.value || 4));
+  if (els.eraserSizeLabel) els.eraserSizeLabel.textContent = String(Number(els.eraserSize.value || 26));
+}
+
+function setDrawTool(tool) {
+  state.drawTool = tool;
+  els.penBtn.classList.toggle('active-tool', tool === 'pen');
+  els.eraserBtn.classList.toggle('active-tool', tool === 'eraser');
+  updateSizeLabels();
+}
+
+function setZoom(value) {
+  state.zoom = Math.min(5, Math.max(0.05, Number(value))); // v6: 한 화면 맞춤을 위해 5%까지 축소
+  els.imageWrap.style.width = `${state.zoom * 100}%`;
+  els.zoomLabel.textContent = `${Math.round(state.zoom * 100)}%`;
+  window.requestAnimationFrame(syncCanvasSize);
+}
+
+function setZoomAround(value, clientX, clientY, fixedContentX = null, fixedContentY = null) {
+  const scroller = els.imageScroller;
+  const rect = scroller.getBoundingClientRect();
+  const viewX = Math.min(rect.width, Math.max(0, clientX - rect.left));
+  const viewY = Math.min(rect.height, Math.max(0, clientY - rect.top));
+  const oldZoom = state.zoom || 1;
+  const contentX = fixedContentX ?? ((scroller.scrollLeft + viewX) / oldZoom);
+  const contentY = fixedContentY ?? ((scroller.scrollTop + viewY) / oldZoom);
+  setZoom(value);
+  scroller.scrollLeft = Math.max(0, contentX * state.zoom - viewX);
+  scroller.scrollTop = Math.max(0, contentY * state.zoom - viewY);
+}
+
+function zoomFromCenter(delta) {
+  const rect = els.imageScroller.getBoundingClientRect();
+  setZoomAround(state.zoom + delta, rect.left + rect.width / 2, rect.top + rect.height / 2);
+}
+
+
+function fitZoomToScreen() {
+  if (!state.current || !els.problemImage.naturalWidth || !els.problemImage.naturalHeight) return;
+  const scroller = els.imageScroller;
+  if (!scroller.clientWidth || !scroller.clientHeight) return;
+  const baseWidth = scroller.clientWidth;
+  const baseHeight = baseWidth * (els.problemImage.naturalHeight / els.problemImage.naturalWidth);
+  const fitByHeight = (scroller.clientHeight - 12) / Math.max(1, baseHeight);
+  const fit = Math.min(1, Math.max(0.05, fitByHeight));
+  setZoom(fit);
+  scroller.scrollLeft = 0;
+  scroller.scrollTop = 0;
+}
+
+async function enterSolveFullscreen() {
+  if (!els.solvePanel) return;
+  document.body.classList.add('solve-active');
+  els.solvePanel.classList.add('fullscreen-solve');
+  state.solveFullscreenActive = true;
+  window.requestAnimationFrame(() => {
+    syncCanvasSize();
+    if (state.autoFitOnImageLoad) fitZoomToScreen();
+  });
+  try {
+    if (els.solvePanel.requestFullscreen && !document.fullscreenElement) {
+      await els.solvePanel.requestFullscreen();
+    }
+  } catch (err) {
+    // 모바일 브라우저가 전체화면 API를 막아도 CSS 전체화면은 유지합니다.
+  }
+}
+
+async function exitSolveFullscreen() {
+  document.body.classList.remove('solve-active');
+  els.solvePanel?.classList.remove('fullscreen-solve');
+  state.solveFullscreenActive = false;
+  window.requestAnimationFrame(syncCanvasSize);
+  try {
+    if (document.fullscreenElement && document.exitFullscreen) await document.exitFullscreen();
+  } catch (err) {}
+}
+
+function getCanvasContext() {
+  const ctx = els.inkCanvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return ctx;
+}
+
+function syncCanvasSize() {
+  if (!state.current || !els.problemImage.complete) return;
+  const width = els.imageWrap.clientWidth;
+  const height = els.problemImage.clientHeight;
+  if (!width || !height) return;
+  const dpr = window.devicePixelRatio || 1;
+  const nextWidth = Math.round(width * dpr);
+  const nextHeight = Math.round(height * dpr);
+  if (els.inkCanvas.width !== nextWidth || els.inkCanvas.height !== nextHeight) {
+    els.inkCanvas.width = nextWidth;
+    els.inkCanvas.height = nextHeight;
+    els.inkCanvas.style.width = `${width}px`;
+    els.inkCanvas.style.height = `${height}px`;
+  }
+  redrawInk();
+}
+
+function redrawInk() {
+  const canvas = els.inkCanvas;
+  const ctx = getCanvasContext();
+  const width = canvas.clientWidth;
+  const height = canvas.clientHeight;
+  ctx.clearRect(0, 0, width, height);
+  const strokes = state.current?.annotations || [];
+  for (const stroke of strokes) drawStroke(ctx, stroke, width, height);
+}
+
+function drawStroke(ctx, stroke, width, height) {
+  const points = stroke.points || [];
+  if (!points.length) return;
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  const baseSize = Number(stroke.size || 4);
+  const strokeZoom = Number(stroke.zoom || 1);
+  ctx.lineWidth = Math.max(1, baseSize * ((state.zoom || 1) / strokeZoom));
+  ctx.strokeStyle = stroke.color || '#111111';
+  ctx.globalCompositeOperation = stroke.tool === 'eraser' ? 'destination-out' : 'source-over';
+  ctx.beginPath();
+  const first = points[0];
+  ctx.moveTo(first.x * width, first.y * height);
+  if (points.length === 1) {
+    ctx.lineTo(first.x * width + 0.1, first.y * height + 0.1);
+  } else {
+    for (let i = 1; i < points.length; i += 1) {
+      const p = points[i];
+      ctx.lineTo(p.x * width, p.y * height);
+    }
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+function clientToPoint(clientX, clientY) {
+  const rect = els.inkCanvas.getBoundingClientRect();
+  const x = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+  const y = Math.min(1, Math.max(0, (clientY - rect.top) / rect.height));
+  return { x, y };
+}
+
+function pointerToPoint(event) {
+  const point = clientToPoint(event.clientX, event.clientY);
+  const pressure = event.pressure && event.pressure > 0 ? event.pressure : 0.5;
+  return { ...point, pressure };
+}
+
+function resetGestureState() {
+  if (state.drawing && state.currentStroke) {
+    state.currentStroke = null;
+  }
+  state.drawing = false;
+  state.activeDrawPointerId = null;
+  state.touchPointers = new Map();
+  state.gesture = null;
+  els.imageScroller?.classList.remove('panning');
+}
+
+function canDrawWithPointer(event) {
+  if (!state.current) return false;
+  if (event.pointerType === 'touch') return false;
+  if (event.pointerType === 'mouse' && event.button !== 0 && event.buttons !== 1) return false;
+  return event.pointerType === 'pen' || event.pointerType === 'mouse' || event.pointerType === '' || !event.pointerType;
+}
+
+function currentStrokeSize() {
+  if (state.drawTool === 'eraser') return Number(els.eraserSize.value || 26);
+  return Number(els.penSize.value || 4);
+}
+
+function startInk(event) {
+  if (event.pointerType === 'touch') {
+    startTouchGesture(event);
+    return;
+  }
+  if (!canDrawWithPointer(event)) return;
+  event.preventDefault();
+  els.inkCanvas.setPointerCapture?.(event.pointerId);
+  state.drawing = true;
+  state.activeDrawPointerId = event.pointerId;
+  state.currentStroke = {
+    tool: state.drawTool,
+    color: '#111111',
+    size: currentStrokeSize(),
+    zoom: state.zoom || 1,
+    points: [pointerToPoint(event)],
+    createdAt: Date.now()
+  };
+}
+
+function moveInk(event) {
+  if (event.pointerType === 'touch') {
+    moveTouchGesture(event);
+    return;
+  }
+  if (!state.drawing || !state.currentStroke || event.pointerId !== state.activeDrawPointerId) return;
+  event.preventDefault();
+  state.currentStroke.points.push(pointerToPoint(event));
+  redrawInk();
+  const ctx = getCanvasContext();
+  drawStroke(ctx, state.currentStroke, els.inkCanvas.clientWidth, els.inkCanvas.clientHeight);
+}
+
+async function endInk(event) {
+  if (event.pointerType === 'touch') {
+    endTouchGesture(event);
+    return;
+  }
+  if (!state.drawing || !state.currentStroke || event.pointerId !== state.activeDrawPointerId) return;
+  event.preventDefault();
+  state.drawing = false;
+  state.activeDrawPointerId = null;
+  try { els.inkCanvas.releasePointerCapture?.(event.pointerId); } catch (err) {}
+  state.current.annotations = state.current.annotations || [];
+  state.current.annotations.push(state.currentStroke);
+  state.currentStroke = null;
+  redrawInk();
+  await saveInkToCurrentProblem(true);
+}
+
+function touchList() {
+  return Array.from(state.touchPointers.values());
+}
+
+function distance(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y) || 1;
+}
+
+function centerOf(a, b) {
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+}
+
+function beginPanGesture(point) {
+  state.gesture = {
+    type: 'pan',
+    pointerId: point.id,
+    startX: point.x,
+    startY: point.y,
+    scrollLeft: els.imageScroller.scrollLeft,
+    scrollTop: els.imageScroller.scrollTop
+  };
+  els.imageScroller.classList.add('panning');
+}
+
+function beginPinchGesture(points) {
+  if (points.length < 2) return;
+  const [a, b] = points;
+  const c = centerOf(a, b);
+  const rect = els.imageScroller.getBoundingClientRect();
+  state.gesture = {
+    type: 'pinch',
+    startDistance: distance(a, b),
+    startZoom: state.zoom || 1,
+    contentX: (els.imageScroller.scrollLeft + (c.x - rect.left)) / (state.zoom || 1),
+    contentY: (els.imageScroller.scrollTop + (c.y - rect.top)) / (state.zoom || 1)
+  };
+  els.imageScroller.classList.add('panning');
+}
+
+function startTouchGesture(event) {
+  if (!state.current) return;
+  event.preventDefault();
+  els.inkCanvas.setPointerCapture?.(event.pointerId);
+  state.touchPointers.set(event.pointerId, { id: event.pointerId, x: event.clientX, y: event.clientY });
+  const points = touchList();
+  if (points.length >= 2) beginPinchGesture(points);
+  else beginPanGesture(points[0]);
+}
+
+function moveTouchGesture(event) {
+  if (!state.touchPointers.has(event.pointerId)) return;
+  event.preventDefault();
+  state.touchPointers.set(event.pointerId, { id: event.pointerId, x: event.clientX, y: event.clientY });
+  const points = touchList();
+  if (points.length >= 2) {
+    if (!state.gesture || state.gesture.type !== 'pinch') beginPinchGesture(points);
+    const [a, b] = points;
+    const c = centerOf(a, b);
+    const ratio = distance(a, b) / Math.max(1, state.gesture.startDistance || distance(a, b));
+    setZoomAround(state.gesture.startZoom * ratio, c.x, c.y, state.gesture.contentX, state.gesture.contentY);
+    return;
+  }
+  if (points.length === 1) {
+    const point = points[0];
+    if (!state.gesture || state.gesture.type !== 'pan' || state.gesture.pointerId !== point.id) beginPanGesture(point);
+    const dx = point.x - state.gesture.startX;
+    const dy = point.y - state.gesture.startY;
+    els.imageScroller.scrollLeft = state.gesture.scrollLeft - dx;
+    els.imageScroller.scrollTop = state.gesture.scrollTop - dy;
+  }
+}
+
+function endTouchGesture(event) {
+  if (!state.touchPointers.has(event.pointerId)) return;
+  event.preventDefault();
+  state.touchPointers.delete(event.pointerId);
+  try { els.inkCanvas.releasePointerCapture?.(event.pointerId); } catch (err) {}
+  const points = touchList();
+  if (points.length >= 2) beginPinchGesture(points);
+  else if (points.length === 1) beginPanGesture(points[0]);
+  else {
+    state.gesture = null;
+    els.imageScroller.classList.remove('panning');
+  }
+}
+
+async function saveInkToCurrentProblem(writeDb) {
+  if (!state.current) return;
+  const idx = state.problems.findIndex((p) => String(p.id) === String(state.current.id));
+  if (idx >= 0) state.problems[idx] = state.current;
+  if (writeDb) await put(STORES.problems, state.current);
+}
+
+async function clearInk() {
+  if (!state.current) return;
+  if (!confirm('현재 문제의 필기를 전부 지울까?')) return;
+  state.current.annotations = [];
+  redrawInk();
+  await saveInkToCurrentProblem(true);
+  showToast('필기를 지웠어');
+}
+
+async function toggleFlag() {
+  if (!state.current) return;
+  state.current.flagged = !state.current.flagged;
+  await put(STORES.problems, state.current);
+  els.flagBtn.textContent = state.current.flagged ? '다시보기 해제' : '다시보기 지정';
+  showToast(state.current.flagged ? '다시보기로 지정했어' : '다시보기를 해제했어');
+  await refresh();
+}
+
+function getVisibleProblemList() {
+  const query = els.searchInput.value.trim().toLowerCase();
+  const subject = els.listSubjectFilter.value;
+  const year = els.listYearFilter?.value || '';
+  const yearText = els.listYearTextFilter?.value?.trim().toLowerCase() || '';
+  return state.problems.filter((p) => {
+    const problemYear = normalizedYear(p.year);
+    if (subject && !subjectMatches(p, subject)) return false;
+    if (year && problemYear !== year) return false;
+    if (yearText && !problemYear.toLowerCase().includes(yearText)) return false;
+    if (!query) return true;
+    const imageKeyword = problemExplanationPagesV61(p).length ? '해설이미지 스크린샷' : '';
+    const hay = [canonicalSubject(p.subject), p.subject, p.year, p.explanation, imageKeyword].join(' ').toLowerCase();
+    return hay.includes(query);
+  });
+}
+
+function renderProblemList(event) {
+  if (event?.type) state.listLimitV63 = LIST_BATCH_V63;
+  const list = getVisibleProblemList();
+  els.problemList.innerHTML = '';
+  if (!list.length) {
+    els.problemList.innerHTML = '<p class="hint">표시할 문제가 없어.</p>';
+    return;
+  }
+  const limit = Math.min(Number(state.listLimitV63 || LIST_BATCH_V63), list.length);
+  const frag = document.createDocumentFragment();
+  for (let index = 0; index < limit; index += 1) {
+    const p = list[index];
+    const displayNumber = list.length - index;
+    frag.appendChild(problemItem(p, false, displayNumber));
+  }
+  els.problemList.appendChild(frag);
+  if (limit < list.length) {
+    const more = document.createElement('button');
+    more.type = 'button';
+    more.className = 'secondary v63-load-more';
+    more.textContent = `더 보기 (${limit}/${list.length})`;
+    more.addEventListener('click', () => {
+      state.listLimitV63 = Math.min(list.length, limit + LIST_BATCH_V63);
+      renderProblemList();
+    });
+    els.problemList.appendChild(more);
+  }
+}
+
+function reviewListForMode(mode) {
+  const subject = els.reviewSubjectFilter?.value || '';
+  const year = els.reviewYearFilter?.value || '';
+  const yearText = (els.reviewYearTextFilter?.value || '').trim().toLowerCase();
+  const applyReviewFilters = (list) => list.filter((p) => {
+    const problemYear = normalizedYear(p.year);
+    if (subject && !subjectMatches(p, subject)) return false;
+    if (year && problemYear !== year) return false;
+    if (yearText && !problemYear.toLowerCase().includes(yearText)) return false;
+    return true;
+  });
+  if (mode === 'correct') {
+    return applyReviewFilters(state.problems)
+      .filter((p) => (p.correct || 0) > 0 && !p.wrongActive)
+      .sort((a, b) => (b.lastAnsweredAt || 0) - (a.lastAnsweredAt || 0));
+  }
+  return applyReviewFilters(state.problems)
+    .filter((p) => p.wrongActive)
+    .sort((a, b) => (b.lastAnsweredAt || 0) - (a.lastAnsweredAt || 0));
+}
+
+function setReviewMode(mode) {
+  state.reviewMode = mode;
+  if (els.reviewWrongBtn) els.reviewWrongBtn.classList.toggle('secondary', mode !== 'wrong');
+  if (els.reviewCorrectBtn) els.reviewCorrectBtn.classList.toggle('secondary', mode !== 'correct');
+  if (els.reviewWrongRandomBtn) els.reviewWrongRandomBtn.classList.add('secondary');
+  renderWrongList();
+}
+
+function renderWrongList(event) {
+  if (event?.type) state.reviewLimitV63 = LIST_BATCH_V63;
+  const mode = state.reviewMode || 'wrong';
+  const list = reviewListForMode(mode);
+  els.wrongList.innerHTML = '';
+  if (els.reviewListTitle) {
+    const subject = els.reviewSubjectFilter?.value || '전체';
+    const year = els.reviewYearFilter?.value || els.reviewYearTextFilter?.value || '전체';
+    els.reviewListTitle.textContent = `${mode === 'correct' ? '정답복습' : '오답복습'} · 대분류 ${subject} · 연도/회차 ${year}`;
+  }
+  if (!list.length) {
+    els.wrongList.innerHTML = mode === 'correct'
+      ? '<p class="hint">아직 정답복습할 문제가 없어.</p>'
+      : '<p class="hint">현재 복습할 오답이 없어.</p>';
+    return;
+  }
+  const limit = Math.min(Number(state.reviewLimitV63 || LIST_BATCH_V63), list.length);
+  const frag = document.createDocumentFragment();
+  for (let index = 0; index < limit; index += 1) {
+    frag.appendChild(problemItem(list[index], true, list.length - index, mode));
+  }
+  els.wrongList.appendChild(frag);
+  if (limit < list.length) {
+    const more = document.createElement('button');
+    more.type = 'button'; more.className = 'secondary v63-load-more';
+    more.textContent = `더 보기 (${limit}/${list.length})`;
+    more.addEventListener('click', () => { state.reviewLimitV63 = Math.min(list.length, limit + LIST_BATCH_V63); renderWrongList(); });
+    els.wrongList.appendChild(more);
+  }
+}
+
+function problemItem(p, wrongOnly, displayNumber = '', reviewMode = '') {
+  const div = document.createElement('article');
+  div.className = wrongOnly ? 'item review-item' : 'item numbered';
+  div.dataset.id = p.id;
+  const streak = p.wrongActive ? `오답해제까지 ${Math.max(0, WRONG_CLEAR_STREAK - (p.correctStreak || 0))}회 정답 필요` : '오답 아님';
+  const hasExpImage = p.explanationImageData ? ' · 해설이미지 있음' : '';
+  const numberBadge = wrongOnly ? '' : `<div class="list-number" aria-label="문제 번호">${displayNumber}</div>`;
+  const lastTime = p.lastTimeMs ? formatLongTime(p.lastTimeMs) : '기록 없음';
+  const avgTime = (p.attempts || 0) ? formatLongTime(averageTime(p)) : '기록 없음';
+  const totalTime = p.totalTimeMs ? formatLongTime(p.totalTimeMs) : '기록 없음';
+  const lastDate = p.lastAnsweredAt ? new Date(p.lastAnsweredAt).toLocaleString('ko-KR') : '기록 없음';
+  const statusText = reviewMode === 'correct' ? '정답복습' : wrongOnly ? '오답복습' : '';
+  div.innerHTML = `
+    ${numberBadge}
+    <img src="${p.imageData}" alt="문제 썸네일">
+    <div>
+      <h3>${escapeHtml(canonicalSubject(p.subject))}${normalizedYear(p.year) ? ` · ${escapeHtml(normalizedYear(p.year))}` : ''} · 정답 ${choiceLabel(p.answer)}</h3>
+      <p>풀이 ${p.attempts || 0}회 · 정답률 ${accuracy(p)}% · 최근 풀이시간 ${lastTime} · 평균 ${avgTime}</p>
+      <p>${statusText ? escapeHtml(statusText) + ' · ' : ''}${escapeHtml(streak)}${p.flagged ? ' · 다시보기 지정' : ''}${hasExpImage}</p>
+      <div class="review-time-detail hidden">
+        <strong>복습 기록</strong>
+        <span>이전 최근 풀이: ${lastTime}</span>
+        <span>이전 평균 풀이: ${avgTime}</span>
+        <span>누적 풀이: ${totalTime}</span>
+        <span>마지막 풀이: ${escapeHtml(lastDate)}</span>
+        ${wrongOnly ? `<button data-action="solve" data-id="${p.id}" data-context="wrong" type="button">이 문제 복습 풀기</button><span>풀고 나면 이번 풀이시간과 이전 풀이시간을 비교해서 보여줘.</span>` : ''}
+      </div>
+      <div class="item-actions">
+        ${wrongOnly ? '' : `<button data-action="moveUp" data-id="${p.id}" data-context="list" class="secondary order-btn" type="button">위</button><button data-action="moveDown" data-id="${p.id}" data-context="list" class="secondary order-btn" type="button">아래</button>`}
+        <button data-action="solve" data-id="${p.id}" data-context="${wrongOnly ? 'wrong' : 'list'}" type="button">${wrongOnly ? '복습 풀기' : '풀기'}</button>
+        <button data-action="edit" data-id="${p.id}" data-context="${wrongOnly ? 'wrong' : 'list'}" class="secondary" type="button">수정</button>
+        <button data-action="flag" data-id="${p.id}" data-context="${wrongOnly ? 'wrong' : 'list'}" class="secondary" type="button">${p.flagged ? '다시보기 해제' : '다시보기'}</button>
+        ${wrongOnly && p.wrongActive ? `<button data-action="unwrong" data-id="${p.id}" data-context="wrong" class="secondary" type="button">오답 해제</button>` : ''}
+        <button data-action="delete" data-id="${p.id}" data-context="${wrongOnly ? 'wrong' : 'list'}" class="danger-lite" type="button">삭제</button>
+      </div>
+    </div>
+  `;
+  div.addEventListener('click', handleItemClick);
+  return div;
+}
+
+function clearListDragClasses() {
+  $$('.item').forEach((item) => item.classList.remove('dragging', 'drop-before', 'drop-after'));
+  state.draggingProblemId = '';
+}
+
+function dropPlacement(event, item) {
+  const rect = item.getBoundingClientRect();
+  return event.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
+}
+
+function handleListDragStart(event) {
+  if (event.target.closest('button') && !event.target.closest('.drag-handle')) {
+    event.preventDefault();
+    return;
+  }
+  state.draggingProblemId = event.currentTarget.dataset.id || '';
+  event.currentTarget.classList.add('dragging');
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', state.draggingProblemId);
+  }
+}
+
+function handleListDragOver(event) {
+  const item = event.currentTarget;
+  const targetId = item.dataset.id;
+  if (!state.draggingProblemId || targetId === state.draggingProblemId) return;
+  event.preventDefault();
+  item.classList.toggle('drop-before', dropPlacement(event, item) === 'before');
+  item.classList.toggle('drop-after', dropPlacement(event, item) === 'after');
+}
+
+function handleListDragLeave(event) {
+  event.currentTarget.classList.remove('drop-before', 'drop-after');
+}
+
+async function handleListDrop(event) {
+  event.preventDefault();
+  const target = event.currentTarget;
+  const targetId = target.dataset.id;
+  const fromId = state.draggingProblemId || event.dataTransfer?.getData('text/plain') || '';
+  const placement = dropPlacement(event, target);
+  clearListDragClasses();
+  if (!fromId || !targetId || fromId === targetId) return;
+  await reorderVisibleProblems(fromId, targetId, placement === 'before');
+}
+
+function listReorderItems() {
+  return [...document.querySelectorAll('#problemList .item.reorderable[data-id]')];
+}
+
+function nearestReorderTarget(clientX, clientY, draggedId) {
+  const items = listReorderItems().filter((item) => item.dataset.id !== draggedId);
+  if (!items.length) return null;
+  let best = null;
+  let bestDistance = Infinity;
+  for (const item of items) {
+    const rect = item.getBoundingClientRect();
+    const centerY = rect.top + rect.height / 2;
+    const distance = Math.abs(clientY - centerY);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = { item, before: clientY < centerY };
+    }
+  }
+  return best;
+}
+
+function setReorderDropMarker(target) {
+  listReorderItems().forEach((node) => node.classList.remove('drop-before', 'drop-after'));
+  if (!target?.item) return;
+  target.item.classList.toggle('drop-before', target.before);
+  target.item.classList.toggle('drop-after', !target.before);
+}
+
+function maybeAutoScrollList(clientY) {
+  const scroller = document.scrollingElement || document.documentElement;
+  const edge = Math.min(96, window.innerHeight * 0.18);
+  let delta = 0;
+  if (clientY < edge) delta = -14;
+  else if (clientY > window.innerHeight - edge) delta = 14;
+  if (!delta) return;
+  scroller.scrollBy({ top: delta, left: 0, behavior: 'auto' });
+}
+
+function handleReorderPointerDown(event) {
+  const item = event.currentTarget.closest('#problemList .item.reorderable[data-id]');
+  if (!item) return;
+  state.pointerReorder = {
+    id: item.dataset.id,
+    targetId: '',
+    before: true,
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY
+  };
+  state.draggingProblemId = item.dataset.id;
+  item.classList.add('dragging');
+  document.body.classList.add('reorder-active');
+  event.currentTarget.setPointerCapture?.(event.pointerId);
+  event.preventDefault();
+}
+
+function handleReorderPointerMove(event) {
+  if (!state.pointerReorder) return;
+  const draggedId = state.pointerReorder.id;
+  const target = nearestReorderTarget(event.clientX, event.clientY, draggedId);
+  setReorderDropMarker(target);
+  if (target?.item) {
+    state.pointerReorder.targetId = target.item.dataset.id;
+    state.pointerReorder.before = target.before;
+  }
+  maybeAutoScrollList(event.clientY);
+  event.preventDefault();
+}
+
+async function handleReorderPointerUp() {
+  if (!state.pointerReorder) return;
+  const { id, targetId, before } = state.pointerReorder;
+  state.pointerReorder = null;
+  document.body.classList.remove('reorder-active');
+  clearListDragClasses();
+  if (id && targetId && id !== targetId) await reorderVisibleProblems(id, targetId, before);
+}
+
+async function reorderVisibleProblems(fromId, targetId, beforeTarget) {
+  const visible = getVisibleProblemList();
+  const visibleIds = visible.map((prob) => prob.id);
+  if (!visibleIds.includes(fromId) || !visibleIds.includes(targetId)) return;
+  const nextVisible = visibleIds.filter((id) => id !== fromId);
+  const targetIndex = nextVisible.indexOf(targetId);
+  nextVisible.splice(beforeTarget ? targetIndex : targetIndex + 1, 0, fromId);
+
+  const visibleSet = new Set(visibleIds);
+  const globalIds = state.problems.map((prob) => prob.id);
+  let cursor = 0;
+  const reorderedGlobalIds = globalIds.map((id) => visibleSet.has(id) ? nextVisible[cursor++] : id);
+  const byId = new Map(state.problems.map((prob) => [prob.id, prob]));
+  const now = Date.now();
+  for (let i = 0; i < reorderedGlobalIds.length; i += 1) {
+    const problem = byId.get(reorderedGlobalIds[i]);
+    if (!problem) continue;
+    problem.order = i + 1;
+    problem.updatedAt = now;
+    await put(STORES.problems, problem);
+  }
+  await refresh();
+  showToast('문제 순서를 바꿨어');
+}
+
+async function moveVisibleProblem(id, delta) {
+  const visible = getVisibleProblemList();
+  const index = visible.findIndex((prob) => String(prob.id) === String(id));
+  if (index < 0) return;
+
+  const targetIndex = index + delta;
+  if (targetIndex < 0 || targetIndex >= visible.length) {
+    showToast(delta < 0 ? '이미 맨 위 문제야' : '이미 맨 아래 문제야');
+    return;
+  }
+
+  const current = visible[index];
+  const target = visible[targetIndex];
+  if (!current || !target) return;
+
+  /*
+    v62:
+    전체 목록 order를 다시 1..N으로 매기지 않고
+    현재 문제와 바로 위/아래 문제의 order만 교환한다.
+    Firebase 실시간 동기화가 중간에 끼어도 순서가 되돌아가지 않게 함.
+  */
+  const currentOrder = problemOrderValue(current);
+  const targetOrder = problemOrderValue(target);
+  const stamp = Date.now();
+
+  current.order = targetOrder;
+  target.order = currentOrder;
+  current.updatedAt = stamp;
+  target.updatedAt = stamp;
+
+  // v60 동기화 순서 충돌 방지용 동일 순서 변경 시각.
+  current.orderModifiedAtV60 = stamp;
+  target.orderModifiedAtV60 = stamp;
+  current.canonicalOrderV60 = true;
+  target.canonicalOrderV60 = true;
+
+  await put(STORES.problems, current);
+  await put(STORES.problems, target);
+  await refresh();
+
+  // 이동 후 해당 문제 위치가 실제로 바뀌었는지 확인.
+  const after = getVisibleProblemList();
+  const afterIndex = after.findIndex((prob) => String(prob.id) === String(id));
+  if (afterIndex === targetIndex) {
+    showToast(delta < 0 ? '한 칸 올렸어' : '한 칸 내렸어');
+  } else {
+    // 혹시 동일 order가 있었던 오래된 데이터면 안전하게 기존 reorder로 1회 정리.
+    const neighbor = after[targetIndex];
+    if (neighbor && String(neighbor.id) !== String(id)) {
+      await reorderVisibleProblems(
+        id,
+        neighbor.id,
+        delta < 0
+      );
+    }
+    showToast(delta < 0 ? '문제를 위로 이동했어' : '문제를 아래로 이동했어');
+  }
+}
+
+async function deleteProblemById(id) {
+  const target = state.problems.find((item) => String(item.id) === String(id));
+  if (!target) {
+    showToast('이미 삭제된 문제야');
+    return;
+  }
+  try {
+    await remove(STORES.problems, id);
+
+    // 이 문제의 풀이 기록도 같이 삭제해서 통계/백업에 남지 않게 처리합니다.
+    const histories = await getAll(STORES.history);
+    for (const h of histories) {
+      if (h.problemId === id) await remove(STORES.history, h.id);
+    }
+
+    if (state.current && String(state.current.id) === String(id)) {
+      await saveInkToCurrentProblem(false).catch(() => {});
+      state.current = null;
+      state.selectedAnswer = null;
+      state.checked = false;
+      els.solvePanel.classList.add('hidden');
+      exitSolveFullscreen();
+    }
+    state.queue = state.queue.filter((item) => String(item.id) !== String(id));
+    localStorage.removeItem('psat-last-problem-id');
+
+    await refresh();
+    showToast('문제를 삭제했어');
+  } catch (err) {
+    console.error(err);
+    showToast('삭제 중 오류가 났어. 앱을 새로고침한 뒤 다시 시도해줘.');
+  }
+}
+
+async function handleItemClick(event) {
+  const btn = event.target.closest('button[data-action]');
+  if (!btn) {
+    const detail = event.currentTarget.querySelector('.review-time-detail');
+    if (detail) detail.classList.toggle('hidden');
+    return;
+  }
+  const id = btn.dataset.id;
+  const p = state.problems.find((item) => String(item.id) === String(id));
+  if (!p) return;
+  const action = btn.dataset.action;
+  if (action === 'dragHandle') return;
+  if (action === 'moveUp') { await moveVisibleProblem(id, -1); return; }
+  if (action === 'moveDown') { await moveVisibleProblem(id, 1); return; }
+  if (action === 'solve') {
+    if (btn.dataset.context === 'wrong') {
+      const label = state.reviewMode === 'correct' ? '정답복습' : '오답복습';
+      startReviewProblem(p, label);
+    } else {
+      startDirectProblem(p);
+    }
+  }
+  if (action === 'edit') {
+    const sequence = btn.dataset.context === 'wrong'
+      ? reviewListForMode(state.reviewMode || 'wrong').map((item) => item.id)
+      : getVisibleProblemList().map((item) => item.id);
+    editProblem(p, { sequence });
+  }
+  if (action === 'flag') {
+    p.flagged = !p.flagged;
+    await put(STORES.problems, p);
+    await refresh();
+    showToast(p.flagged ? '다시보기로 지정했어' : '다시보기를 해제했어');
+  }
+  if (action === 'unwrong') {
+    p.wrongActive = false;
+    p.correctStreak = 0;
+    await put(STORES.problems, p);
+    await refresh();
+    showToast('오답에서 해제했어');
+  }
+  if (action === 'delete') {
+    if (!confirm('이 문제를 삭제할까? 복구하려면 백업 파일이 필요해.')) return;
+    await deleteProblemById(id);
+  }
+}
+
+function renderStats() {
+  const total = state.problems.length;
+  const attempts = state.problems.reduce((sum, p) => sum + (p.attempts || 0), 0);
+  const correct = state.problems.reduce((sum, p) => sum + (p.correct || 0), 0);
+  const wrongActive = state.problems.filter((p) => p.wrongActive).length;
+  const unseen = state.problems.filter((p) => !p.attempts).length;
+  const slow = state.problems.filter((p) => averageTime(p) >= SLOW_MS || (p.lastTimeMs || 0) >= SLOW_MS).length;
+  const avg = attempts ? state.problems.reduce((sum, p) => sum + (p.totalTimeMs || 0), 0) / attempts : 0;
+  const flagged = state.problems.filter((p) => p.flagged).length;
+  const expImages = state.problems.filter((p) => problemExplanationPagesV61(p).length).length;
+  const data = [
+    ['전체 문제', `${total}개`],
+    ['총 풀이', `${attempts}회`],
+    ['전체 정답률', `${attempts ? Math.round(correct / attempts * 100) : 0}%`],
+    ['활성 오답', `${wrongActive}개`],
+    ['안 푼 문제', `${unseen}개`],
+    ['오래 걸린 문제', `${slow}개`],
+    ['평균 풀이시간', formatLongTime(avg)],
+    ['해설 이미지', `${expImages}개`],
+    ['다시보기', `${flagged}개`]
+  ];
+  els.statsCards.innerHTML = data.map(([label, value]) => `<div class="stat"><span>${label}</span><strong>${value}</strong></div>`).join('');
+}
+
+function setPasteTarget(target) {
+  state.activePasteTarget = target;
+  els.problemPasteZone.classList.toggle('active-paste', target === 'problem');
+  els.explanationPasteZone.classList.toggle('active-paste', target === 'explanation');
+}
+
+function setAnswerDetectStatus(message) {
+  if (els.answerDetectStatus) els.answerDetectStatus.textContent = message || '';
+}
+
+function setExplanationTextOpen(open) {
+  if (!els.explanationTextWrap || !els.toggleExplanationTextBtn) return;
+  els.explanationTextWrap.classList.toggle('hidden', !open);
+  els.toggleExplanationTextBtn.textContent = open ? '해설 텍스트 입력 닫기' : '해설 텍스트 입력 열기';
+  if (open) setTimeout(() => els.explanationInput?.focus(), 0);
+}
+
+function toggleExplanationText() {
+  if (!els.explanationTextWrap) return;
+  setExplanationTextOpen(els.explanationTextWrap.classList.contains('hidden'));
+}
+
+function normalizeAnswerText(text) {
+  return String(text || '')
+    .replace(/[①❶➀⓵]/g, '1')
+    .replace(/[②❷➁⓶]/g, '2')
+    .replace(/[③❸➂⓷]/g, '3')
+    .replace(/[④❹➃⓸]/g, '4')
+    .replace(/[⑤❺➄⓹]/g, '5')
+    .replace(/[⑴㈠]/g, '1')
+    .replace(/[⑵㈡]/g, '2')
+    .replace(/[⑶㈢]/g, '3')
+    .replace(/[⑷㈣]/g, '4')
+    .replace(/[⑸㈤]/g, '5')
+    .replace(/［|\[/g, '[')
+    .replace(/］|\]/g, ']')
+    .replace(/[：﹕]/g, ':')
+    .replace(/[|]/g, '1')
+    .replace(/[ＯOo〇○◯]/g, '0')
+    .replace(/[×✕✖]/g, 'X');
+}
+
+function extractAnswerNumberFromText(rawText) {
+  const text = normalizeAnswerText(rawText);
+  // 예: "정답률 93.38%"는 절대 정답 단서로 쓰면 안 됨. 먼저 제거합니다.
+  const noRate = text.replace(/정\s*답\s*[률율][^\n\r]*/g, ' ');
+  const compact = noRate.replace(/\s+/g, ' ');
+  const lines = noRate.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+
+  const strictPatterns = [
+    /(?:정\s*답)(?!\s*[률율])\s*[:：\-]?\s*([1-5])\s*(?:번|[.)\]】〉>]|$)?/i,
+    /(?:해\s*답|해답|답안)\s*[:：\-]?\s*([1-5])\s*(?:번|[.)\]】〉>]|$)?/i,
+    /(?:correct\s*answer|answer|ans)\s*[:：\-]?\s*([1-5])/i,
+    /([1-5])\s*번\s*(?:이|가)?\s*(?:정\s*답|답)/i
+  ];
+  for (const pattern of strictPatterns) {
+    const match = compact.match(pattern) || noRate.match(pattern);
+    if (match && match[1]) return Number(match[1]);
+  }
+
+  // OCR이 줄바꿈을 살린 경우: "정답"이 들어간 줄과 그 다음 줄만 검색합니다.
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (/정\s*답\s*[률율]/.test(line)) continue;
+    if (!/(정\s*답|해\s*답|해답|답안|answer|ans)/i.test(line)) continue;
+    const windowText = [line, lines[i + 1] || ''].join(' ');
+    const m = windowText.match(/(?:정\s*답|해\s*답|해답|답안|answer|ans)?\s*[:：\-]?\s*([1-5])\s*(?:번|[.)\]】〉>]|$)?/i);
+    if (m) return Number(m[1]);
+  }
+
+  // 해설지 형식: ①(X) ②(X) ③(X) ④(O) ⑤(X) 처럼 정답 선지에 O가 붙는 경우.
+  const markedCorrect = compact.match(/(?:^|\s)([1-5])\s*[\(\[\{]?\s*(?:0|ㅇ)\s*[\)\]\}]?/i);
+  if (markedCorrect && markedCorrect[1]) return Number(markedCorrect[1]);
+
+  return 0;
+}
+
+async function detectAnswerFromExplanationImage(manual = false) {
+  const candidates = (state.formExplanationOcrCandidates && state.formExplanationOcrCandidates.length)
+    ? state.formExplanationOcrCandidates
+    : [state.formExplanationOcrData || state.formExplanationImageData].filter(Boolean);
+  if (!candidates.length) {
+    if (manual) showToast('해설 이미지를 먼저 넣어줘');
+    setAnswerDetectStatus('해설 이미지가 아직 없어.');
+    return;
+  }
+  if (state.answerDetectRunning) return;
+  if (state.formExplanationVisualAnswer >= 1 && state.formExplanationVisualAnswer <= 5) {
+    els.answerInput.value = String(state.formExplanationVisualAnswer);
+    const pct = Math.round((state.formExplanationVisualConfidence || 0) * 100);
+    setAnswerDetectStatus(`오른쪽 위 정답칸에서 ${choiceLabel(state.formExplanationVisualAnswer)} 자동 입력됨${pct ? ` · 신뢰도 ${pct}%` : ''}`);
+    showToast(`정답 ${choiceLabel(state.formExplanationVisualAnswer)} 자동 입력됨`);
+    return;
+  }
+  if (!window.Tesseract || !window.Tesseract.recognize) {
+    const msg = 'OCR 로딩 전이야. 인터넷 연결 후 잠시 뒤 다시 눌러줘.';
+    setAnswerDetectStatus(msg);
+    if (manual) showToast(msg);
+    return;
+  }
+  state.answerDetectRunning = true;
+  setAnswerDetectStatus('정답 인식 중... 조금 걸릴 수 있어.');
+  try {
+    let foundAnswer = 0;
+    let collectedText = '';
+    for (let i = 0; i < candidates.length; i += 1) {
+      const label = i === 0 ? '오른쪽 위 정답칸' : (i === 1 ? '상단 영역' : '전체 해설');
+      const ocrOptions = {
+        tessedit_pageseg_mode: i === 0 ? '7' : '6',
+        preserve_interword_spaces: '1',
+        logger: (m) => {
+          if (!m || m.status !== 'recognizing text') return;
+          const pct = Math.round((m.progress || 0) * 100);
+          setAnswerDetectStatus(`${label} 인식 중... ${pct}%`);
+        }
+      };
+      const result = await window.Tesseract.recognize(candidates[i], 'kor+eng', ocrOptions);
+      const text = result?.data?.text || '';
+      collectedText += `\n--- ${label} ---\n${text}`;
+      foundAnswer = extractAnswerNumberFromText(text);
+      if (foundAnswer >= 1 && foundAnswer <= 5) break;
+    }
+    state.lastOcrText = collectedText;
+    if (foundAnswer >= 1 && foundAnswer <= 5) {
+      els.answerInput.value = String(foundAnswer);
+      setAnswerDetectStatus(`정답 ${choiceLabel(foundAnswer)} 자동 입력됨`);
+      showToast(`정답 ${choiceLabel(foundAnswer)} 자동 입력됨`);
+    } else {
+      setAnswerDetectStatus('정답 자동인식 실패. 정답 칸이 너무 작으면 직접 선택해줘.');
+      if (manual) showToast('정답을 못 찾았어. 직접 선택해줘.');
+    }
+  } catch (err) {
+    console.warn('Answer OCR failed', err);
+    setAnswerDetectStatus('정답 인식 실패. 직접 선택해줘.');
+    if (manual) showToast('정답 인식 실패. 직접 선택해줘.');
+  } finally {
+    state.answerDetectRunning = false;
+  }
+}
+
+function scheduleAnswerDetection() {
+  // v20: 해설 스크린샷 자동 정답 인식은 제거하고, 정답은 ①~⑤ 직접 지정만 사용합니다.
+  clearTimeout(state.answerDetectTimer);
+}
+
+
+/* === v61 해설 멀티페이지 등록 === */
+function problemExplanationPagesV61(problem) {
+  const pages = Array.isArray(problem?.explanationImagePages)
+    ? problem.explanationImagePages.filter(Boolean)
+    : [];
+  if (pages.length) return pages;
+  return problem?.explanationImageData ? [problem.explanationImageData] : [];
+}
+
+function formExplanationPagesV61() {
+  if (!Array.isArray(state.formExplanationPagesV61)) {
+    state.formExplanationPagesV61 = [];
+  }
+  return state.formExplanationPagesV61;
+}
+
+function updateExplanationPageControlsV61() {
+  const pages = formExplanationPagesV61();
+  const total = Math.max(1, pages.length);
+  state.formExplanationPageIndexV61 = Math.max(
+    0,
+    Math.min(total - 1, Number(state.formExplanationPageIndexV61 || 0))
+  );
+
+  const idx = state.formExplanationPageIndexV61;
+  const badge = document.getElementById('explanationPageBadgeV61');
+  const prev = document.getElementById('prevExplanationPageBtnV61');
+  const next = document.getElementById('nextExplanationPageBtnV61');
+  const del = document.getElementById('deleteExplanationPageBtnV61');
+
+  if (badge) badge.textContent = `해설 ${idx + 1}/${total}쪽`;
+  if (prev) prev.disabled = !pages.length || idx <= 0;
+  if (next) next.disabled = !pages.length || idx >= pages.length - 1;
+  if (del) del.disabled = !pages.length;
+
+  const src = pages[idx] || '';
+  state.formExplanationImageData = src;
+
+  if (src) {
+    els.previewExplanationImage.src = src;
+    els.previewExplanationImage.classList.remove('hidden');
+  } else {
+    els.previewExplanationImage.src = '';
+    els.previewExplanationImage.classList.add('hidden');
+  }
+}
+
+function addExplanationPageV61() {
+  const pages = formExplanationPagesV61();
+
+  if (!pages.length) {
+    pages.push('');
+    state.formExplanationPageIndexV61 = 0;
+  } else if (pages[state.formExplanationPageIndexV61]) {
+    pages.push('');
+    state.formExplanationPageIndexV61 = pages.length - 1;
+  }
+
+  state.formExplanationImageData = '';
+  els.explanationImageInput.value = '';
+  updateExplanationPageControlsV61();
+  setPasteTarget('explanation');
+  try { els.explanationPasteZone.focus(); } catch {}
+  showToast(`해설 ${state.formExplanationPageIndexV61 + 1}쪽 추가됨 · 이미지를 붙여넣어줘`);
+}
+
+function moveExplanationPageV61(delta) {
+  const pages = formExplanationPagesV61();
+  if (!pages.length) return;
+  state.formExplanationPageIndexV61 = Math.max(
+    0,
+    Math.min(pages.length - 1, state.formExplanationPageIndexV61 + delta)
+  );
+  els.explanationImageInput.value = '';
+  updateExplanationPageControlsV61();
+}
+
+function deleteExplanationPageV61() {
+  const pages = formExplanationPagesV61();
+  if (!pages.length) return;
+
+  const idx = Math.max(
+    0,
+    Math.min(pages.length - 1, state.formExplanationPageIndexV61)
+  );
+  pages.splice(idx, 1);
+  state.formExplanationPageIndexV61 = Math.max(0, Math.min(idx, pages.length - 1));
+  state.formExplanationImageData = pages[state.formExplanationPageIndexV61] || '';
+  els.explanationImageInput.value = '';
+  updateExplanationPageControlsV61();
+  showToast('현재 해설 쪽을 삭제했어');
+}
+
+function setFormImage(target, dataUrl) {
+  if (target === 'problem') {
+    state.formProblemImageData = dataUrl;
+    els.previewImage.src = dataUrl;
+    els.previewImage.classList.remove('hidden');
+  } else {
+    const pages = formExplanationPagesV61();
+    if (!pages.length) {
+      pages.push(dataUrl || '');
+      state.formExplanationPageIndexV61 = 0;
+    } else {
+      const idx = Math.max(
+        0,
+        Math.min(pages.length - 1, Number(state.formExplanationPageIndexV61 || 0))
+      );
+      pages[idx] = dataUrl || '';
+    }
+    state.formExplanationImageData = dataUrl || '';
+    updateExplanationPageControlsV61();
+  }
+}
+
+function clearFormImage(target) {
+  if (target === 'problem') {
+    state.formProblemImageData = '';
+    els.imageInput.value = '';
+    els.previewImage.src = '';
+    els.previewImage.classList.add('hidden');
+  } else {
+    state.formExplanationImageData = '';
+    state.formExplanationPagesV61 = [];
+    state.formExplanationPageIndexV61 = 0;
+    state.formExplanationOcrData = '';
+    state.formExplanationOcrCandidates = [];
+    state.formExplanationVisualAnswer = 0;
+    state.formExplanationVisualConfidence = 0;
+    state.lastOcrText = '';
+    els.explanationImageInput.value = '';
+    els.previewExplanationImage.src = '';
+    els.previewExplanationImage.classList.add('hidden');
+    updateExplanationPageControlsV61();
+  }
+}
+
+function updateFormModeUi() {
+  const editing = !!els.editingId.value;
+  if (els.saveProblemBtn) els.saveProblemBtn.textContent = editing ? '저장 후 다음' : '저장';
+  if (els.saveOnlyBtn) els.saveOnlyBtn.classList.toggle('hidden', !editing);
+  if (els.newProblemModeBtn) els.newProblemModeBtn.classList.toggle('hidden', !editing);
+  if (els.resetFormBtn) els.resetFormBtn.textContent = editing ? '현재 내용 초기화' : '새 문제로 초기화';
+}
+
+function enterNewProblemMode() {
+  resetForm();
+  showToast('새 문제 등록 모드야');
+}
+
+function getNextEditProblemId(currentId) {
+  const activeIds = new Set(state.problems.map((p) => p.id));
+  const queue = (state.editQueueIds || []).filter((id) => activeIds.has(id));
+  if (queue.length) {
+    const idx = queue.indexOf(currentId);
+    if (idx >= 0 && idx < queue.length - 1) return queue[idx + 1];
+  }
+  const fallback = state.problems.map((p) => p.id);
+  const fallbackIdx = fallback.indexOf(currentId);
+  if (fallbackIdx >= 0 && fallbackIdx < fallback.length - 1) return fallback[fallbackIdx + 1];
+  return '';
+}
+
+function resetForm() {
+  const keepSubject = els.subjectInput?.value || readFormPreferences().subject || '언어';
+  const keepYear = els.yearInput?.value || readFormPreferences().year || '';
+  const keepQuality = els.imageQualityInput?.value || readFormPreferences().imageQuality || 'sharp';
+  els.problemForm.reset();
+  els.editingId.value = '';
+  els.subjectInput.value = SUBJECT_GROUPS.includes(canonicalSubject(keepSubject)) ? canonicalSubject(keepSubject) : '언어';
+  if (els.yearInput) els.yearInput.value = normalizedYear(keepYear);
+  if (els.imageQualityInput) els.imageQualityInput.value = ['sharp', 'bulk', 'original'].includes(keepQuality) ? keepQuality : 'sharp';
+  if (els.categoryInput) els.categoryInput.value = '';
+  if (els.difficultyInput) els.difficultyInput.value = '중';
+  if (els.tagsInput) els.tagsInput.value = '';
+  saveFormPreferences();
+  els.formTitle.textContent = '문제 등록';
+  state.editQueueIds = [];
+  state.lastEditedId = '';
+  updateFormModeUi();
+  clearFormImage('problem');
+  clearFormImage('explanation');
+  setExplanationTextOpen(false);
+  els.imageInput.required = false;
+  setPasteTarget('problem');
+}
+
+function editProblem(p, options = {}) {
+  els.formTitle.textContent = '문제 수정';
+  els.editingId.value = p.id;
+  if (Array.isArray(options.sequence) && options.sequence.length) state.editQueueIds = [...options.sequence];
+  else if (!state.editQueueIds.length) state.editQueueIds = state.problems.map((item) => item.id);
+  state.lastEditedId = p.id;
+  els.subjectInput.value = SUBJECT_GROUPS.includes(canonicalSubject(p.subject)) ? canonicalSubject(p.subject) : '언어';
+  if (els.yearInput) els.yearInput.value = normalizedYear(p.year);
+  if (els.categoryInput) els.categoryInput.value = p.category || '';
+  els.answerInput.value = String(p.answer || 1);
+  if (els.difficultyInput) els.difficultyInput.value = p.difficulty || '중';
+  els.explanationInput.value = p.explanation || '';
+  setExplanationTextOpen(!!(p.explanation || '').trim());
+  if (els.tagsInput) els.tagsInput.value = (p.tags || []).join(', ');
+  saveFormPreferences();
+  els.imageInput.value = '';
+  els.explanationImageInput.value = '';
+  setFormImage('problem', p.imageData || '');
+
+  const expPagesV61 = problemExplanationPagesV61(p);
+  state.formExplanationPagesV61 = [...expPagesV61];
+  state.formExplanationPageIndexV61 = 0;
+
+  if (expPagesV61.length) {
+    state.formExplanationOcrData = expPagesV61[0];
+    state.formExplanationOcrCandidates = [expPagesV61[0]];
+    state.formExplanationImageData = expPagesV61[0];
+    updateExplanationPageControlsV61();
+  } else {
+    clearFormImage('explanation');
+  }
+  els.imageInput.required = false;
+  updateFormModeUi();
+  setPasteTarget('problem');
+  switchView('addView');
+}
+
+async function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+function dataUrlBytes(dataUrl) {
+  const comma = String(dataUrl || '').indexOf(',');
+  const payload = comma >= 0 ? String(dataUrl).slice(comma + 1) : String(dataUrl || '');
+  return Math.floor(payload.length * 3 / 4);
+}
+
+function formatBytes(bytes) {
+  const n = Number(bytes || 0);
+  if (n < 1024) return `${n}B`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)}KB`;
+  return `${(n / 1024 / 1024).toFixed(1)}MB`;
+}
+
+function compressionPreset() {
+  const mode = els.imageQualityInput?.value || 'sharp';
+  if (mode === 'original') return { mode, label: '원본', maxWidth: Infinity, quality: 1, mime: '' };
+  if (mode === 'bulk') return { mode, label: '3000문제용', maxWidth: 1700, quality: 0.86, mime: 'image/webp' };
+  return { mode: 'sharp', label: '선명압축', maxWidth: 2200, quality: 0.94, mime: 'image/webp' };
+}
+
+function blobToImage(blob) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(img);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('이미지를 읽지 못했어'));
+    };
+    img.src = url;
+  });
+}
+
+function canvasToBlob(canvas, mime, quality) {
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => resolve(blob), mime, quality);
+  });
+}
+
+
+function isAnswerBlackPixel(r, g, b) {
+  // 빨간 펜 표시/동그라미는 정답 숫자 후보에서 제외하고, 인쇄된 검은 글자만 남깁니다.
+  const looksRed = r > 130 && g < 130 && b < 130 && r > g * 1.25 && r > b * 1.25;
+  if (looksRed) return false;
+  return r < 178 && g < 178 && b < 178 && (r + g + b) / 3 < 172;
+}
+
+function getDigitTemplateMasks() {
+  if (getDigitTemplateMasks.cache) return getDigitTemplateMasks.cache;
+  const out = [];
+  for (let digit = 1; digit <= 5; digit += 1) {
+    for (const size of [40, 44, 48, 52, 56, 60]) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 96;
+      canvas.height = 96;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#000';
+      ctx.font = `900 ${size}px Arial, Helvetica, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(digit), 48, 52);
+      const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      const mask = new Uint8Array(canvas.width * canvas.height);
+      for (let i = 0, j = 0; i < data.length; i += 4, j += 1) {
+        mask[j] = data[i] < 128 && data[i + 1] < 128 && data[i + 2] < 128 ? 1 : 0;
+      }
+      const normalized = normalizeMask32(mask, canvas.width, canvas.height);
+      out.push({ digit, mask: normalized, dilated: dilateMask32(normalized) });
+    }
+  }
+  getDigitTemplateMasks.cache = out;
+  return out;
+}
+
+function normalizeMask32(mask, width, height) {
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (!mask[y * width + x]) continue;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+  }
+  const out = new Uint8Array(32 * 32);
+  if (maxX < minX || maxY < minY) return out;
+  const srcW = maxX - minX + 1;
+  const srcH = maxY - minY + 1;
+  const scale = Math.min(28 / srcW, 28 / srcH);
+  const dstW = Math.max(1, Math.round(srcW * scale));
+  const dstH = Math.max(1, Math.round(srcH * scale));
+  const offsetX = Math.floor((32 - dstW) / 2);
+  const offsetY = Math.floor((32 - dstH) / 2);
+  for (let dy = 0; dy < dstH; dy += 1) {
+    const sy = minY + Math.min(srcH - 1, Math.floor(dy / dstH * srcH));
+    for (let dx = 0; dx < dstW; dx += 1) {
+      const sx = minX + Math.min(srcW - 1, Math.floor(dx / dstW * srcW));
+      if (mask[sy * width + sx]) out[(offsetY + dy) * 32 + offsetX + dx] = 1;
+    }
+  }
+  return out;
+}
+
+function dilateMask32(mask) {
+  const out = new Uint8Array(32 * 32);
+  for (let y = 0; y < 32; y += 1) {
+    for (let x = 0; x < 32; x += 1) {
+      let on = 0;
+      for (let yy = Math.max(0, y - 1); yy <= Math.min(31, y + 1); yy += 1) {
+        for (let xx = Math.max(0, x - 1); xx <= Math.min(31, x + 1); xx += 1) {
+          if (mask[yy * 32 + xx]) { on = 1; break; }
+        }
+        if (on) break;
+      }
+      out[y * 32 + x] = on;
+    }
+  }
+  return out;
+}
+
+function compareDigitMasks(candidate, template, templateDilated) {
+  const candidateDilated = dilateMask32(candidate);
+  let miss = 0;
+  let union = 0;
+  for (let i = 0; i < candidate.length; i += 1) {
+    const c = candidate[i];
+    const t = template[i];
+    if (c || t) union += 1;
+    if (c && !templateDilated[i]) miss += 1;
+    if (t && !candidateDilated[i]) miss += 1;
+  }
+  return union ? miss / union : 1;
+}
+
+function findBlackComponents(mask, width, height) {
+  const seen = new Uint8Array(width * height);
+  const components = [];
+  const stack = [];
+  for (let start = 0; start < mask.length; start += 1) {
+    if (!mask[start] || seen[start]) continue;
+    let minX = width;
+    let minY = height;
+    let maxX = 0;
+    let maxY = 0;
+    let area = 0;
+    stack.length = 0;
+    stack.push(start);
+    seen[start] = 1;
+    while (stack.length) {
+      const idx = stack.pop();
+      const x = idx % width;
+      const y = Math.floor(idx / width);
+      area += 1;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+      const left = idx - 1;
+      const right = idx + 1;
+      const up = idx - width;
+      const down = idx + width;
+      if (x > 0 && mask[left] && !seen[left]) { seen[left] = 1; stack.push(left); }
+      if (x < width - 1 && mask[right] && !seen[right]) { seen[right] = 1; stack.push(right); }
+      if (y > 0 && mask[up] && !seen[up]) { seen[up] = 1; stack.push(up); }
+      if (y < height - 1 && mask[down] && !seen[down]) { seen[down] = 1; stack.push(down); }
+    }
+    const w = maxX - minX + 1;
+    const h = maxY - minY + 1;
+    if (area >= 10) components.push({ x: minX, y: minY, w, h, area, cx: minX + w / 2, cy: minY + h / 2 });
+  }
+  return components;
+}
+
+function classifyDigitInsideComponent(imageData, width, height, box) {
+  const data = imageData.data;
+  const padX = Math.max(4, Math.round(box.w * 0.28));
+  const padY = Math.max(4, Math.round(box.h * 0.28));
+  const x0 = Math.max(0, box.x - padX);
+  const y0 = Math.max(0, box.y - padY);
+  const x1 = Math.min(width, box.x + box.w + padX);
+  const y1 = Math.min(height, box.y + box.h + padY);
+  const localW = x1 - x0;
+  const localH = y1 - y0;
+  if (localW < 10 || localH < 10) return { answer: 0, score: 1 };
+
+  let best = { answer: 0, score: 1 };
+  const templates = getDigitTemplateMasks();
+  for (const pad of [0.22, 0.25, 0.28, 0.31, 0.34]) {
+    const ix0 = x0 + Math.floor(localW * pad);
+    const iy0 = y0 + Math.floor(localH * pad);
+    const ix1 = x0 + Math.ceil(localW * (1 - pad));
+    const iy1 = y0 + Math.ceil(localH * (1 - pad));
+    const innerW = Math.max(1, ix1 - ix0);
+    const innerH = Math.max(1, iy1 - iy0);
+    const digitMask = new Uint8Array(innerW * innerH);
+    let count = 0;
+    for (let y = 0; y < innerH; y += 1) {
+      for (let x = 0; x < innerW; x += 1) {
+        const px = ix0 + x;
+        const py = iy0 + y;
+        const i = (py * width + px) * 4;
+        if (isAnswerBlackPixel(data[i], data[i + 1], data[i + 2])) {
+          digitMask[y * innerW + x] = 1;
+          count += 1;
+        }
+      }
+    }
+    if (count < 8) continue;
+    const normalized = normalizeMask32(digitMask, innerW, innerH);
+    for (const tmpl of templates) {
+      const score = compareDigitMasks(normalized, tmpl.mask, tmpl.dilated);
+      if (score < best.score) best = { answer: tmpl.digit, score };
+    }
+  }
+  return best;
+}
+
+async function detectAnswerVisuallyFromBlob(blob) {
+  try {
+    const img = await blobToImage(blob);
+    const ow = img.naturalWidth || img.width;
+    const oh = img.naturalHeight || img.height;
+    if (!ow || !oh) return { answer: 0, confidence: 0 };
+    // 오른쪽 위 정답칸 전용 탐지. OCR보다 먼저 수행해서 정답률 숫자 오인식을 피합니다.
+    const crops = [
+      { x: 0.60, y: 0.035, w: 0.38, h: 0.22 },
+      { x: 0.68, y: 0.055, w: 0.30, h: 0.18 },
+      { x: 0.52, y: 0.00, w: 0.48, h: 0.28 }
+    ];
+    for (const crop of crops) {
+      const sx = Math.max(0, Math.round(ow * crop.x));
+      const sy = Math.max(0, Math.round(oh * crop.y));
+      const sw = Math.min(ow - sx, Math.round(ow * crop.w));
+      const sh = Math.min(oh - sy, Math.round(oh * crop.h));
+      if (sw <= 0 || sh <= 0) continue;
+      const maxW = 900;
+      const scale = Math.min(1, maxW / sw);
+      const cw = Math.max(1, Math.round(sw * scale));
+      const ch = Math.max(1, Math.round(sh * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = cw;
+      canvas.height = ch;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true, alpha: false });
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, cw, ch);
+      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, cw, ch);
+      const imageData = ctx.getImageData(0, 0, cw, ch);
+      const data = imageData.data;
+      const mask = new Uint8Array(cw * ch);
+      for (let i = 0, j = 0; i < data.length; i += 4, j += 1) {
+        mask[j] = isAnswerBlackPixel(data[i], data[i + 1], data[i + 2]) ? 1 : 0;
+      }
+      const minSide = Math.max(14, Math.min(cw, ch) * 0.055);
+      const maxSide = Math.max(28, Math.min(cw, ch) * 0.34);
+      const components = findBlackComponents(mask, cw, ch)
+        .filter((c) => {
+          const ratio = c.w / Math.max(1, c.h);
+          const squareish = ratio >= 0.55 && ratio <= 1.65;
+          const sized = c.w >= minSide && c.h >= minSide && c.w <= maxSide && c.h <= maxSide;
+          const rightSide = c.cx >= cw * 0.45;
+          const upperSide = c.cy <= ch * 0.82;
+          const denseEnough = c.area >= Math.max(40, c.w * c.h * 0.08);
+          return squareish && sized && rightSide && upperSide && denseEnough;
+        })
+        .sort((a, b) => (b.cx - a.cx) || (b.area - a.area));
+      for (const comp of components.slice(0, 5)) {
+        const result = classifyDigitInsideComponent(imageData, cw, ch, comp);
+        // 숫자 4처럼 모양이 뚜렷한 경우 0.42 미만이면 오른쪽 위 정답칸 후보로 인정합니다.
+        if (result.answer >= 1 && result.answer <= 5 && result.score < 0.42) {
+          return { answer: result.answer, confidence: Math.max(0, 1 - result.score), score: result.score };
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Visual answer detection failed', err);
+  }
+  return { answer: 0, confidence: 0 };
+}
+
+async function imageBlobToDataUrl(blob) {
+  const preset = compressionPreset();
+  if (preset.mode === 'original') return blobToDataUrl(blob);
+
+  try {
+    const img = await blobToImage(blob);
+    const originalWidth = img.naturalWidth || img.width;
+    const originalHeight = img.naturalHeight || img.height;
+    if (!originalWidth || !originalHeight) return blobToDataUrl(blob);
+
+    const scale = Math.min(1, preset.maxWidth / originalWidth);
+    const width = Math.max(1, Math.round(originalWidth * scale));
+    const height = Math.max(1, Math.round(originalHeight * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d', { alpha: false });
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, width, height);
+    ctx.drawImage(img, 0, 0, width, height);
+
+    let out = await canvasToBlob(canvas, preset.mime, preset.quality);
+    // 일부 브라우저에서 WebP 변환이 실패하면 JPEG로 저장합니다.
+    if (!out) out = await canvasToBlob(canvas, 'image/jpeg', 0.92);
+    if (!out) return blobToDataUrl(blob);
+    return blobToDataUrl(out);
+  } catch (err) {
+    console.warn('Image optimization failed, storing original', err);
+    return blobToDataUrl(blob);
+  }
+}
+
+
+async function imageBlobToOcrDataUrl(blob, crop = null) {
+  try {
+    const img = await blobToImage(blob);
+    const originalWidth = img.naturalWidth || img.width;
+    const originalHeight = img.naturalHeight || img.height;
+    if (!originalWidth || !originalHeight) return blobToDataUrl(blob);
+
+    const cropX = crop ? Math.max(0, Math.round(originalWidth * crop.x)) : 0;
+    const cropY = crop ? Math.max(0, Math.round(originalHeight * crop.y)) : 0;
+    const cropW = crop ? Math.min(originalWidth - cropX, Math.round(originalWidth * crop.w)) : originalWidth;
+    const cropH = crop ? Math.min(originalHeight - cropY, Math.round(originalHeight * crop.h)) : originalHeight;
+    if (cropW <= 0 || cropH <= 0) return blobToDataUrl(blob);
+
+    // 정답 자동인식은 전체 해설보다 "오른쪽 위 정답칸"을 먼저 크게 확대해서 읽습니다.
+    const targetWidth = crop ? 2200 : Math.min(3400, Math.max(2400, cropW));
+    const scale = targetWidth / cropW;
+    const width = Math.max(1, Math.round(cropW * scale));
+    const height = Math.max(1, Math.round(cropH * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true, alpha: false });
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, width, height);
+    ctx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, width, height);
+
+    const imageData = ctx.getImageData(0, 0, width, height);
+    const d = imageData.data;
+    for (let i = 0; i < d.length; i += 4) {
+      const gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+      const boosted = gray < 190 ? Math.max(0, gray * 0.40) : Math.min(255, 248 + (gray - 190) * 0.35);
+      d[i] = boosted;
+      d[i + 1] = boosted;
+      d[i + 2] = boosted;
+      d[i + 3] = 255;
+    }
+    ctx.putImageData(imageData, 0, 0);
+    const out = await canvasToBlob(canvas, 'image/png', 1);
+    return out ? blobToDataUrl(out) : blobToDataUrl(blob);
+  } catch (err) {
+    console.warn('OCR image preprocessing failed', err);
+    return blobToDataUrl(blob);
+  }
+}
+
+async function imageBlobToAnswerOcrCandidates(blob) {
+  // 1순위: 오른쪽 위 정답칸. 사용자가 보낸 해설처럼 "정답 ④"가 이 위치에 있는 경우가 많음.
+  // 2순위: 상단 전체. 3순위: 전체 해설. 정답률·선지 내용 오인식을 줄이기 위한 순서입니다.
+  const crops = [
+    { x: 0.52, y: 0.00, w: 0.48, h: 0.25 },
+    { x: 0.00, y: 0.00, w: 1.00, h: 0.32 },
+    null
+  ];
+  const out = [];
+  for (const crop of crops) out.push(await imageBlobToOcrDataUrl(blob, crop));
+  return out;
+}
+
+async function fileToDataUrl(file) {
+  return imageBlobToDataUrl(file);
+}
+
+function sizeToastPrefix(dataUrl) {
+  return `저장크기 ${formatBytes(dataUrlBytes(dataUrl))}`;
+}
+
+async function imageFileInputChanged(target, input) {
+  const file = input.files[0];
+  if (!file) return;
+  showToast('이미지 처리 중...');
+  const data = await fileToDataUrl(file);
+  if (target === 'explanation') {
+    state.formExplanationVisualAnswer = 0;
+    state.formExplanationVisualConfidence = 0;
+    state.formExplanationOcrCandidates = [];
+    state.formExplanationOcrData = '';
+  }
+  setFormImage(target, data);
+  setPasteTarget(target);
+  showToast(`${target === 'problem' ? '문제 이미지' : '해설 이미지'}를 넣었어 · ${sizeToastPrefix(data)}`);
+}
+
+async function pasteImageFromClipboardEvent(event, explicitTarget = '') {
+  const items = event.clipboardData?.items ? Array.from(event.clipboardData.items) : [];
+  const item = items.find((entry) => entry.type && entry.type.startsWith('image/'));
+  if (!item) return false;
+  event.preventDefault();
+  const target = explicitTarget || event.target.closest?.('[data-paste-target]')?.dataset?.pasteTarget || state.activePasteTarget || 'problem';
+  const file = item.getAsFile();
+  if (!file) return false;
+  showToast('스크린샷 처리 중...');
+  const data = await fileToDataUrl(file);
+  if (target === 'explanation') {
+    state.formExplanationVisualAnswer = 0;
+    state.formExplanationVisualConfidence = 0;
+    state.formExplanationOcrCandidates = [];
+    state.formExplanationOcrData = '';
+  }
+  setFormImage(target, data);
+  setPasteTarget(target);
+  showToast(`${target === 'problem' ? '문제 스샷' : '해설 스샷'}을 붙여넣었어 · ${sizeToastPrefix(data)}`);
+  return true;
+}
+
+async function pasteImageWithClipboardApi(target) {
+  setPasteTarget(target);
   if (!navigator.clipboard || !navigator.clipboard.read) {
-    toast("이 브라우저는 버튼 붙여넣기를 지원하지 않아. 영역 클릭 후 Ctrl+V를 눌러줘.");
+    showToast('이 브라우저는 버튼 붙여넣기를 지원하지 않아. 영역 클릭 후 Ctrl+V를 눌러줘.');
     return;
   }
   try {
     const items = await navigator.clipboard.read();
-    const files = [];
     for (const item of items) {
-      const type = (item.types || []).find(type => type.startsWith("image/"));
+      const type = item.types.find((t) => t.startsWith('image/'));
       if (!type) continue;
       const blob = await item.getType(type);
-      files.push(new File([blob], `${target}_${Date.now()}_${files.length}.png`, { type }));
-    }
-    if (!files.length) {
-      toast("클립보드에 이미지가 없어");
+      showToast('스크린샷 처리 중...');
+      const data = await imageBlobToDataUrl(blob);
+      if (target === 'explanation') {
+        state.formExplanationVisualAnswer = 0;
+        state.formExplanationVisualConfidence = 0;
+        state.formExplanationOcrCandidates = [];
+        state.formExplanationOcrData = '';
+      }
+      setFormImage(target, data);
+      showToast(`${target === 'problem' ? '문제 스샷' : '해설 스샷'}을 붙여넣었어 · ${sizeToastPrefix(data)}`);
       return;
     }
-    toast("스크린샷 처리 중...");
-    await addImageFilesV21(files, target, { autoNextAfterPaste: true });
-  } catch (error) {
-    console.error(error);
-    toast("붙여넣기 권한이 막혔어. 영역 클릭 후 Ctrl+V를 눌러줘.");
-  }
-}
-function fillForm(p) {
-  $("formTitle").textContent = "문제 수정";
-  $("editId").value = p.id;
-  $("subjectInput").value = p.subject || getV21Prefs().subject || "형법";
-  $("sessionInput").value = p.session || "";
-  $("titleInput").value = p.title || "";
-  $("scoreInput").value = p.maxScore || 20;
-  $("timeInput").value = p.timeLimit || 30;
-  $("pointsInput").value = p.pointsText || (p.points || []).join("\n");
-  $("modelTextInput").value = p.modelText || "";
-  $("qualityInput").value = getV21Prefs().quality || $("qualityInput").value || "sharp";
-  state.questionPages = [...(p.questionPages || [])];
-  state.explanationPages = [...(p.explanationPages || [])];
-  setSelectedIndex("question", state.questionPages.length ? 0 : -1);
-  setSelectedIndex("explanation", state.explanationPages.length ? 0 : -1);
-  setPasteTarget("question");
-  renderPageLists();
-  showView("addView");
-  window.scrollTo(0, 0);
-}
-function resetForm() {
-  $("formTitle").textContent = "문제 등록";
-  $("problemForm").reset();
-  $("editId").value = "";
-  $("scoreInput").value = 20;
-  $("timeInput").value = 30;
-  applyV21Prefs();
-  state.questionPages = [];
-  state.explanationPages = [];
-  setSelectedIndex("question", -1);
-  setSelectedIndex("explanation", -1);
-  setPasteTarget("question");
-  renderPageLists();
-}
-const saveProblemV21Original = saveProblem;
-saveProblem = async function(event) {
-  saveV21Prefs();
-  return saveProblemV21Original(event);
-};
-function setupV21PreferenceTracking() {
-  applyV21Prefs();
-  $("subjectInput")?.addEventListener("change", saveV21Prefs);
-  $("qualityInput")?.addEventListener("change", saveV21Prefs);
-}
-setTimeout(setupV21PreferenceTracking, 300);
-
-
-/* === v22: 문제등록/문제풀기 옆 순번 표시 === */
-function renderPageList(id, arr, target) {
-  const box = $(id);
-  if (!box) return;
-  box.innerHTML = "";
-
-  if (!arr.length) {
-    box.innerHTML = '<p class="hint">아직 페이지가 없어. “빈 페이지 추가”를 누른 뒤 스샷을 붙여넣어.</p>';
-    return;
-  }
-
-  normalizeSelectionV20(target);
-  const selected = selectedIndexFor(target);
-
-  arr.forEach((src, index) => {
-    const div = document.createElement("div");
-    div.className = "page-item" + (selected === index ? " selected-page" : "");
-    div.addEventListener("click", () => {
-      setSelectedIndex(target, index);
-      setPasteTarget(target);
-      renderPageLists();
-    });
-
-    const isReal = isRealPage(src);
-    const thumb = isReal
-      ? `<img src="${src}" alt="${index + 1}쪽" />`
-      : `<div class="blank-thumb">빈 페이지<br/>붙여넣기</div>`;
-
-    div.innerHTML =
-      `<span class="reg-side-no">${index + 1}</span>` +
-      `${thumb}<div><strong>${index + 1}쪽${selected === index ? " · 선택됨" : ""}</strong>` +
-      `<p class="hint">${selected === index ? "여기에 이미지가 들어갑니다" : (isReal ? "이미지 페이지" : "빈 페이지")}</p>` +
-      `<div class="page-actions"></div></div>`;
-
-    const actions = div.querySelector(".page-actions");
-    actions.append(makeButton("선택", () => {
-      setSelectedIndex(target, index);
-      setPasteTarget(target);
-      renderPageLists();
-    }, "secondary small"));
-    actions.append(makeButton("위", () => movePage(target, index, -1), "secondary small"));
-    actions.append(makeButton("아래", () => movePage(target, index, 1), "secondary small"));
-    actions.append(makeButton("삭제", () => deletePage(target, index), "danger small"));
-
-    box.append(div);
-  });
-}
-
-function renderPageLists() {
-  renderPageList("questionPageList", state.questionPages, "question");
-  renderPageList("explanationPageList", state.explanationPages, "explanation");
-}
-
-function ensureSolveSideNumbersV22() {
-  const zone = $("problemZone");
-  if (!zone) return;
-
-  let qNo = $("solveSideQuestionNo");
-  if (!qNo) {
-    qNo = document.createElement("div");
-    qNo.id = "solveSideQuestionNo";
-    qNo.className = "solve-side-no";
-    zone.appendChild(qNo);
-  }
-
-  let setNo = $("solveSideSetNo");
-  if (!setNo) {
-    setNo = document.createElement("div");
-    setNo.id = "solveSideSetNo";
-    setNo.className = "solve-set-side-no";
-    zone.appendChild(setNo);
+    showToast('클립보드에 이미지가 없어');
+  } catch (err) {
+    showToast('붙여넣기 권한이 막혔어. 영역 클릭 후 Ctrl+V를 눌러줘.');
   }
 }
 
-function updateSolveSideNumbersV22() {
-  ensureSolveSideNumbersV22();
-
-  const p = currentProblem?.();
-  const pages = realPages(p?.questionPages || []);
-  const qNo = $("solveSideQuestionNo");
-  const setNo = $("solveSideSetNo");
-
-  if (qNo) {
-    qNo.textContent = pages.length ? `문제 ${state.qPage + 1}/${pages.length}` : "문제 없음";
+function storageErrorMessage(err) {
+  const name = String(err?.name || '');
+  const msg = String(err?.message || err || '');
+  if (name.includes('Quota') || msg.includes('quota') || msg.includes('Quota')) {
+    return '저장공간이 부족해. 이미지 저장 방식을 3000문제용 압축으로 바꾸거나 기존 문제를 백업 후 정리해줘.';
   }
-
-  if (setNo) {
-    const idx = state.solve ? Number(state.solve.index || 0) + 1 : 1;
-    const total = state.solve?.ids?.length || 1;
-    setNo.textContent = `순번 ${idx}/${total}`;
-  }
+  return '저장 중 오류가 났어. 새로고침 후 다시 시도해줘.';
 }
 
-const showQuestionPageV22Original = showQuestionPage;
-showQuestionPage = function(index) {
-  showQuestionPageV22Original(index);
-  setTimeout(updateSolveSideNumbersV22, 20);
-};
+async function saveProblemFromForm(event) {
+  event.preventDefault();
+  if (state.saveBusy) return;
+  state.saveBusy = true;
+  const submitBtn = event.submitter || els.problemForm.querySelector('button[type="submit"]');
+  if (submitBtn) submitBtn.disabled = true;
 
-const openCurrentProblemV22Original = openCurrentProblem;
-openCurrentProblem = function() {
-  openCurrentProblemV22Original();
-  setTimeout(updateSolveSideNumbersV22, 80);
-};
-
-
-/* === v23: 문제풀기 목록에도 순번 표시 === */
-function addSolveListNumbersV23() {
-  const list = $("solveList");
-  if (!list) return;
-  Array.from(list.children).forEach((card, index) => {
-    if (!card.classList?.contains("problem-card")) return;
-    card.classList.add("has-solve-number");
-
-    let badge = card.querySelector(".solve-list-card-number");
-    if (!badge) {
-      badge = document.createElement("span");
-      badge.className = "solve-list-card-number";
-      card.prepend(badge);
-    }
-    badge.textContent = String(index + 1);
-  });
-}
-
-const renderSolveListV23Original = renderSolveList;
-renderSolveList = function() {
-  renderSolveListV23Original();
-  addSolveListNumbersV23();
-};
-
-function ensureBigSolveOrderBadgeV23() {
-  const zone = $("problemZone");
-  if (!zone) return null;
-
-  let badge = $("solveOrderBigBadge");
-  if (!badge) {
-    badge = document.createElement("div");
-    badge.id = "solveOrderBigBadge";
-    badge.className = "solve-order-big-badge";
-    badge.innerHTML = '<span id="solveOrderTextV23"></span><span id="solvePageTextV23"></span>';
-    zone.appendChild(badge);
-  }
-  return badge;
-}
-
-function updateBigSolveOrderBadgeV23() {
-  ensureBigSolveOrderBadgeV23();
-
-  const p = currentProblem?.();
-  const pages = realPages(p?.questionPages || []);
-  const orderText = $("solveOrderTextV23");
-  const pageText = $("solvePageTextV23");
-
-  if (orderText) {
-    const idx = state.solve ? Number(state.solve.index || 0) + 1 : 1;
-    const total = state.solve?.ids?.length || 1;
-    orderText.textContent = `순번 ${idx}/${total}`;
-  }
-
-  if (pageText) {
-    pageText.textContent = pages.length ? `쪽 ${state.qPage + 1}/${pages.length}` : "쪽 없음";
-  }
-}
-
-const showQuestionPageV23Original = showQuestionPage;
-showQuestionPage = function(index) {
-  showQuestionPageV23Original(index);
-  setTimeout(updateBigSolveOrderBadgeV23, 30);
-};
-
-const openCurrentProblemV23Original = openCurrentProblem;
-openCurrentProblem = function() {
-  openCurrentProblemV23Original();
-  setTimeout(updateBigSolveOrderBadgeV23, 100);
-};
-
-
-/* === v24: 채점화면 해설 스크롤/필기 위치 수정 + 풀이화면 순번배지 삭제 === */
-function removeSolveBadgesV24() {
-  ["solveSideQuestionNo", "solveSideSetNo", "solveOrderBigBadge"].forEach(id => {
-    const el = $(id);
-    if (el) el.remove();
-  });
-}
-function ensureSolveSideNumbersV22() { removeSolveBadgesV24(); }
-function updateSolveSideNumbersV22() { removeSolveBadgesV24(); }
-function ensureBigSolveOrderBadgeV23() { removeSolveBadgesV24(); return null; }
-function updateBigSolveOrderBadgeV23() { removeSolveBadgesV24(); }
-
-function v24Clamp(v, min, max) {
-  return Math.max(min, Math.min(max, v));
-}
-function ensureScoreExpStoreV24() {
   try {
-    if (!state.scoreExpEdits) {
-      state.scoreExpEdits = JSON.parse(localStorage.getItem("essayScoreExpEditsV11") || "{}");
+    const editingId = els.editingId.value;
+    const saveMode = event.submitter?.dataset?.saveMode || (editingId ? 'next' : 'new');
+    const existing = editingId ? state.problems.find((p) => p.id === editingId) : null;
+
+    let imageData = state.formProblemImageData || existing?.imageData || '';
+    if (!imageData && els.imageInput.files[0]) imageData = await fileToDataUrl(els.imageInput.files[0]);
+
+    if (els.explanationImageInput.files[0]) {
+      const dataV61 = await fileToDataUrl(els.explanationImageInput.files[0]);
+      setFormImage('explanation', dataV61);
     }
-  } catch {
-    state.scoreExpEdits = {};
-  }
-}
-function scoreExpKeyV24() {
-  if (typeof scoreKeyV14 === "function") return scoreKeyV14("exp");
-  if (typeof scoreKeyV11 === "function") return scoreKeyV11("exp");
-  const p = currentProblem?.();
-  return `${p?.id || "unknown"}:exp:${state.expPage || 0}`;
-}
-function saveScoreExpV24() {
-  try { localStorage.setItem("essayScoreExpEditsV11", JSON.stringify(state.scoreExpEdits || {})); } catch {}
-}
-function sizeScoreExplanationCanvasV24() {
-  const wrap = $("scoreExplanationEditWrap");
-  const img = $("explanationImageView");
-  const canvas = $("scoreExplanationCanvas");
-  if (!wrap || !img || !canvas) return false;
 
-  if (img.classList.contains("hidden") || !img.src) {
-    canvas.width = 1;
-    canvas.height = 1;
-    canvas.style.setProperty("width", "1px", "important");
-    canvas.style.setProperty("height", "1px", "important");
-    return false;
-  }
+    const explanationImagePages = formExplanationPagesV61().filter(Boolean);
+    const explanationImageData = explanationImagePages[0] || '';
 
-  const naturalW = img.naturalWidth || 1;
-  const naturalH = img.naturalHeight || 1;
-  const wrapW = Math.max(1, Math.floor(wrap.clientWidth || wrap.getBoundingClientRect().width || window.innerWidth - 24));
-  const displayW = wrapW;
-  const displayH = Math.max(220, Math.round(displayW * naturalH / naturalW));
-  const dpr = window.devicePixelRatio || 1;
-
-  img.style.setProperty("width", displayW + "px", "important");
-  img.style.setProperty("height", displayH + "px", "important");
-  img.style.setProperty("max-width", "none", "important");
-  img.style.setProperty("display", "block", "important");
-  img.style.setProperty("margin", "0", "important");
-
-  canvas.width = Math.max(1, Math.round(displayW * dpr));
-  canvas.height = Math.max(1, Math.round(displayH * dpr));
-  canvas.style.setProperty("width", displayW + "px", "important");
-  canvas.style.setProperty("height", displayH + "px", "important");
-  canvas.style.setProperty("left", "0px", "important");
-  canvas.style.setProperty("top", "0px", "important");
-
-  wrap.style.setProperty("height", Math.min(displayH, Math.floor(window.innerHeight * 0.62)) + "px", "important");
-  return true;
-}
-function scoreExpPointV24(event, canvas) {
-  const rect = canvas.getBoundingClientRect();
-  return {
-    x: v24Clamp((event.clientX - rect.left) / Math.max(1, rect.width), 0, 1),
-    y: v24Clamp((event.clientY - rect.top) / Math.max(1, rect.height), 0, 1)
-  };
-}
-function drawScoreExplanationCanvasV24() {
-  ensureScoreExpStoreV24();
-
-  const canvas = $("scoreExplanationCanvas");
-  if (!canvas) return;
-  const rect = canvas.getBoundingClientRect();
-  if (!rect.width || !rect.height) return;
-
-  const dpr = window.devicePixelRatio || 1;
-  const ctx = canvas.getContext("2d");
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, rect.width, rect.height);
-
-  const strokes = (state.scoreExpEdits || {})[scoreExpKeyV24()] || [];
-  for (const stroke of strokes) {
-    if (!stroke.points || !stroke.points.length) continue;
-    ctx.save();
-    ctx.globalCompositeOperation = stroke.tool === "eraser" ? "destination-out" : "source-over";
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.strokeStyle = stroke.tool === "eraser" ? "rgba(0,0,0,1)" : "#0ea5e9";
-    ctx.lineWidth = Number(stroke.size || state.scoreExpSize || 4);
-    ctx.beginPath();
-    stroke.points.forEach((pt, i) => {
-      const x = pt.x * rect.width;
-      const y = pt.y * rect.height;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    });
-    ctx.stroke();
-    ctx.restore();
-  }
-}
-function resetScoreExplanationCanvasV24() {
-  ensureScoreExpStoreV24();
-
-  let canvas = $("scoreExplanationCanvas");
-  const wrap = $("scoreExplanationEditWrap");
-  const img = $("explanationImageView");
-  if (!canvas || !wrap || !img) return;
-
-  const fresh = canvas.cloneNode(false);
-  canvas.replaceWith(fresh);
-  canvas = fresh;
-
-  if (!img.classList.contains("hidden") && img.src && !(img.complete && img.naturalWidth)) {
-    img.onload = () => setTimeout(resetScoreExplanationCanvasV24, 30);
-    return;
-  }
-
-  sizeScoreExplanationCanvasV24();
-  drawScoreExplanationCanvasV24();
-
-  let current = null;
-  let pan = null;
-
-  const block = (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    event.stopImmediatePropagation?.();
-  };
-
-  canvas.addEventListener("pointerdown", (event) => {
-    block(event);
-    canvas.setPointerCapture?.(event.pointerId);
-
-    if (event.pointerType !== "pen") {
-      canvas.classList.add("is-panning");
-      const shell = document.querySelector(".score-shell");
-      pan = {
-        x: event.clientX,
-        y: event.clientY,
-        left: wrap.scrollLeft,
-        top: wrap.scrollTop,
-        shellTop: shell ? shell.scrollTop : 0
-      };
+    if (!existing && !imageData) {
+      showToast('문제 이미지를 올려줘');
+      return;
+    }
+    if (!imageData) {
+      showToast('문제 이미지를 올려줘');
       return;
     }
 
-    const tool = state.scoreExpEditTool === "eraser" ? "eraser" : "pen";
-    const size = Number(state.scoreExpSize || $("scoreExpSizeInput")?.value || 4) * (tool === "eraser" ? 5 : 1);
-    current = {
-      tool,
-      size,
-      points: [scoreExpPointV24(event, canvas)]
+    saveFormPreferences();
+    const now = Date.now();
+    const problem = {
+      id: existing?.id || uid(),
+      subject: canonicalSubject(els.subjectInput.value),
+      year: normalizedYear(els.yearInput?.value),
+      category: els.categoryInput?.value?.trim() || '',
+      answer: Number(els.answerInput.value),
+      difficulty: els.difficultyInput?.value || '중',
+      imageData,
+      explanation: els.explanationInput.value.trim(),
+      explanationImageData,
+      explanationImagePages,
+      tags: tagsToArray(els.tagsInput?.value || ''),
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+      contentUpdatedAtV65: now,
+      order: Number.isFinite(Number(existing?.order)) ? Number(existing.order) : nextOrderAtTop(),
+      attempts: existing?.attempts || 0,
+      correct: existing?.correct || 0,
+      wrong: existing?.wrong || 0,
+      totalTimeMs: existing?.totalTimeMs || 0,
+      lastTimeMs: existing?.lastTimeMs || 0,
+      lastAnsweredAt: existing?.lastAnsweredAt || 0,
+      lastResult: existing?.lastResult || '',
+      wrongActive: existing?.wrongActive || false,
+      correctStreak: existing?.correctStreak || 0,
+      flagged: existing?.flagged || false,
+      annotations: existing?.annotations || []
     };
 
-    const key = scoreExpKeyV24();
-    if (!state.scoreExpEdits[key]) state.scoreExpEdits[key] = [];
-    state.scoreExpEdits[key].push(current);
-    drawScoreExplanationCanvasV24();
-  }, true);
+    await put(STORES.problems, problem);
+    // v63: 등록/수정 때 전체 IndexedDB 재조회 + 전체 목록 렌더링 금지.
+    upsertStateProblemV63(problem, true);
+    renderEmptyState();
+    updateFilterOptionsV63();
 
-  canvas.addEventListener("pointermove", (event) => {
-    block(event);
-
-    if (event.pointerType !== "pen") {
-      if (!pan) return;
-      const dx = event.clientX - pan.x;
-      const dy = event.clientY - pan.y;
-      const maxTop = Math.max(0, wrap.scrollHeight - wrap.clientHeight);
-      const maxLeft = Math.max(0, wrap.scrollWidth - wrap.clientWidth);
-      const desiredTop = pan.top - dy;
-      const desiredLeft = pan.left - dx;
-
-      wrap.scrollTop = v24Clamp(desiredTop, 0, maxTop);
-      wrap.scrollLeft = v24Clamp(desiredLeft, 0, maxLeft);
-
-      // 해설 이미지 끝에서 계속 손가락으로 밀면 채점화면 전체도 같이 이동
-      if (desiredTop < 0 || desiredTop > maxTop || maxTop < 2) {
-        const shell = document.querySelector(".score-shell");
-        if (shell) shell.scrollTop = pan.shellTop - dy;
+    if (editingId) {
+      if (saveMode === 'stay') {
+        const updated = problemByIdV63(problem.id) || problem;
+        editProblem(updated, { sequence: state.editQueueIds });
+        showToast(`수정했어 · 현재 ${state.problems.length}문제`);
+      } else {
+        const nextId = getNextEditProblemId(problem.id);
+        if (nextId) {
+          const nextProblemToEdit = problemByIdV63(nextId);
+          if (nextProblemToEdit) {
+            editProblem(nextProblemToEdit, { sequence: state.editQueueIds });
+            showToast('수정했어 · 다음 문제로 이동했어');
+          }
+        } else {
+          resetForm();
+          showToast('마지막 문제까지 수정했어 · 새 문제 등록 모드로 전환했어');
+        }
       }
-      return;
+    } else {
+      resetForm();
+      showToast(`저장했어 · 현재 ${state.problems.length}문제`);
+      switchView('addView');
+    }
+  } catch (err) {
+    console.error(err);
+    showToast(storageErrorMessage(err));
+  } finally {
+    state.saveBusy = false;
+    if (submitBtn) submitBtn.disabled = false;
+  }
+}
+
+async function countStoreV63(storeName) {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const req = db.transaction(storeName, 'readonly').objectStore(storeName).count();
+    req.onsuccess = () => resolve(Number(req.result || 0));
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function readStoreChunkV63(storeName, afterKey = null, limit = 12) {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const txv = db.transaction(storeName, 'readonly');
+    const store = txv.objectStore(storeName);
+    const range = afterKey == null ? null : IDBKeyRange.lowerBound(afterKey, true);
+    const req = store.openCursor(range);
+    const rows = [];
+    let lastKey = afterKey;
+    let done = true;
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      const cursor = req.result;
+      if (!cursor) { done = true; resolve({ rows, lastKey, done }); return; }
+      rows.push(cursor.value);
+      lastKey = cursor.key;
+      if (rows.length >= limit) { done = false; resolve({ rows, lastKey, done }); return; }
+      cursor.continue();
+    };
+  });
+}
+
+async function walkStoreV63(storeName, onRow, onProgress) {
+  let key = null, done = false, count = 0;
+  while (!done) {
+    const chunk = await readStoreChunkV63(storeName, key, 12);
+    for (const row of chunk.rows) {
+      await onRow(row);
+      count += 1;
+      if (count % 24 === 0) onProgress?.(count);
+    }
+    key = chunk.lastKey;
+    done = chunk.done || !chunk.rows.length;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  return count;
+}
+
+async function putBatchNativeV63(storeName, rows) {
+  if (!rows.length) return;
+  const db = await openDb();
+  await new Promise((resolve, reject) => {
+    const txv = db.transaction(storeName, 'readwrite');
+    const store = txv.objectStore(storeName);
+    txv.oncomplete = () => resolve();
+    txv.onerror = () => reject(txv.error);
+    for (const row of rows) store.put(row);
+  });
+}
+
+function downloadBackupBlobV63(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  // Android Chrome에서 click 직후 revoke하면 다운로드가 취소될 수 있어 충분히 늦게 해제.
+  setTimeout(() => { try { a.remove(); URL.revokeObjectURL(url); } catch {} }, 60000);
+}
+
+
+const BACKUP_PART_BYTES_V65 = 48 * 1024 * 1024;
+let backupPartsV65 = [];
+
+function compactProblemForBackupV65(row){
+  if(!row)return row;
+  const out={...row};
+  const pages=Array.isArray(out.explanationImagePages)?out.explanationImagePages:[];
+  // v61 호환용 첫 페이지 중복값은 백업에서만 제거해 파일 크기/시간을 줄인다.
+  if(pages.length && out.explanationImageData===pages[0]){
+    delete out.explanationImageData;
+    out.backupExpFirstFromPagesV65=true;
+  }
+  return out;
+}
+
+function restoreProblemFromBackupV65(row){
+  if(!row)return row;
+  const out={...row};
+  if(out.backupExpFirstFromPagesV65){
+    out.explanationImageData=Array.isArray(out.explanationImagePages)
+      ? (out.explanationImagePages[0]||"")
+      : "";
+    delete out.backupExpFirstFromPagesV65;
+  }
+  return out;
+}
+
+async function clearBackupPartsV65() {
+  for (const part of backupPartsV65) {
+    try {
+      if (part.url) URL.revokeObjectURL(part.url);
+      if (part.root && part.tempName) await part.root.removeEntry(part.tempName);
+    } catch {}
+  }
+  backupPartsV65 = [];
+  const box = document.getElementById('backupPartsV65');
+  if (box) { box.innerHTML = ''; box.classList.add('hidden'); }
+}
+
+function showBackupPartsV65(parts, totalProblems, totalHistory) {
+  const box = document.getElementById('backupPartsV65');
+  if (!box) return;
+  box.classList.remove('hidden');
+  box.innerHTML = `
+    <strong>백업 생성 완료 · ${parts.length}파일</strong>
+    <div class="hint">문제 ${totalProblems}개 · 풀이기록 ${totalHistory}개 · 아래 파일을 모두 내려받아.</div>
+    <div class="backup-part-list-v65"></div>
+  `;
+  const list = box.querySelector('.backup-part-list-v65');
+  parts.forEach((part, index) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'secondary';
+    btn.textContent = parts.length === 1
+      ? '백업파일 다운로드'
+      : `백업 ${index + 1}/${parts.length} 다운로드`;
+    btn.addEventListener('click', async () => {
+      try {
+        btn.disabled = true;
+        btn.textContent = '다운로드 여는 중...';
+        let fileOrBlob;
+        if (part.handle) fileOrBlob = await part.handle.getFile();
+        else fileOrBlob = part.blob;
+        downloadBackupBlobV63(fileOrBlob, part.filename);
+      } catch (err) {
+        console.error('v65 part download failed', err);
+        showToast(`다운로드 실패 · ${String(err?.message || err || '오류')}`);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = parts.length === 1
+          ? '백업파일 다운로드'
+          : `백업 ${index + 1}/${parts.length} 다운로드`;
+      }
+    });
+    list.appendChild(btn);
+  });
+}
+
+async function exportData() {
+  if (exportData.busy) return;
+  exportData.busy = true;
+  const btn = els.exportBtn;
+  const originalText = btn?.textContent || '백업 파일 내보내기';
+  if (btn) { btn.disabled = true; btn.textContent = '백업 준비 중...'; }
+
+  try {
+    const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 16);
+    const backupId = `psat-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const encoder = new TextEncoder();
+
+    /*
+      지원되는 브라우저는 사용자가 고른 실제 파일에 바로 쓴다.
+      RAM/OPFS에 백업 전체를 한 번 더 만들지 않아서 가장 빠르고 안정적이다.
+      반드시 첫 await 전에 picker를 띄워 user activation을 보존한다.
+    */
+    let directHandleV65 = null;
+    if (typeof window.showSaveFilePicker === 'function') {
+      try {
+        directHandleV65 = await window.showSaveFilePicker({
+          suggestedName:`psat-backup-${stamp}.psatbackup`,
+          types:[{
+            description:'PSAT 백업',
+            accept:{'application/x-ndjson':['.psatbackup']}
+          }]
+        });
+      } catch (pickerErr) {
+        if (pickerErr?.name === 'AbortError') {
+          showToast('백업 저장을 취소했어');
+          return;
+        }
+        console.warn('v65 direct save unavailable', pickerErr);
+      }
     }
 
-    if (!current) return;
-    current.points.push(scoreExpPointV24(event, canvas));
-    drawScoreExplanationCanvasV24();
-  }, true);
+    await clearBackupPartsV65();
 
-  const end = (event) => {
-    block(event);
+    const [problemCount, historyCount] = await Promise.all([
+      countStoreV63(STORES.problems),
+      countStoreV63(STORES.history)
+    ]);
 
-    if (event.pointerType !== "pen") {
-      pan = null;
-      canvas.classList.remove("is-panning");
-      return;
+    if (directHandleV65) {
+      const directWriter = await directHandleV65.createWritable();
+      const writeDirect = async obj => {
+        await directWriter.write(encoder.encode(JSON.stringify(obj)+'\n'));
+      };
+      try {
+        await writeDirect({
+          type:'meta', format:'psat-ndjson-v65', version:65, backupId,
+          exportedAt:new Date().toISOString(), problems:problemCount, history:historyCount
+        });
+        if(btn)btn.textContent=`문제 백업 0/${problemCount}`;
+        await walkStoreV63(
+          STORES.problems,
+          row=>writeDirect({type:'problem',data:compactProblemForBackupV65(row)}),
+          n=>{if(btn)btn.textContent=`문제 백업 ${n}/${problemCount}`;}
+        );
+        if(btn)btn.textContent=`풀이기록 백업 0/${historyCount}`;
+        await walkStoreV63(
+          STORES.history,
+          row=>writeDirect({type:'history',data:row}),
+          n=>{if(btn)btn.textContent=`풀이기록 백업 ${n}/${historyCount}`;}
+        );
+        await writeDirect({type:'end',problems:problemCount,history:historyCount});
+        await directWriter.close();
+        showToast(`백업 완료 · ${problemCount}문제 · ${historyCount}기록`);
+        return;
+      } catch (directErr) {
+        try { await directWriter.abort(); } catch {}
+        throw directErr;
+      }
     }
 
-    if (!current) return;
-    current = null;
-    saveScoreExpV24();
+    const canOpfs = !!navigator.storage?.getDirectory;
+    const root = canOpfs ? await navigator.storage.getDirectory() : null;
+
+    let partNo = 0;
+    let writer = null;
+    let handle = null;
+    let tempName = '';
+    let bytes = 0;
+    let dataRows = 0;
+    let memoryChunks = [];
+
+    async function openPart() {
+      partNo += 1;
+      bytes = 0;
+      dataRows = 0;
+      memoryChunks = [];
+      handle = null;
+      writer = null;
+      tempName = `psat-v65-${backupId}-${String(partNo).padStart(3,'0')}.tmp`;
+
+      if (root) {
+        handle = await root.getFileHandle(tempName, {create:true});
+        writer = await handle.createWritable();
+      }
+      const head = encoder.encode(JSON.stringify({
+        type:'part',
+        format:'psat-ndjson-v65',
+        version:65,
+        backupId,
+        part:partNo,
+        exportedAt:new Date().toISOString()
+      }) + '\n');
+      if (writer) await writer.write(head);
+      else memoryChunks.push(head);
+      bytes += head.byteLength;
+    }
+
+    async function closePart() {
+      if (!dataRows) return;
+      if (writer) await writer.close();
+      const filename = `psat-backup-${stamp}-part-${String(partNo).padStart(3,'0')}.psatpart`;
+      if (handle) {
+        backupPartsV65.push({filename, handle, root, tempName});
+      } else {
+        const blob = new Blob(memoryChunks, {type:'application/x-ndjson'});
+        backupPartsV65.push({filename, blob});
+      }
+      writer = null; handle = null; memoryChunks = [];
+    }
+
+    async function writeObject(obj) {
+      const data = encoder.encode(JSON.stringify(obj) + '\n');
+      if (dataRows > 0 && bytes + data.byteLength > BACKUP_PART_BYTES_V65) {
+        await closePart();
+        await openPart();
+      }
+      if (writer) await writer.write(data);
+      else memoryChunks.push(data);
+      bytes += data.byteLength;
+      dataRows += 1;
+    }
+
+    await openPart();
+
+    if (btn) btn.textContent = `문제 백업 0/${problemCount}`;
+    await walkStoreV63(
+      STORES.problems,
+      row => writeObject({type:'problem', data:compactProblemForBackupV65(row)}),
+      n => { if (btn) btn.textContent = `문제 백업 ${n}/${problemCount}`; }
+    );
+
+    if (btn) btn.textContent = `풀이기록 백업 0/${historyCount}`;
+    await walkStoreV63(
+      STORES.history,
+      row => writeObject({type:'history', data:row}),
+      n => { if (btn) btn.textContent = `풀이기록 백업 ${n}/${historyCount}`; }
+    );
+
+    await writeObject({type:'end', problems:problemCount, history:historyCount});
+    await closePart();
+
+    showBackupPartsV65(backupPartsV65, problemCount, historyCount);
+    showToast(`백업 생성 완료 · ${backupPartsV65.length}파일`);
+
+    // 한 파일뿐이면 기존처럼 바로 다운로드도 시도한다.
+    if (backupPartsV65.length === 1) {
+      try {
+        const part = backupPartsV65[0];
+        const fileOrBlob = part.handle ? await part.handle.getFile() : part.blob;
+        downloadBackupBlobV63(fileOrBlob, part.filename);
+      } catch {}
+    }
+  } catch (err) {
+    console.error('v65 backup failed', err);
+    const msg = String(err?.message || err || '오류');
+    showToast(`백업 실패 · ${msg}`);
+  } finally {
+    exportData.busy = false;
+    if (btn) { btn.disabled = false; btn.textContent = originalText; }
+  }
+}
+
+async function importNdjsonV63(file, gzip) {
+  if (gzip && typeof DecompressionStream !== 'function') throw new Error('이 브라우저는 압축 백업 복원을 지원하지 않아');
+  let stream = file.stream();
+  if (gzip) stream = stream.pipeThrough(new DecompressionStream('gzip'));
+  stream = stream.pipeThrough(new TextDecoderStream());
+  const reader = stream.getReader();
+  let buffer = '';
+  let problemBatch = [], historyBatch = [];
+  let problems = 0, history = 0;
+
+  async function flush() {
+    if (problemBatch.length) { await putBatchNativeV63(STORES.problems, problemBatch); problemBatch = []; }
+    if (historyBatch.length) { await putBatchNativeV63(STORES.history, historyBatch); historyBatch = []; }
+  }
+  async function consume(line) {
+    if (!line.trim()) return;
+    const item = JSON.parse(line);
+    if (item.type === 'problem' && item.data?.id) { problemBatch.push(restoreProblemFromBackupV65(item.data)); problems += 1; }
+    else if (item.type === 'history' && item.data?.id) { historyBatch.push(item.data); history += 1; }
+    if (problemBatch.length + historyBatch.length >= 24) {
+      await flush();
+      if ((problems + history) % 120 === 0) showToast(`복원 중 · 문제 ${problems} · 기록 ${history}`);
+    }
+  }
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += value;
+    let idx;
+    while ((idx = buffer.indexOf('\n')) >= 0) {
+      const line = buffer.slice(0, idx); buffer = buffer.slice(idx + 1);
+      await consume(line);
+    }
+  }
+  if (buffer.trim()) await consume(buffer);
+  await flush();
+  return { problems, history };
+}
+
+async function importData(event) {
+  const files = [...(event.target.files || [])];
+  if (!files.length) return;
+  files.sort((a,b)=>a.name.localeCompare(b.name, undefined, {numeric:true}));
+  if (!confirm(`${files.length}개 백업 파일을 불러올까? 같은 ID 문제는 덮어씁니다.`)) {
+    event.target.value = '';
+    return;
+  }
+
+  try {
+    let totalProblems = 0;
+    let totalHistory = 0;
+
+    for (let fi = 0; fi < files.length; fi += 1) {
+      const file = files[fi];
+      showToast(`복원 ${fi + 1}/${files.length} · ${file.name}`);
+
+      const magic = new Uint8Array(await file.slice(0, 2).arrayBuffer());
+      const gzip = magic[0] === 0x1f && magic[1] === 0x8b;
+      const isNew = gzip ||
+        /\.psatbackup(?:\.gz)?$/i.test(file.name) ||
+        /\.psatpart$/i.test(file.name) ||
+        /\.jsonl$/i.test(file.name);
+
+      let result;
+      if (isNew) {
+        result = await importNdjsonV63(file, gzip);
+      } else {
+        const text = await file.text();
+        const payload = JSON.parse(text);
+        if (!Array.isArray(payload.problems)) throw new Error(`${file.name}: 올바른 백업 파일이 아니야`);
+        for (let i = 0; i < payload.problems.length; i += 24) {
+          await putBatchNativeV63(STORES.problems, payload.problems.slice(i, i + 24));
+        }
+        if (Array.isArray(payload.history)) {
+          for (let i = 0; i < payload.history.length; i += 48) {
+            await putBatchNativeV63(STORES.history, payload.history.slice(i, i + 48));
+          }
+        }
+        result = {problems:payload.problems.length, history:payload.history?.length || 0};
+      }
+      totalProblems += result.problems || 0;
+      totalHistory += result.history || 0;
+    }
+
+    await refresh();
+    showToast(`복원 완료 · 문제 ${totalProblems} · 기록 ${totalHistory}`);
+  } catch (err) {
+    console.error('v65 import failed', err);
+    showToast(`복원 실패 · ${String(err?.message || err || '파일 오류')}`);
+  } finally {
+    event.target.value = '';
+  }
+}
+
+function guessGitHubDefaults() {
+  const host = location.hostname || '';
+  const pathRepo = (location.pathname || '').split('/').filter(Boolean)[0] || 'psat-data';
+  const owner = host.endsWith('.github.io') ? host.replace('.github.io', '') : '';
+  return { owner, repo: pathRepo === 'psat' ? 'psat-data' : pathRepo, branch: 'main', path: 'psat-sync-data.json' };
+}
+
+function loadTombstones() {
+  try {
+    const data = JSON.parse(localStorage.getItem(SYNC_TOMBSTONES_KEY) || '{}');
+    state.tombstones = data && typeof data === 'object' ? data : {};
+  } catch (err) {
+    state.tombstones = {};
+  }
+}
+
+function saveTombstones() {
+  localStorage.setItem(SYNC_TOMBSTONES_KEY, JSON.stringify(state.tombstones || {}));
+}
+
+function recordTombstone(id, at = Date.now()) {
+  if (!id || state.syncApplying) return;
+  state.tombstones = state.tombstones || {};
+  state.tombstones[id] = Math.max(Number(state.tombstones[id] || 0), Number(at || Date.now()));
+  saveTombstones();
+}
+
+function getSyncConfig() {
+  try {
+    const cfg = JSON.parse(localStorage.getItem(SYNC_CONFIG_KEY) || 'null');
+    if (cfg && typeof cfg === 'object') return cfg;
+  } catch (err) {}
+  return null;
+}
+
+function saveSyncConfig(cfg) {
+  state.syncConfig = cfg;
+  localStorage.setItem(SYNC_CONFIG_KEY, JSON.stringify(cfg));
+}
+
+function clearSyncConfig() {
+  state.syncConfig = null;
+  localStorage.removeItem('psat-sync-config');
+  localStorage.removeItem('psat-sync-tombstones');
+}
+
+function renderSyncSettings() {
+  const defaults = guessGitHubDefaults();
+  const cfg = state.syncConfig || getSyncConfig() || defaults;
+  if (!els.syncOwnerInput) return;
+  els.syncOwnerInput.value = cfg.owner || defaults.owner || '';
+  els.syncRepoInput.value = cfg.repo || defaults.repo || '';
+  els.syncBranchInput.value = cfg.branch || 'main';
+  els.syncPathInput.value = cfg.path || 'psat-sync-data.json';
+  if (cfg.token && !els.syncTokenInput.value) els.syncTokenInput.value = cfg.token;
+  updateSyncStatus();
+}
+
+function updateSyncStatus(text = '') {
+  if (!els.syncStatus) return;
+  const cfg = state.syncConfig || getSyncConfig();
+  const enabled = !!(cfg && cfg.enabled);
+  const last = cfg?.lastSyncAt ? ` · 마지막 ${new Date(cfg.lastSyncAt).toLocaleString()}` : '';
+  const base = enabled ? '자동 동기화 켜짐' : '동기화 꺼짐';
+  els.syncStatus.textContent = text || `${base}${last}`;
+  els.syncStatus.classList.toggle('sync-on', enabled);
+}
+
+function readSyncForm() {
+  return {
+    enabled: true,
+    owner: els.syncOwnerInput.value.trim(),
+    repo: els.syncRepoInput.value.trim(),
+    branch: els.syncBranchInput.value.trim() || 'main',
+    path: els.syncPathInput.value.trim() || 'psat-sync-data.json',
+    token: els.syncTokenInput.value.trim(),
+    lastSyncAt: state.syncConfig?.lastSyncAt || 0
   };
-
-  canvas.addEventListener("pointerup", end, true);
-  canvas.addEventListener("pointercancel", end, true);
-  canvas.addEventListener("pointerleave", end, true);
-}
-function connectScoreExpToolsV24() {
-  $("scoreExpSizeInput") && ($("scoreExpSizeInput").oninput = e => {
-    state.scoreExpSize = Number(e.target.value || 4);
-  });
-  $("scoreExpPenBtn") && ($("scoreExpPenBtn").onclick = () => {
-    state.scoreExpEditTool = "pen";
-    try { setScoreToolV11?.("exp", "pen"); } catch {}
-  });
-  $("scoreExpEraserBtn") && ($("scoreExpEraserBtn").onclick = () => {
-    state.scoreExpEditTool = "eraser";
-    try { setScoreToolV11?.("exp", "eraser"); } catch {}
-  });
-  $("clearScoreExpInkBtn") && ($("clearScoreExpInkBtn").onclick = () => {
-    if (!confirm("현재 해설 필기를 지울까?")) return;
-    ensureScoreExpStoreV24();
-    delete state.scoreExpEdits[scoreExpKeyV24()];
-    saveScoreExpV24();
-    resetScoreExplanationCanvasV24();
-  });
 }
 
-/* 이전 버전 함수명으로 호출되는 곳까지 v24 로직으로 연결 */
-function fitExplanationAndCanvasV14() { resetScoreExplanationCanvasV24(); }
-function resetScoreExplanationCanvasV14() { resetScoreExplanationCanvasV24(); }
-function resetScoreExplanationCanvasV11() { resetScoreExplanationCanvasV24(); }
-
-const showExplanationPageV24Original = showExplanationPage;
-showExplanationPage = function(index) {
-  showExplanationPageV24Original(index);
-  setTimeout(() => {
-    connectScoreExpToolsV24();
-    resetScoreExplanationCanvasV24();
-    removeSolveBadgesV24();
-  }, 120);
-  setTimeout(resetScoreExplanationCanvasV24, 420);
-};
-
-const openScoreV24Original = openScore;
-openScore = function() {
-  openScoreV24Original();
-  setTimeout(() => {
-    connectScoreExpToolsV24();
-    resetScoreExplanationCanvasV24();
-    removeSolveBadgesV24();
-  }, 220);
-  setTimeout(resetScoreExplanationCanvasV24, 620);
-};
-
-const openCurrentProblemV24Original = openCurrentProblem;
-openCurrentProblem = function() {
-  openCurrentProblemV24Original();
-  setTimeout(removeSolveBadgesV24, 50);
-  setTimeout(removeSolveBadgesV24, 250);
-};
-
-setTimeout(() => {
-  connectScoreExpToolsV24();
-  resetScoreExplanationCanvasV24();
-  removeSolveBadgesV24();
-}, 1300);
-
-window.addEventListener("resize", () => setTimeout(resetScoreExplanationCanvasV24, 220));
-
-
-/* === v25: 문제풀이 출제 범위 추가 === */
-function solveScopeV25() {
-  return $("solveScope")?.value || "all";
-}
-function scopeLabelV25(scope = solveScopeV25()) {
-  return ({
-    all: "전체 랜덤",
-    review: "복습필요 문제만",
-    slow: "오래 걸린 문제만",
-    unseen: "안 푼 문제만",
-    solved: "푼 문제만"
-  })[scope] || "전체 랜덤";
-}
-function isSlowProblemV25(problem) {
-  const last = lastAttempt(problem.id);
-  if (!last) return false;
-  const elapsed = Number(last.elapsedMs || 0);
-  const limit = Number(problem.timeLimit || 0) * 60000;
-  if (limit > 0) return elapsed >= limit;
-  return elapsed >= 30 * 60000;
-}
-function scopeMatchesV25(problem, scope = solveScopeV25()) {
-  const attempts = attemptsOf(problem.id);
-  const last = lastAttempt(problem.id);
-  if (scope === "review") return String(last?.needReview) === "true";
-  if (scope === "slow") return isSlowProblemV25(problem);
-  if (scope === "unseen") return attempts.length === 0;
-  if (scope === "solved") return attempts.length > 0;
-  return true;
-}
-function filterProblemsByScopeV25(list, scope = solveScopeV25()) {
-  return (list || []).filter(problem => scopeMatchesV25(problem, scope));
-}
-function renderScopeSummaryV25(list) {
-  const root = $("solveScope")?.closest("section.card");
-  if (!root) return;
-  let box = $("solveScopeSummaryV25");
-  if (!box) {
-    box = document.createElement("div");
-    box.id = "solveScopeSummaryV25";
-    box.className = "scope-summary-v25";
-    root.appendChild(box);
-  }
-  const scope = solveScopeV25();
-  box.textContent = `${scopeLabelV25(scope)} · 표시 ${list.length}문제`;
-}
-const filterProblemsV25Original = filterProblems;
-filterProblems = function(args = {}) {
-  const base = filterProblemsV25Original(args);
-  if (args && args.applyScope === false) return base;
-  if (args && args.scope) return filterProblemsByScopeV25(base, args.scope);
-  return base;
-};
-const problemCardV25Original = problemCard;
-problemCard = function(problem, opts = {}) {
-  const card = problemCardV25Original(problem, opts);
-  if (opts.solve) {
-    const badges = card.querySelector(".badges");
-    if (badges && !badges.querySelector(".scope-badge-v25")) {
-      const scope = solveScopeV25();
-      const span = document.createElement("span");
-      span.className = "badge scope-badge-v25";
-      span.textContent = scopeLabelV25(scope);
-      badges.appendChild(span);
-    }
-  }
-  return card;
-};
-function renderSolveList() {
-  const list = $("solveList");
-  const arr = filterProblems({
-    subject: $("solveSubject").value,
-    session: $("solveSession").value,
-    scope: solveScopeV25()
-  });
-  if (!list) return;
-  list.innerHTML = "";
-  renderScopeSummaryV25(arr);
-  if (!arr.length) {
-    list.innerHTML = '<p class="hint">조건에 맞는 문제가 없어.</p>';
-    return;
-  }
-  arr.forEach(problem => list.append(problemCard(problem, { solve: true })));
-}
-function startRandom(reviewOnly = false) {
-  let arr = filterProblems({
-    subject: $("solveSubject").value,
-    session: $("solveSession").value,
-    scope: reviewOnly ? "review" : solveScopeV25()
-  });
-  if (!arr.length) {
-    toast(reviewOnly ? "복습필요 문제가 없어" : `${scopeLabelV25()} 조건에 맞는 문제가 없어`);
-    return;
-  }
-  const picks = chooseRandom(arr, Number($("randomCount").value || 1));
-  startSolve(picks.map(problem => problem.id), $("solveMode").value || "outline");
-}
-function bindSolveScopeV25() {
-  const select = $("solveScope");
-  if (select && !select.dataset.v25Ready) {
-    select.dataset.v25Ready = "1";
-    select.addEventListener("input", renderAll);
-    select.addEventListener("change", renderAll);
-  }
-  try { renderSolveList(); } catch {}
-}
-setTimeout(bindSolveScopeV25, 500);
-
-
-/* === v26: 텍스트 해설에도 스타일러스 필기 === */
-function scoreModelTextKeyV26() {
-  const p = currentProblem?.();
-  return `${p?.id || "unknown"}:modelText`;
-}
-
-function sizeScoreModelTextCanvasV26() {
-  ensureScoreExpStoreV24();
-
-  const wrap = $("scoreModelTextEditWrap");
-  const text = $("modelTextView");
-  const canvas = $("scoreModelTextCanvas");
-  if (!wrap || !text || !canvas) return false;
-
-  const hasText = !!String(text.textContent || "").trim();
-  wrap.classList.toggle("text-empty-v26", !hasText);
-
-  if (!hasText) {
-    canvas.width = 1;
-    canvas.height = 1;
-    canvas.style.setProperty("width", "1px", "important");
-    canvas.style.setProperty("height", "1px", "important");
+function validateSyncConfig(cfg) {
+  if (!cfg.owner || !cfg.repo || !cfg.branch || !cfg.path || !cfg.token) {
+    showToast('동기화 설정을 모두 입력해줘');
     return false;
   }
-
-  const wrapW = Math.max(
-    1,
-    Math.floor(wrap.clientWidth || wrap.getBoundingClientRect().width || window.innerWidth - 24)
-  );
-
-  text.style.setProperty("width", wrapW + "px", "important");
-  text.style.setProperty("min-height", "220px", "important");
-
-  const contentH = Math.max(
-    220,
-    Math.ceil(text.scrollHeight || text.getBoundingClientRect().height || 220)
-  );
-  const dpr = window.devicePixelRatio || 1;
-
-  canvas.width = Math.max(1, Math.round(wrapW * dpr));
-  canvas.height = Math.max(1, Math.round(contentH * dpr));
-  canvas.style.setProperty("width", wrapW + "px", "important");
-  canvas.style.setProperty("height", contentH + "px", "important");
-  canvas.style.setProperty("left", "0px", "important");
-  canvas.style.setProperty("top", "0px", "important");
-
-  text.style.setProperty("height", contentH + "px", "important");
-  let textVisibleH = Math.min(contentH, Math.floor(window.innerHeight * 0.58));
-  const overlayV58=document.getElementById("scoreOverlay");
-  const paneV58=wrap.closest(".score-box");
-  if(overlayV58?.classList.contains("v58-one-screen") && paneV58){
-    const paneRectV58=paneV58.getBoundingClientRect();
-    const wrapRectV58=wrap.getBoundingClientRect();
-    textVisibleH=Math.max(120,Math.floor(paneRectV58.bottom-wrapRectV58.top-8));
-  }
-  wrap.style.setProperty(
-    "height",
-    textVisibleH + "px",
-    "important"
-  );
   return true;
 }
 
-function scoreModelTextPointV26(event, canvas) {
-  const rect = canvas.getBoundingClientRect();
-  return {
-    x: v24Clamp((event.clientX - rect.left) / Math.max(1, rect.width), 0, 1),
-    y: v24Clamp((event.clientY - rect.top) / Math.max(1, rect.height), 0, 1)
-  };
+function startAutoSync() {
+  stopAutoSync();
+  const cfg = state.syncConfig || getSyncConfig();
+  if (!cfg?.enabled) return;
+  state.syncTimer = setInterval(() => syncNow(false), SYNC_INTERVAL_MS);
 }
 
-function drawScoreModelTextCanvasV26() {
-  ensureScoreExpStoreV24();
+function stopAutoSync() {
+  if (state.syncTimer) clearInterval(state.syncTimer);
+  state.syncTimer = null;
+}
 
-  const canvas = $("scoreModelTextCanvas");
-  if (!canvas) return;
+function scheduleSyncForLocalChange(storeName) {
+  // v4: 자동 동기화 기능 제거. 데이터는 기기별 저장 + JSON 백업/복원 방식으로 유지합니다.
+  return;
+}
 
-  const rect = canvas.getBoundingClientRect();
-  if (!rect.width || !rect.height) return;
+function dataTimestamp(payload) {
+  let max = 0;
+  for (const p of payload.problems || []) {
+    max = Math.max(max, Number(p.updatedAt || p.createdAt || 0));
+  }
+  for (const h of payload.history || []) {
+    max = Math.max(max, Number(h.createdAt || 0));
+  }
+  for (const value of Object.values(payload.tombstones || {})) {
+    max = Math.max(max, Number(value || 0));
+  }
+  return max;
+}
 
-  const dpr = window.devicePixelRatio || 1;
-  const ctx = canvas.getContext("2d");
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, rect.width, rect.height);
+async function buildSyncPayload() {
+  const problems = await getAll(STORES.problems);
+  const history = await getAll(STORES.history);
+  loadTombstones();
+  const payload = {
+    app: 'PSAT 랜덤 복습노트',
+    version: 3,
+    contentUpdatedAt: 0,
+    syncedAt: new Date().toISOString(),
+    deviceId: state.deviceId,
+    problems,
+    history,
+    tombstones: state.tombstones || {}
+  };
+  payload.contentUpdatedAt = dataTimestamp(payload);
+  return payload;
+}
 
-  const strokes = (state.scoreExpEdits || {})[scoreModelTextKeyV26()] || [];
-  for (const stroke of strokes) {
-    if (!stroke.points || !stroke.points.length) continue;
+function utf8ToBase64(str) {
+  const bytes = new TextEncoder().encode(str);
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
 
-    ctx.save();
-    ctx.globalCompositeOperation =
-      stroke.tool === "eraser" ? "destination-out" : "source-over";
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.strokeStyle =
-      stroke.tool === "eraser" ? "rgba(0,0,0,1)" : "#0ea5e9";
-    ctx.lineWidth = Number(stroke.size || state.scoreExpSize || 4);
-    ctx.beginPath();
+function base64ToUtf8(base64) {
+  const clean = String(base64 || '').replace(/\s/g, '');
+  const binary = atob(clean);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
 
-    stroke.points.forEach((pt, index) => {
-      const x = pt.x * rect.width;
-      const y = pt.y * rect.height;
-      if (index === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    });
+function githubContentsUrl(cfg) {
+  const path = String(cfg.path || '').split('/').map(encodeURIComponent).join('/');
+  return `https://api.github.com/repos/${encodeURIComponent(cfg.owner)}/${encodeURIComponent(cfg.repo)}/contents/${path}`;
+}
 
-    ctx.stroke();
-    ctx.restore();
+async function fetchRemotePayload(cfg) {
+  const url = `${githubContentsUrl(cfg)}?ref=${encodeURIComponent(cfg.branch)}`;
+  const res = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${cfg.token}`,
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28'
+    }
+  });
+  if (res.status === 404) return { sha: '', payload: null };
+  if (!res.ok) throw new Error(`GitHub 가져오기 실패: ${res.status}`);
+  const data = await res.json();
+  const text = base64ToUtf8(data.content || '');
+  let payload = null;
+  try {
+    payload = JSON.parse(text);
+  } catch (err) {
+    throw new Error('동기화 파일 JSON을 읽지 못했어');
+  }
+  return { sha: data.sha || '', payload };
+}
+
+async function putRemotePayload(cfg, payload, sha = '') {
+  const body = {
+    message: `PSAT sync ${new Date().toISOString()}`,
+    content: utf8ToBase64(JSON.stringify(payload)),
+    branch: cfg.branch
+  };
+  if (sha) body.sha = sha;
+  const res = await fetch(githubContentsUrl(cfg), {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${cfg.token}`,
+      Accept: 'application/vnd.github+json',
+      'Content-Type': 'application/json',
+      'X-GitHub-Api-Version': '2022-11-28'
+    },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(`GitHub 저장 실패: ${res.status} ${detail.slice(0, 120)}`);
+  }
+  return res.json();
+}
+
+async function applyRemotePayload(remotePayload) {
+  if (!remotePayload) return false;
+  let changed = false;
+  state.syncApplying = true;
+  try {
+    loadTombstones();
+    const remoteTombstones = remotePayload.tombstones || {};
+    for (const [id, at] of Object.entries(remoteTombstones)) {
+      state.tombstones[id] = Math.max(Number(state.tombstones[id] || 0), Number(at || 0));
+    }
+    saveTombstones();
+
+    const localProblems = await getAll(STORES.problems);
+    const localById = new Map(localProblems.map((p) => [p.id, p]));
+
+    for (const local of localProblems) {
+      const deletedAt = Number(state.tombstones[local.id] || 0);
+      const updatedAt = Number(local.updatedAt || local.createdAt || 0);
+      if (deletedAt && deletedAt >= updatedAt) {
+        await tx(STORES.problems, 'readwrite', (store) => store.delete(local.id));
+        changed = true;
+      }
+    }
+
+    for (const remote of remotePayload.problems || []) {
+      if (!remote?.id) continue;
+      const deletedAt = Number(state.tombstones[remote.id] || 0);
+      const remoteUpdated = Number(remote.updatedAt || remote.createdAt || 0);
+      if (deletedAt && deletedAt >= remoteUpdated) continue;
+      const local = localById.get(remote.id);
+      const localUpdated = Number(local?.updatedAt || local?.createdAt || 0);
+      if (!local || remoteUpdated > localUpdated) {
+        await tx(STORES.problems, 'readwrite', (store) => store.put(remote));
+        changed = true;
+      }
+    }
+
+    const localHistory = await getAll(STORES.history);
+    const localHistoryIds = new Set(localHistory.map((h) => h.id));
+    for (const remoteHistory of remotePayload.history || []) {
+      if (!remoteHistory?.id || localHistoryIds.has(remoteHistory.id)) continue;
+      await tx(STORES.history, 'readwrite', (store) => store.put(remoteHistory));
+      changed = true;
+    }
+  } finally {
+    state.syncApplying = false;
+  }
+  if (changed) await refresh();
+  return changed;
+}
+
+async function syncNow(manual = false) {
+  const cfg = state.syncConfig || getSyncConfig();
+  if (!cfg?.enabled) {
+    if (manual) showToast('동기화가 꺼져 있어');
+    return;
+  }
+  if (state.syncRunning) return;
+  if (!navigator.onLine) {
+    updateSyncStatus('오프라인이라 동기화 대기 중');
+    return;
+  }
+  state.syncRunning = true;
+  updateSyncStatus('동기화 중...');
+  try {
+    const remote = await fetchRemotePayload(cfg);
+    const remoteContentAt = Number(remote.payload?.contentUpdatedAt || dataTimestamp(remote.payload || {}) || 0);
+    await applyRemotePayload(remote.payload);
+    const localPayload = await buildSyncPayload();
+    if (!remote.payload || Number(localPayload.contentUpdatedAt || 0) > remoteContentAt) {
+      try {
+        await putRemotePayload(cfg, localPayload, remote.sha);
+      } catch (err) {
+        if (String(err.message || '').includes('409')) {
+          const retry = await fetchRemotePayload(cfg);
+          await applyRemotePayload(retry.payload);
+          const retryPayload = await buildSyncPayload();
+          await putRemotePayload(cfg, retryPayload, retry.sha);
+        } else {
+          throw err;
+        }
+      }
+    }
+    cfg.lastSyncAt = Date.now();
+    saveSyncConfig(cfg);
+    renderSyncSettings();
+    updateSyncStatus('동기화 완료 · ' + new Date(cfg.lastSyncAt).toLocaleString());
+    if (manual) showToast('동기화 완료');
+  } catch (err) {
+    console.error(err);
+    updateSyncStatus('동기화 오류: ' + (err.message || err));
+    if (manual) showToast('동기화 실패. 설정/토큰을 확인해줘.');
+  } finally {
+    state.syncRunning = false;
   }
 }
 
-function resetScoreModelTextCanvasV26() {
-  ensureScoreExpStoreV24();
+async function pullOnlySync() {
+  const cfg = state.syncConfig || getSyncConfig();
+  if (!cfg?.enabled) {
+    showToast('동기화 설정을 먼저 저장해줘');
+    return;
+  }
+  if (state.syncRunning) return;
+  state.syncRunning = true;
+  updateSyncStatus('가져오는 중...');
+  try {
+    const remote = await fetchRemotePayload(cfg);
+    await applyRemotePayload(remote.payload);
+    cfg.lastSyncAt = Date.now();
+    saveSyncConfig(cfg);
+    renderSyncSettings();
+    showToast('가져오기 완료');
+  } catch (err) {
+    console.error(err);
+    showToast('가져오기 실패. 설정/토큰을 확인해줘.');
+    updateSyncStatus('가져오기 오류: ' + (err.message || err));
+  } finally {
+    state.syncRunning = false;
+  }
+}
 
-  let canvas = $("scoreModelTextCanvas");
-  const wrap = $("scoreModelTextEditWrap");
-  const text = $("modelTextView");
-  if (!canvas || !wrap || !text) return;
+async function enableSyncFromForm() {
+  const cfg = readSyncForm();
+  if (!validateSyncConfig(cfg)) return;
+  saveSyncConfig(cfg);
+  renderSyncSettings();
+  startAutoSync();
+  await syncNow(true);
+}
 
-  const fresh = canvas.cloneNode(false);
-  canvas.replaceWith(fresh);
-  canvas = fresh;
+function disableSync() {
+  stopAutoSync();
+  clearTimeout(state.syncDebounceTimer);
+  clearSyncConfig();
+  if (els.syncTokenInput) els.syncTokenInput.value = '';
+  renderSyncSettings();
+  showToast('동기화를 껐어');
+}
 
-  if (!sizeScoreModelTextCanvasV26()) return;
-  drawScoreModelTextCanvasV26();
+async function wipeAll() {
+  if (!confirm('전체 문제, 오답, 필기, 풀이 기록을 모두 삭제할까?')) return;
+  if (!confirm('정말 삭제할까? 백업이 없으면 복구할 수 없어.')) return;
+  await clearStore(STORES.problems);
+  await clearStore(STORES.history);
+  state.current = null;
+  state.queue = [];
+  exitSolveFullscreen();
+  els.solvePanel.classList.add('hidden');
+  await refresh();
+  showToast('전체 삭제 완료');
+}
 
-  let current = null;
-  let pan = null;
 
-  const block = event => {
-    event.preventDefault();
-    event.stopPropagation();
-    event.stopImmediatePropagation?.();
-  };
+function setManualAnswer(value) {
+  const answer = Number(value);
+  if (answer < 1 || answer > 5) return;
+  els.answerInput.value = String(answer);
+  showToast(`정답 ${choiceLabel(answer)}로 지정했어`);
+}
 
-  canvas.addEventListener("pointerdown", event => {
-    block(event);
-    canvas.setPointerCapture?.(event.pointerId);
+async function applyBulkYearChange() {
+  const source = els.bulkYearSource?.value || '';
+  const target = normalizedYear(els.bulkYearTarget?.value || '');
+  if (!target) {
+    showToast('새 연도/회차를 입력해줘');
+    return;
+  }
+  const list = source
+    ? state.problems.filter((problem) => normalizedYear(problem.year) === source)
+    : getVisibleProblemList();
+  if (!list.length) {
+    showToast('바꿀 문제가 없어');
+    return;
+  }
+  if (!confirm(`${list.length}개 문제의 연도/회차를 "${target}"(으)로 바꿀까?`)) return;
+  const now = Date.now();
+  for (const problem of list) {
+    problem.year = target;
+    problem.updatedAt = now;
+    problem.contentUpdatedAtV65 = now;
+    await put(STORES.problems, problem);
+  }
+  if (els.bulkYearTarget) els.bulkYearTarget.value = '';
+  await refresh();
+  if (els.listYearFilter && [...els.listYearFilter.options].some((o) => o.value === target)) els.listYearFilter.value = target;
+  renderProblemList();
+  showToast(`${list.length}개 문제 연도/회차를 바꿨어`);
+}
 
-    if (event.pointerType !== "pen") {
-      canvas.classList.add("is-panning");
-      const shell = document.querySelector(".score-shell");
-      pan = {
-        x: event.clientX,
-        y: event.clientY,
-        left: wrap.scrollLeft,
-        top: wrap.scrollTop,
-        shellTop: shell ? shell.scrollTop : 0
-      };
+function bindEvents() {
+  els.tabs.forEach((tab) => tab.addEventListener('click', () => switchView(tab.dataset.view)));
+  els.startBtn.addEventListener('click', () => {
+    const problems = filterProblems(els.modeSelect.value, els.subjectFilter.value, els.yearFilter?.value || '');
+    const label = `${els.subjectFilter.value || '전체'}${els.yearFilter?.value ? ' · ' + els.yearFilter.value : ''} 랜덤`;
+    startSession(problems, {
+      count: Number(els.sessionCount.value || 0),
+      minutes: Number(els.sessionMinutes.value || 0),
+      label
+    });
+  });
+  els.quickStartBtns.forEach((btn) => btn.addEventListener('click', () => {
+    const subject = btn.dataset.subject || '언어';
+    const count = Number(btn.dataset.count || 10);
+    const problems = filterProblems('all', subject, els.yearFilter?.value || '');
+    startSession(problems, { count, minutes: 0, label: `${subject} 랜덤 ${count}문제` });
+  }));
+
+  if (els.yearFilter) els.yearFilter.addEventListener('change', () => {});
+
+  els.continueBtn.addEventListener('click', () => {
+    if (resumePausedSession()) return;
+    const id = localStorage.getItem('psat-last-problem-id');
+    const p = state.problems.find((item) => String(item.id) === String(id));
+    if (!p) {
+      showToast('이어 풀 문제가 없어');
       return;
     }
-
-    const tool = state.scoreExpEditTool === "eraser" ? "eraser" : "pen";
-    const size =
-      Number(state.scoreExpSize || $("scoreExpSizeInput")?.value || 4) *
-      (tool === "eraser" ? 5 : 1);
-
-    current = {
-      tool,
-      size,
-      points: [scoreModelTextPointV26(event, canvas)]
-    };
-
-    const key = scoreModelTextKeyV26();
-    if (!state.scoreExpEdits[key]) state.scoreExpEdits[key] = [];
-    state.scoreExpEdits[key].push(current);
-    drawScoreModelTextCanvasV26();
-  }, true);
-
-  canvas.addEventListener("pointermove", event => {
-    block(event);
-
-    if (event.pointerType !== "pen") {
-      if (!pan) return;
-
-      const dx = event.clientX - pan.x;
-      const dy = event.clientY - pan.y;
-      const maxTop = Math.max(0, wrap.scrollHeight - wrap.clientHeight);
-      const maxLeft = Math.max(0, wrap.scrollWidth - wrap.clientWidth);
-      const desiredTop = pan.top - dy;
-      const desiredLeft = pan.left - dx;
-
-      wrap.scrollTop = v24Clamp(desiredTop, 0, maxTop);
-      wrap.scrollLeft = v24Clamp(desiredLeft, 0, maxLeft);
-
-      if (desiredTop < 0 || desiredTop > maxTop || maxTop < 2) {
-        const shell = document.querySelector(".score-shell");
-        if (shell) shell.scrollTop = pan.shellTop - dy;
+    startDirectProblem(p);
+  });
+  if (els.reviewWrongBtn) els.reviewWrongBtn.addEventListener('click', () => setReviewMode('wrong'));
+  if (els.reviewCorrectBtn) els.reviewCorrectBtn.addEventListener('click', () => setReviewMode('correct'));
+  if (els.reviewWrongRandomBtn) els.reviewWrongRandomBtn.addEventListener('click', () => startSession(reviewListForMode('wrong'), { count: 0, minutes: 0, label: '오답랜덤복습' }));
+  if (els.reviewSubjectFilter) els.reviewSubjectFilter.addEventListener('change', renderWrongList);
+  if (els.reviewYearFilter) els.reviewYearFilter.addEventListener('change', renderWrongList);
+  if (els.reviewYearTextFilter) els.reviewYearTextFilter.addEventListener('input', renderWrongList);
+  els.clearSolvedWrongBtn.addEventListener('click', async () => {
+    for (const p of state.problems) {
+      if (p.wrongActive && (p.correctStreak || 0) >= WRONG_CLEAR_STREAK) {
+        p.wrongActive = false;
+        await put(STORES.problems, p);
       }
+    }
+    await refresh();
+    showToast('반영했어');
+  });
+
+  els.choices.forEach((btn) => btn.addEventListener('click', async () => {
+    if (state.checked) return;
+    state.selectedAnswer = Number(btn.dataset.answer);
+    els.choices.forEach((b) => b.classList.toggle('selected', b === btn));
+    await checkAnswer({ autoAdvance: true });
+  }));
+  els.checkBtn.addEventListener('click', () => checkAnswer({ autoAdvance: false }));
+  els.showExpBtn.addEventListener('click', showExplanation);
+  els.flagBtn.addEventListener('click', toggleFlag);
+  els.nextBtn.addEventListener('click', nextProblem);
+
+  els.penBtn.addEventListener('click', () => setDrawTool('pen'));
+  els.eraserBtn.addEventListener('click', () => setDrawTool('eraser'));
+  els.clearInkBtn.addEventListener('click', clearInk);
+  // v52: 중단/나가기는 psatExitStableV52에서 단독 처리
+  els.penSize.addEventListener('input', updateSizeLabels);
+  els.eraserSize.addEventListener('input', updateSizeLabels);
+  els.zoomOutBtn.addEventListener('click', () => zoomFromCenter(state.zoom <= 0.35 ? -0.05 : -0.20));
+  els.zoomInBtn.addEventListener('click', () => zoomFromCenter(state.zoom < 0.35 ? 0.05 : 0.20));
+  if (els.fitZoomBtn) els.fitZoomBtn.addEventListener('click', fitZoomToScreen);
+  els.problemImage.addEventListener('load', () => window.requestAnimationFrame(() => {
+    syncCanvasSize();
+    if (state.autoFitOnImageLoad) {
+      fitZoomToScreen();
+      state.autoFitOnImageLoad = false;
+    }
+  }));
+  window.addEventListener('resize', () => window.requestAnimationFrame(syncCanvasSize));
+  els.inkCanvas.addEventListener('pointerdown', startInk);
+  els.inkCanvas.addEventListener('pointermove', moveInk);
+  els.inkCanvas.addEventListener('pointerup', endInk);
+  els.inkCanvas.addEventListener('pointercancel', endInk);
+  els.inkCanvas.addEventListener('pointerleave', (event) => {
+    if (state.drawing) endInk(event);
+  });
+
+  els.problemForm.addEventListener('submit', saveProblemFromForm);
+  els.resetFormBtn.addEventListener('click', resetForm);
+  if (els.newProblemModeBtn) els.newProblemModeBtn.addEventListener('click', enterNewProblemMode);
+  if (els.subjectInput) els.subjectInput.addEventListener('change', saveFormPreferences);
+  if (els.yearInput) els.yearInput.addEventListener('input', saveFormPreferences);
+  if (els.imageQualityInput) els.imageQualityInput.addEventListener('change', saveFormPreferences);
+  if (els.toggleExplanationTextBtn) els.toggleExplanationTextBtn.addEventListener('click', toggleExplanationText);
+  els.manualAnswerBtns.forEach((btn) => btn.addEventListener('click', () => setManualAnswer(btn.dataset.answer)));
+  els.imageInput.addEventListener('change', () => imageFileInputChanged('problem', els.imageInput));
+  els.explanationImageInput.addEventListener('change', () => imageFileInputChanged('explanation', els.explanationImageInput));
+  els.problemPasteZone.addEventListener('click', () => setPasteTarget('problem'));
+  els.problemPasteZone.addEventListener('focus', () => setPasteTarget('problem'));
+  els.explanationPasteZone.addEventListener('click', () => setPasteTarget('explanation'));
+  els.explanationPasteZone.addEventListener('focus', () => setPasteTarget('explanation'));
+  els.problemPasteZone.addEventListener('paste', (event) => pasteImageFromClipboardEvent(event, 'problem'));
+  els.explanationPasteZone.addEventListener('paste', (event) => pasteImageFromClipboardEvent(event, 'explanation'));
+  els.pasteProblemBtn.addEventListener('click', () => pasteImageWithClipboardApi('problem'));
+  els.pasteExplanationBtn.addEventListener('click', () => pasteImageWithClipboardApi('explanation'));
+  els.clearProblemImageBtn.addEventListener('click', () => clearFormImage('problem'));
+  els.clearExplanationImageBtn.addEventListener('click', () => clearFormImage('explanation'));
+  document.getElementById('addExplanationPageBtnV61')?.addEventListener('click', addExplanationPageV61);
+  document.getElementById('prevExplanationPageBtnV61')?.addEventListener('click', () => moveExplanationPageV61(-1));
+  document.getElementById('nextExplanationPageBtnV61')?.addEventListener('click', () => moveExplanationPageV61(1));
+  document.getElementById('deleteExplanationPageBtnV61')?.addEventListener('click', deleteExplanationPageV61);
+  updateExplanationPageControlsV61();
+  document.addEventListener('paste', async (event) => {
+    if (event.defaultPrevented) return;
+    if (!document.getElementById('addView').classList.contains('active')) return;
+    await pasteImageFromClipboardEvent(event);
+  });
+
+  els.searchInput.addEventListener('input', renderProblemList);
+  els.listSubjectFilter.addEventListener('change', renderProblemList);
+  if (els.listYearFilter) els.listYearFilter.addEventListener('change', renderProblemList);
+  if (els.listYearTextFilter) els.listYearTextFilter.addEventListener('input', renderProblemList);
+  if (els.bulkYearApplyBtn) els.bulkYearApplyBtn.addEventListener('click', applyBulkYearChange);
+  document.addEventListener('pointermove', handleReorderPointerMove, { passive: false });
+  document.addEventListener('pointerup', handleReorderPointerUp);
+  document.addEventListener('pointercancel', handleReorderPointerUp);
+  if (els.sessionSummary) els.sessionSummary.addEventListener('click', handleSessionSummaryClick);
+  els.exportBtn.addEventListener('click', exportData);
+  els.importInput.addEventListener('change', importData);
+  els.wipeBtn.addEventListener('click', wipeAll);
+  if (els.saveSyncBtn) els.saveSyncBtn.addEventListener('click', enableSyncFromForm);
+  if (els.manualSyncBtn) els.manualSyncBtn.addEventListener('click', () => syncNow(true));
+  if (els.pullSyncBtn) els.pullSyncBtn.addEventListener('click', pullOnlySync);
+  if (els.disableSyncBtn) els.disableSyncBtn.addEventListener('click', disableSync);
+
+  window.addEventListener('beforeinstallprompt', (event) => {
+    event.preventDefault();
+    state.deferredInstallPrompt = event;
+    const standalone = window.matchMedia?.('(display-mode: standalone)')?.matches || window.navigator.standalone === true;
+    if (!standalone) els.installBtn.classList.remove('hidden');
+  });
+  window.addEventListener('appinstalled', () => {
+    state.deferredInstallPrompt = null;
+    els.installBtn.classList.add('hidden');
+    showToast('홈화면 앱 설치 완료');
+  });
+  els.installBtn.addEventListener('click', async () => {
+    const standalone = window.matchMedia?.('(display-mode: standalone)')?.matches || window.navigator.standalone === true;
+    if (standalone) {
+      els.installBtn.classList.add('hidden');
+      showToast('이미 앱으로 실행 중이야');
       return;
     }
-
-    if (!current) return;
-    current.points.push(scoreModelTextPointV26(event, canvas));
-    drawScoreModelTextCanvasV26();
-  }, true);
-
-  const end = event => {
-    block(event);
-
-    if (event.pointerType !== "pen") {
-      pan = null;
-      canvas.classList.remove("is-panning");
+    if (!state.deferredInstallPrompt) {
+      showToast('설치 정보 새로고침 중이야. 페이지를 한 번 새로고침해줘.');
       return;
     }
-
-    if (!current) return;
-    current = null;
-    saveScoreExpV24();
-  };
-
-  canvas.addEventListener("pointerup", end, true);
-  canvas.addEventListener("pointercancel", end, true);
-  canvas.addEventListener("pointerleave", end, true);
-}
-
-function connectScoreExplanationToolsV26() {
-  $("scoreExpSizeInput") && ($("scoreExpSizeInput").oninput = event => {
-    state.scoreExpSize = Number(event.target.value || 4);
-  });
-
-  $("scoreExpPenBtn") && ($("scoreExpPenBtn").onclick = () => {
-    state.scoreExpEditTool = "pen";
-    try { setScoreToolV11?.("exp", "pen"); } catch {}
-  });
-
-  $("scoreExpEraserBtn") && ($("scoreExpEraserBtn").onclick = () => {
-    state.scoreExpEditTool = "eraser";
-    try { setScoreToolV11?.("exp", "eraser"); } catch {}
-  });
-
-  $("clearScoreExpInkBtn") && ($("clearScoreExpInkBtn").onclick = () => {
-    if (!confirm("현재 문제의 이미지·텍스트 해설 필기를 모두 지울까?")) return;
-
-    ensureScoreExpStoreV24();
-    delete state.scoreExpEdits[scoreExpKeyV24()];
-    delete state.scoreExpEdits[scoreModelTextKeyV26()];
-    saveScoreExpV24();
-
-    resetScoreExplanationCanvasV24();
-    resetScoreModelTextCanvasV26();
+    state.deferredInstallPrompt.prompt();
+    const choice = await state.deferredInstallPrompt.userChoice;
+    state.deferredInstallPrompt = null;
+    if (choice?.outcome === 'accepted') els.installBtn.classList.add('hidden');
   });
 }
 
-function refreshScoreExplanationInkV26() {
-  connectScoreExplanationToolsV26();
-  resetScoreModelTextCanvasV26();
+async function registerServiceWorker() {
+  if ('serviceWorker' in navigator) {
+    try {
+      await navigator.serviceWorker.register('./sw.js?v=72');
+    } catch (err) {
+      console.warn('Service worker registration failed', err);
+    }
+  }
 }
 
-const openScoreV26Original = openScore;
-openScore = function() {
-  openScoreV26Original();
+async function init() {
+  bindEvents();
+  applyFormPreferences();
+  resetForm();
+  updateSizeLabels();
+  setDrawEnabled(true);
+  localStorage.removeItem('psat-sync-config');
+  localStorage.removeItem('psat-sync-tombstones');
+  await openDb();
+  // v63: 대용량 문제은행이 브라우저 저장공간 정리 대상이 되지 않도록 영구 저장을 요청.
+  try { await navigator.storage?.persist?.(); } catch {}
+  await refresh();
+  updateContinueButton();
+  await registerServiceWorker();
+}
 
-  setTimeout(refreshScoreExplanationInkV26, 280);
-  setTimeout(refreshScoreExplanationInkV26, 720);
-  setTimeout(refreshScoreExplanationInkV26, 1300);
-};
-
-const showExplanationPageV26Original = showExplanationPage;
-showExplanationPage = function(index) {
-  showExplanationPageV26Original(index);
-
-  setTimeout(refreshScoreExplanationInkV26, 180);
-  setTimeout(refreshScoreExplanationInkV26, 520);
-};
-
-window.addEventListener("resize", () => {
-  setTimeout(resetScoreModelTextCanvasV26, 250);
+init().catch((err) => {
+  console.error(err);
+  showToast('앱 초기화 중 오류가 났어');
 });
 
-setTimeout(refreshScoreExplanationInkV26, 1500);
 
+/* === v26 해설보기 손가락 핀치 줌 === */
+function setupExplanationPinchZoomV26(wrap, content, img, label) {
+  if (!wrap || !content || !img) return;
 
-/* === v27: 텍스트 해설만 있을 때 이미지칸 제거 + 새 문제 답안필기 초기화 === */
-function explanationStateV27() {
-  const p = currentProblem?.();
-  const pages = realPages(p?.explanationPages || []);
-  const text = String(p?.modelText || "").trim();
-  return { p, pages, text, hasImages: pages.length > 0, hasText: !!text };
-}
-
-function clearCanvasPixelsV27(id) {
-  const canvas = $(id);
-  if (!canvas) return;
-  try {
-    const ctx = canvas.getContext("2d");
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, canvas.width || 1, canvas.height || 1);
-  } catch {}
-}
-
-function ensureNoExplanationV27() {
-  let hint = $("scoreNoExplanationV27");
-  if (hint) return hint;
-  hint = document.createElement("p");
-  hint.id = "scoreNoExplanationV27";
-  hint.className = "hidden";
-  hint.textContent = "등록된 해설이 없어.";
-  const textWrap = $("scoreModelTextEditWrap");
-  textWrap?.insertAdjacentElement("afterend", hint);
-  return hint;
-}
-
-function syncExplanationLayoutV27() {
-  const { pages, hasImages, hasText } = explanationStateV27();
-  const imageWrap = $("scoreExplanationEditWrap");
-  const image = $("explanationImageView");
-  const imageCanvas = $("scoreExplanationCanvas");
-  const textWrap = $("scoreModelTextEditWrap");
-  const badge = $("explanationPageBadge");
-  const prev = $("prevExplanationPageBtn");
-  const next = $("nextExplanationPageBtn");
-  const hint = ensureNoExplanationV27();
-
-  if (imageWrap) {
-    imageWrap.classList.toggle("v27-no-image", !hasImages);
-    imageWrap.style.setProperty("display", hasImages ? "" : "none", hasImages ? "" : "important");
-  }
-
-  if (!hasImages) {
-    image?.classList.add("hidden");
-    if (image) image.removeAttribute("src");
-    if (imageCanvas) {
-      imageCanvas.width = 1;
-      imageCanvas.height = 1;
-      imageCanvas.style.setProperty("width", "1px", "important");
-      imageCanvas.style.setProperty("height", "1px", "important");
-    }
-    clearCanvasPixelsV27("scoreExplanationCanvas");
-  }
-
-  const hidePageButtons = !hasImages || pages.length <= 1;
-  prev?.classList.toggle("v27-hidden-explanation-control", hidePageButtons);
-  next?.classList.toggle("v27-hidden-explanation-control", hidePageButtons);
-
-  if (badge) {
-    if (!hasImages && hasText) badge.textContent = "텍스트 해설";
-    else if (!hasImages && !hasText) badge.textContent = "해설 없음";
-  }
-
-  if (textWrap) {
-    textWrap.classList.toggle("v27-text-only", !hasImages && hasText);
-    textWrap.classList.toggle("text-empty-v26", !hasText);
-    textWrap.style.setProperty("display", hasText ? "block" : "none", "important");
-    if (hasText) {
-      textWrap.scrollTop = 0;
-      textWrap.scrollLeft = 0;
-    }
-  }
-
-  hint?.classList.toggle("hidden", hasImages || hasText);
-
-  if (hasText) {
-    setTimeout(() => {
-      try { resetScoreModelTextCanvasV26(); } catch {}
-    }, 40);
-  }
-}
-
-function resetAnswerForNewProblemV27() {
-  state.answerInkCurrentStroke = null;
-  state.answerInkStrokes = [];
-
-  if (state.solve) {
-    state.solve.answer = "";
-    state.solve.answerInkStrokes = [];
-    state.solve.answerInkData = "";
-    state.solve.answerPages = [{ text: "", strokes: [] }];
-    state.solve.answerPageIndex = 0;
-  }
-
-  const text = $("answerText");
-  if (text) text.value = "";
-
-  clearCanvasPixelsV27("answerInkCanvas");
-  clearCanvasPixelsV27("scoreAnswerCanvas");
-  clearCanvasPixelsV27("scoreExplanationCanvas");
-  clearCanvasPixelsV27("scoreModelTextCanvas");
-
-  try { drawAnswerInkV10(); } catch {
-    try { drawAnswerInk(); } catch {}
-  }
-  try { renderAnswerPageBadgeV10(); } catch {}
-}
-
-const startSolveV27Original = startSolve;
-startSolve = function(ids, mode) {
-  state.answerInkCurrentStroke = null;
-  state.answerInkStrokes = [];
-  clearCanvasPixelsV27("answerInkCanvas");
-  startSolveV27Original(ids, mode);
-};
-
-async function saveAndNextV27() {
-  await saveAttempt();
-  if (!state.solve) return;
-
-  if (state.solve.index >= state.solve.ids.length - 1) {
-    finishSolve(true);
-    return;
-  }
-
-  state.solve.index += 1;
-  state.solve.elapsedBase = 0;
-  state.solve.startedProblemAt = Date.now();
-  resetAnswerForNewProblemV27();
-
-  $("scoreOverlay")?.classList.add("hidden");
-  openCurrentProblem();
-
-  setTimeout(() => {
-    try { loadAnswerPageV10(0); } catch {}
-    try { resetAnswerInkLayerV13(); } catch {
-      try { resetAnswerInkLayerV10(); } catch {}
-    }
-    try { drawInk(); } catch {}
-  }, 100);
-}
-
-saveAndNext = saveAndNextV27;
-
-// 기존 addEventListener가 이전 함수를 잡았더라도 이 캡처 핸들러가 먼저 실행
-if (!document.documentElement.dataset.v27SaveNextReady) {
-  document.documentElement.dataset.v27SaveNextReady = "1";
-  document.addEventListener("click", event => {
-    const button = event.target?.closest?.("#saveAndNextBtn");
-    if (!button) return;
-    event.preventDefault();
-    event.stopPropagation();
-    event.stopImmediatePropagation();
-    saveAndNextV27();
-  }, true);
-}
-
-const openScoreV27Original = openScore;
-openScore = function() {
-  openScoreV27Original();
-  syncExplanationLayoutV27();
-  setTimeout(syncExplanationLayoutV27, 80);
-  setTimeout(syncExplanationLayoutV27, 320);
-  setTimeout(syncExplanationLayoutV27, 800);
-};
-
-const showExplanationPageV27Original = showExplanationPage;
-showExplanationPage = function(index) {
-  showExplanationPageV27Original(index);
-  syncExplanationLayoutV27();
-  setTimeout(syncExplanationLayoutV27, 100);
-  setTimeout(syncExplanationLayoutV27, 420);
-};
-
-setTimeout(() => {
-  ensureNoExplanationV27();
-  syncExplanationLayoutV27();
-}, 1500);
-
-
-/* === v28: 답안 제출 후 내 답안 수정필기 안정화 === */
-function scoreAnswerKeyV28() {
-  try {
-    if (typeof scoreKeyV14 === "function") return scoreKeyV14("answer");
-    if (typeof scoreKeyV11 === "function") return scoreKeyV11("answer");
-  } catch {}
-  const p = currentProblem?.();
-  return `${p?.id || "unknown"}:answer:${state.scoreAnswerPageIndex || 0}`;
-}
-
-function ensureScoreAnswerStoreV28() {
-  if (!state.scoreAnswerEdits) {
-    try {
-      state.scoreAnswerEdits = JSON.parse(
-        localStorage.getItem("essayScoreAnswerEditsV11") || "{}"
-      );
-    } catch {
-      state.scoreAnswerEdits = {};
-    }
-  }
-}
-
-function saveScoreAnswerStoreV28() {
-  ensureScoreAnswerStoreV28();
-  try {
-    localStorage.setItem(
-      "essayScoreAnswerEditsV11",
-      JSON.stringify(state.scoreAnswerEdits || {})
-    );
-  } catch {}
-}
-
-function clampV28(value, min, max) {
-  return Math.max(min, Math.min(max, value));
-}
-
-function sizeScoreAnswerCanvasV28(canvas) {
-  const wrap = $("scoreAnswerEditWrap");
-  const pre = $("ownAnswerView");
-  const ink = $("ownAnswerInkView");
-  if (!canvas || !wrap || !pre) return false;
-
-  const width = Math.max(
-    1,
-    Math.floor(wrap.clientWidth || wrap.getBoundingClientRect().width || window.innerWidth - 24)
-  );
-
-  pre.style.setProperty("width", width + "px", "important");
-  pre.style.setProperty("min-height", "240px", "important");
-
-  const preBottom = Math.max(
-    240,
-    Math.ceil((pre.offsetTop || 0) + (pre.scrollHeight || pre.getBoundingClientRect().height || 240))
-  );
-
-  let inkBottom = 0;
-  if (ink && !ink.classList.contains("hidden")) {
-    const inkHeight = Math.max(
-      ink.offsetHeight || 0,
-      ink.getBoundingClientRect().height || 0,
-      ink.naturalWidth && ink.naturalHeight
-        ? Math.round(width * ink.naturalHeight / ink.naturalWidth)
-        : 0
-    );
-    if (inkHeight) {
-      ink.style.setProperty("width", width + "px", "important");
-      ink.style.setProperty("height", inkHeight + "px", "important");
-    }
-    inkBottom = Math.ceil((ink.offsetTop || preBottom) + inkHeight);
-  }
-
-  const contentHeight = Math.max(260, preBottom, inkBottom);
-  const visibleHeight = Math.min(
-    contentHeight,
-    Math.max(260, Math.floor(window.innerHeight * 0.58))
-  );
-
-  wrap.style.setProperty("height", visibleHeight + "px", "important");
-
-  const dpr = window.devicePixelRatio || 1;
-  canvas.width = Math.max(1, Math.round(width * dpr));
-  canvas.height = Math.max(1, Math.round(contentHeight * dpr));
-  canvas.style.setProperty("width", width + "px", "important");
-  canvas.style.setProperty("height", contentHeight + "px", "important");
-  canvas.style.setProperty("left", "0px", "important");
-  canvas.style.setProperty("top", "0px", "important");
-
-  return true;
-}
-
-function scoreAnswerPointV28(event, canvas) {
-  const rect = canvas.getBoundingClientRect();
-  return {
-    x: clampV28((event.clientX - rect.left) / Math.max(1, rect.width), 0, 1),
-    y: clampV28((event.clientY - rect.top) / Math.max(1, rect.height), 0, 1)
-  };
-}
-
-function drawScoreAnswerCanvasV28() {
-  ensureScoreAnswerStoreV28();
-
-  const canvas = $("scoreAnswerCanvas");
-  if (!canvas) return;
-
-  const rect = canvas.getBoundingClientRect();
-  if (!rect.width || !rect.height) return;
-
-  const dpr = window.devicePixelRatio || 1;
-  const ctx = canvas.getContext("2d");
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, rect.width, rect.height);
-
-  const strokes = state.scoreAnswerEdits[scoreAnswerKeyV28()] || [];
-  for (const stroke of strokes) {
-    if (!stroke.points || !stroke.points.length) continue;
-
-    ctx.save();
-    ctx.globalCompositeOperation =
-      stroke.tool === "eraser" ? "destination-out" : "source-over";
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.strokeStyle =
-      stroke.tool === "eraser" ? "rgba(0,0,0,1)" : "#ef4444";
-    ctx.lineWidth = Number(stroke.size || 4);
-    ctx.beginPath();
-
-    stroke.points.forEach((point, index) => {
-      const x = point.x * rect.width;
-      const y = point.y * rect.height;
-      if (index === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    });
-
-    // 점만 찍어도 표시되도록 보정
-    if (stroke.points.length === 1) {
-      const point = stroke.points[0];
-      ctx.lineTo(point.x * rect.width + 0.01, point.y * rect.height + 0.01);
-    }
-
-    ctx.stroke();
-    ctx.restore();
-  }
-}
-
-function addCoalescedScoreAnswerPointsV28(event, canvas, stroke) {
-  const events =
-    typeof event.getCoalescedEvents === "function"
-      ? event.getCoalescedEvents()
-      : [event];
-
-  for (const item of events) {
-    stroke.points.push(scoreAnswerPointV28(item, canvas));
-  }
-}
-
-function resetScoreAnswerCanvasV28() {
-  ensureScoreAnswerStoreV28();
-
-  let canvas = $("scoreAnswerCanvas");
-  const wrap = $("scoreAnswerEditWrap");
-  if (!canvas || !wrap) return;
-
-  const fresh = canvas.cloneNode(false);
-  canvas.replaceWith(fresh);
-  canvas = fresh;
-
-  if (!sizeScoreAnswerCanvasV28(canvas)) return;
-  drawScoreAnswerCanvasV28();
-
-  let current = null;
-  let activePenId = null;
-  let pan = null;
-
-  const block = event => {
-    event.preventDefault();
-    event.stopPropagation();
-    event.stopImmediatePropagation?.();
+  const zoomState = {
+    scale: 1,
+    min: 1,
+    max: 4,
+    startScale: 1,
+    startDist: 0,
+    startMid: null,
+    startScrollLeft: 0,
+    startScrollTop: 0,
+    pan: null
   };
 
-  canvas.addEventListener("pointerdown", event => {
-    block(event);
-    canvas.setPointerCapture?.(event.pointerId);
+  function clamp(v, min, max) {
+    return Math.max(min, Math.min(max, v));
+  }
+  function dist(t1, t2) {
+    return Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+  }
+  function mid(t1, t2) {
+    return {
+      x: (t1.clientX + t2.clientX) / 2,
+      y: (t1.clientY + t2.clientY) / 2
+    };
+  }
+  function applyScale(nextScale, anchorClientX, anchorClientY) {
+    nextScale = clamp(nextScale, zoomState.min, zoomState.max);
+    const oldScale = zoomState.scale;
+    const rect = wrap.getBoundingClientRect();
 
-    if (event.pointerType !== "pen") {
-      canvas.classList.add("is-panning");
-      pan = {
-        pointerId: event.pointerId,
-        x: event.clientX,
-        y: event.clientY,
+    const anchorX = (anchorClientX ?? (rect.left + rect.width / 2)) - rect.left + wrap.scrollLeft;
+    const anchorY = (anchorClientY ?? (rect.top + rect.height / 2)) - rect.top + wrap.scrollTop;
+
+    const contentX = anchorX / oldScale;
+    const contentY = anchorY / oldScale;
+
+    zoomState.scale = nextScale;
+    content.style.transform = `scale(${zoomState.scale})`;
+    content.style.width = `${img.offsetWidth * zoomState.scale}px`;
+    content.style.height = `${img.offsetHeight * zoomState.scale}px`;
+
+    wrap.scrollLeft = contentX * zoomState.scale - ((anchorClientX ?? (rect.left + rect.width / 2)) - rect.left);
+    wrap.scrollTop = contentY * zoomState.scale - ((anchorClientY ?? (rect.top + rect.height / 2)) - rect.top);
+
+    if (label) label.textContent = `${Math.round(zoomState.scale * 100)}%`;
+  }
+  function resetZoom() {
+    zoomState.scale = 1;
+    content.style.transform = "scale(1)";
+    content.style.width = "";
+    content.style.height = "";
+    wrap.scrollLeft = 0;
+    wrap.scrollTop = 0;
+    if (label) label.textContent = "100%";
+  }
+
+  wrap._expZoomIn = () => applyScale(zoomState.scale + 0.25);
+  wrap._expZoomOut = () => applyScale(zoomState.scale - 0.25);
+  wrap._expZoomReset = resetZoom;
+
+  // 핀치 줌: 두 손가락
+  wrap.addEventListener("touchstart", (event) => {
+    if (event.touches.length === 2) {
+      event.preventDefault();
+      zoomState.startDist = dist(event.touches[0], event.touches[1]);
+      zoomState.startScale = zoomState.scale;
+      zoomState.startMid = mid(event.touches[0], event.touches[1]);
+      zoomState.startScrollLeft = wrap.scrollLeft;
+      zoomState.startScrollTop = wrap.scrollTop;
+      zoomState.pan = null;
+    } else if (event.touches.length === 1) {
+      zoomState.pan = {
+        x: event.touches[0].clientX,
+        y: event.touches[0].clientY,
         left: wrap.scrollLeft,
         top: wrap.scrollTop
       };
+    }
+  }, { passive: false });
+
+  wrap.addEventListener("touchmove", (event) => {
+    if (event.touches.length === 2 && zoomState.startDist) {
+      event.preventDefault();
+      const d = dist(event.touches[0], event.touches[1]);
+      const m = mid(event.touches[0], event.touches[1]);
+      const next = zoomState.startScale * (d / zoomState.startDist);
+      applyScale(next, m.x, m.y);
       return;
     }
 
-    activePenId = event.pointerId;
-    const tool =
-      state.scoreAnswerEditTool === "eraser" ? "eraser" : "pen";
-    const size =
-      Number(state.scoreAnswerSize || $("scoreAnswerSizeInput")?.value || 4) *
-      (tool === "eraser" ? 5 : 1);
+    // 확대 상태에서 한 손가락 이동
+    if (event.touches.length === 1 && zoomState.pan && zoomState.scale > 1.01) {
+      event.preventDefault();
+      wrap.scrollLeft = zoomState.pan.left - (event.touches[0].clientX - zoomState.pan.x);
+      wrap.scrollTop = zoomState.pan.top - (event.touches[0].clientY - zoomState.pan.y);
+    }
+  }, { passive: false });
 
-    current = {
-      tool,
-      size,
-      points: [scoreAnswerPointV28(event, canvas)]
-    };
+  wrap.addEventListener("touchend", () => {
+    if (event?.touches?.length < 2) zoomState.startDist = 0;
+    if (!event?.touches?.length) zoomState.pan = null;
+  }, { passive: false });
 
-    const key = scoreAnswerKeyV28();
-    if (!state.scoreAnswerEdits[key]) state.scoreAnswerEdits[key] = [];
-    state.scoreAnswerEdits[key].push(current);
-    drawScoreAnswerCanvasV28();
-  }, true);
+  // 마우스/트랙패드 테스트용 휠 줌
+  wrap.addEventListener("wheel", (event) => {
+    if (!event.ctrlKey) return;
+    event.preventDefault();
+    applyScale(zoomState.scale + (event.deltaY < 0 ? 0.15 : -0.15), event.clientX, event.clientY);
+  }, { passive: false });
 
-  canvas.addEventListener("pointermove", event => {
-    block(event);
+  img.addEventListener("load", resetZoom, { once: true });
+  setTimeout(resetZoom, 50);
+}
 
-    if (event.pointerType !== "pen") {
-      if (!pan || pan.pointerId !== event.pointerId) return;
-      wrap.scrollLeft = pan.left - (event.clientX - pan.x);
-      wrap.scrollTop = pan.top - (event.clientY - pan.y);
-      return;
+/* 기존 showExplanation 덮어쓰기: 해설 이미지에 핀치 줌 컨테이너 추가 */
+function showExplanation() {
+  if (!state.current) return;
+  const hasText = state.current.explanation && state.current.explanation.trim();
+  const hasImage = state.current.explanationImageData;
+  els.explanationBox.innerHTML = '';
+
+  if (!hasText && !hasImage) {
+    els.explanationBox.textContent = '등록된 해설이 없습니다.';
+  } else {
+    if (hasImage) {
+      const toolbar = document.createElement('div');
+      toolbar.className = 'exp-zoom-toolbar';
+      toolbar.innerHTML = `
+        <button class="exp-zoom-btn" type="button" data-exp-zoom="out">축소</button>
+        <button class="exp-zoom-btn" type="button" data-exp-zoom="reset">맞춤</button>
+        <button class="exp-zoom-btn" type="button" data-exp-zoom="in">확대</button>
+        <span class="exp-zoom-label">100%</span>
+      `;
+
+      const wrap = document.createElement('div');
+      wrap.className = 'exp-zoom-wrap';
+
+      const content = document.createElement('div');
+      content.className = 'exp-zoom-content';
+
+      const img = document.createElement('img');
+      img.src = state.current.explanationImageData;
+      img.alt = '해설 이미지';
+      img.className = 'explanation-image';
+
+      content.appendChild(img);
+      wrap.appendChild(content);
+      els.explanationBox.appendChild(toolbar);
+      els.explanationBox.appendChild(wrap);
+
+      const label = toolbar.querySelector('.exp-zoom-label');
+      setupExplanationPinchZoomV26(wrap, content, img, label);
+
+      toolbar.querySelector('[data-exp-zoom="in"]').addEventListener('click', () => wrap._expZoomIn?.());
+      toolbar.querySelector('[data-exp-zoom="out"]').addEventListener('click', () => wrap._expZoomOut?.());
+      toolbar.querySelector('[data-exp-zoom="reset"]').addEventListener('click', () => wrap._expZoomReset?.());
+
+      const hint = document.createElement('div');
+      hint.className = 'exp-zoom-hint';
+      hint.textContent = '해설 이미지는 두 손가락으로 확대/축소, 확대 후 한 손가락으로 이동';
+      els.explanationBox.appendChild(hint);
     }
 
-    if (!current || activePenId !== event.pointerId) return;
-    addCoalescedScoreAnswerPointsV28(event, canvas, current);
-    drawScoreAnswerCanvasV28();
-  }, true);
-
-  const end = event => {
-    block(event);
-
-    if (event.pointerType !== "pen") {
-      if (pan?.pointerId === event.pointerId) pan = null;
-      canvas.classList.remove("is-panning");
-      return;
+    if (hasText) {
+      const text = document.createElement('div');
+      text.className = 'explanation-text';
+      text.textContent = state.current.explanation.trim();
+      els.explanationBox.appendChild(text);
     }
-
-    if (!current || activePenId !== event.pointerId) return;
-    addCoalescedScoreAnswerPointsV28(event, canvas, current);
-    current = null;
-    activePenId = null;
-    saveScoreAnswerStoreV28();
-    drawScoreAnswerCanvasV28();
-  };
-
-  // pointerleave에서는 끝내지 않음: 빠르게 쓸 때 선이 끊기는 문제 방지
-  canvas.addEventListener("pointerup", end, true);
-  canvas.addEventListener("pointercancel", end, true);
-  canvas.addEventListener("lostpointercapture", end, true);
-
-  $("scoreAnswerSizeInput") && ($("scoreAnswerSizeInput").oninput = event => {
-    state.scoreAnswerSize = Number(event.target.value || 4);
-  });
-
-  $("scoreAnswerPenBtn") && ($("scoreAnswerPenBtn").onclick = () => {
-    state.scoreAnswerEditTool = "pen";
-    try { setScoreToolV11?.("answer", "pen"); } catch {}
-  });
-
-  $("scoreAnswerEraserBtn") && ($("scoreAnswerEraserBtn").onclick = () => {
-    state.scoreAnswerEditTool = "eraser";
-    try { setScoreToolV11?.("answer", "eraser"); } catch {}
-  });
-
-  $("clearScoreAnswerInkBtn") && ($("clearScoreAnswerInkBtn").onclick = () => {
-    if (!confirm("현재 답안 수정필기를 지울까?")) return;
-    delete state.scoreAnswerEdits[scoreAnswerKeyV28()];
-    saveScoreAnswerStoreV28();
-    resetScoreAnswerCanvasV28();
-  });
-}
-
-function scheduleScoreAnswerCanvasV28() {
-  [30, 140, 360, 820, 1500].forEach(delay => {
-    setTimeout(() => {
-      try { resetScoreAnswerCanvasV28(); } catch {}
-    }, delay);
-  });
-}
-
-/* 답안 페이지 전환 후에도 정확한 페이지 필기 캔버스로 재연결 */
-if (typeof renderScoreAnswerPageV11 === "function") {
-  const renderScoreAnswerPageV28Original = renderScoreAnswerPageV11;
-  renderScoreAnswerPageV11 = function(index = 0) {
-    renderScoreAnswerPageV28Original(index);
-    scheduleScoreAnswerCanvasV28();
-  };
-}
-
-/* 채점 화면이 열린 뒤 이전 버전의 지연 재설정까지 모두 덮어씀 */
-const openScoreV28Original = openScore;
-openScore = function() {
-  openScoreV28Original();
-
-  const ink = $("ownAnswerInkView");
-  if (ink) {
-    ink.onload = () => scheduleScoreAnswerCanvasV28();
   }
-  scheduleScoreAnswerCanvasV28();
+
+  els.explanationBox.classList.remove('hidden');
+}
+
+/* === v27 해설보기 줌/이동 확정 수정 === */
+function setupExplanationZoomV27(wrap,stage,img,label){
+  if(!wrap||!stage||!img)return;
+  const z={scale:1,min:1,max:5,x:0,y:0,baseW:1,baseH:1,pointers:new Map(),pinchStartDist:0,pinchStartScale:1,pinchStartX:0,pinchStartY:0,pinchCenter:{x:0,y:0},panStart:null};
+  const clamp=(v,min,max)=>Math.max(min,Math.min(max,v));
+  function measure(){
+    const rect=wrap.getBoundingClientRect(); const nw=img.naturalWidth||img.width||1, nh=img.naturalHeight||img.height||1;
+    const fit=Math.min(rect.width/nw,1); z.baseW=Math.max(1,Math.round(nw*fit)); z.baseH=Math.max(1,Math.round(nh*fit));
+    img.style.width=z.baseW+"px"; img.style.height=z.baseH+"px"; stage.style.width=z.baseW+"px"; stage.style.height=z.baseH+"px";
+    z.scale=1; z.x=0; z.y=0; apply();
+  }
+  function apply(){
+    const rect=wrap.getBoundingClientRect(); const sw=z.baseW*z.scale, sh=z.baseH*z.scale;
+    z.x=sw<=rect.width?0:clamp(z.x,rect.width-sw,0);
+    z.y=sh<=rect.height?0:clamp(z.y,rect.height-sh,0);
+    stage.style.transform=`translate3d(${z.x}px,${z.y}px,0) scale(${z.scale})`;
+    if(label)label.textContent=Math.round(z.scale*100)+"%";
+  }
+  function zoomAt(next,cx,cy){
+    const rect=wrap.getBoundingClientRect(); const old=z.scale; next=clamp(next,z.min,z.max);
+    const px=(cx??(rect.left+rect.width/2))-rect.left, py=(cy??(rect.top+rect.height/2))-rect.top;
+    const contentX=(px-z.x)/old, contentY=(py-z.y)/old;
+    z.scale=next; z.x=px-contentX*z.scale; z.y=py-contentY*z.scale; apply();
+  }
+  const distance=(a,b)=>Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);
+  const center=(a,b)=>({x:(a.clientX+b.clientX)/2,y:(a.clientY+b.clientY)/2});
+  const two=()=>Array.from(z.pointers.values()).slice(0,2);
+  wrap._expZoomIn=()=>zoomAt(z.scale*1.25);
+  wrap._expZoomOut=()=>zoomAt(z.scale/1.25);
+  wrap._expZoomReset=()=>measure();
+  wrap.addEventListener("pointerdown",e=>{
+    e.preventDefault(); try{wrap.setPointerCapture(e.pointerId)}catch{}
+    z.pointers.set(e.pointerId,{clientX:e.clientX,clientY:e.clientY});
+    if(z.pointers.size===1) z.panStart={clientX:e.clientX,clientY:e.clientY,x:z.x,y:z.y};
+    if(z.pointers.size>=2){const [a,b]=two(); z.pinchStartDist=distance(a,b); z.pinchStartScale=z.scale; z.pinchStartX=z.x; z.pinchStartY=z.y; z.pinchCenter=center(a,b); z.panStart=null;}
+  },{passive:false});
+  wrap.addEventListener("pointermove",e=>{
+    if(!z.pointers.has(e.pointerId))return; e.preventDefault();
+    z.pointers.set(e.pointerId,{clientX:e.clientX,clientY:e.clientY});
+    if(z.pointers.size>=2){
+      const [a,b]=two(); const d=distance(a,b); if(!z.pinchStartDist)return; const c=center(a,b);
+      z.scale=clamp(z.pinchStartScale*(d/z.pinchStartDist),z.min,z.max);
+      const rect=wrap.getBoundingClientRect(); const px=z.pinchCenter.x-rect.left, py=z.pinchCenter.y-rect.top;
+      const ox=(px-z.pinchStartX)/z.pinchStartScale, oy=(py-z.pinchStartY)/z.pinchStartScale;
+      z.x=px-ox*z.scale+(c.x-z.pinchCenter.x); z.y=py-oy*z.scale+(c.y-z.pinchCenter.y); apply(); return;
+    }
+    if(z.panStart){z.x=z.panStart.x+(e.clientX-z.panStart.clientX); z.y=z.panStart.y+(e.clientY-z.panStart.clientY); apply();}
+  },{passive:false});
+  function endPointer(e){z.pointers.delete(e.pointerId); if(z.pointers.size===1){const p=Array.from(z.pointers.values())[0]; z.panStart={clientX:p.clientX,clientY:p.clientY,x:z.x,y:z.y};}else{z.panStart=null;z.pinchStartDist=0;}}
+  wrap.addEventListener("pointerup",endPointer,{passive:false}); wrap.addEventListener("pointercancel",endPointer,{passive:false}); wrap.addEventListener("lostpointercapture",endPointer,{passive:false});
+  img.addEventListener("load",measure,{once:true}); setTimeout(measure,80); window.addEventListener("resize",()=>setTimeout(measure,120));
+}
+function showExplanation(){
+  if(!state.current)return;
+  const hasText=state.current.explanation&&state.current.explanation.trim();
+  const hasImage=state.current.explanationImageData;
+  els.explanationBox.innerHTML="";
+  if(!hasText&&!hasImage){els.explanationBox.textContent="등록된 해설이 없습니다.";}
+  else{
+    if(hasImage){
+      const toolbar=document.createElement("div"); toolbar.className="exp-zoom-toolbar v27";
+      toolbar.innerHTML=`<button class="exp-zoom-btn" type="button" data-exp-zoom="out">축소</button><button class="exp-zoom-btn" type="button" data-exp-zoom="reset">맞춤</button><button class="exp-zoom-btn" type="button" data-exp-zoom="in">확대</button><span class="exp-zoom-label">100%</span>`;
+      const wrap=document.createElement("div"); wrap.className="exp-zoom-wrap v27";
+      const stage=document.createElement("div"); stage.className="exp-zoom-stage v27";
+      const img=document.createElement("img"); img.src=state.current.explanationImageData; img.alt="해설 이미지"; img.className="explanation-image";
+      stage.appendChild(img); wrap.appendChild(stage); els.explanationBox.appendChild(toolbar); els.explanationBox.appendChild(wrap);
+      const label=toolbar.querySelector(".exp-zoom-label"); setupExplanationZoomV27(wrap,stage,img,label);
+      toolbar.querySelector('[data-exp-zoom="in"]').onclick=()=>wrap._expZoomIn?.();
+      toolbar.querySelector('[data-exp-zoom="out"]').onclick=()=>wrap._expZoomOut?.();
+      toolbar.querySelector('[data-exp-zoom="reset"]').onclick=()=>wrap._expZoomReset?.();
+      const hint=document.createElement("div"); hint.className="exp-zoom-hint v27"; hint.textContent="해설 이미지는 두 손가락으로 확대/축소, 확대 후 한 손가락으로 이동"; els.explanationBox.appendChild(hint);
+    }
+    if(hasText){const text=document.createElement("div"); text.className="explanation-text"; text.textContent=state.current.explanation.trim(); els.explanationBox.appendChild(text);}
+  }
+  els.explanationBox.classList.remove("hidden");
+}
+
+
+/* === v28: 중간분류 항목 추가 === */
+function categoryValueV28(value) {
+  return String(value || "").trim();
+}
+function problemCategoryV28(problem) {
+  return categoryValueV28(problem?.category || "");
+}
+function categoryMatchesV28(problem, filter) {
+  const f = categoryValueV28(filter);
+  if (!f) return true;
+  return problemCategoryV28(problem) === f;
+}
+function getCategorySetV28() {
+  return [...new Set(state.problems.map(problemCategoryV28).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, "ko", { numeric: true, sensitivity: "base" }));
+}
+function fillCategorySelectV28(select, keepValue = true) {
+  if (!select) return;
+  const current = keepValue ? select.value : "";
+  select.innerHTML = '<option value="">전체</option>';
+  for (const category of getCategorySetV28()) {
+    const opt = document.createElement("option");
+    opt.value = category;
+    opt.textContent = category;
+    select.appendChild(opt);
+  }
+  if (current && [...select.options].some((option) => option.value === current)) {
+    select.value = current;
+  }
+}
+function populateCategoryFiltersV28() {
+  fillCategorySelectV28($("categoryFilter"));
+  fillCategorySelectV28($("listCategoryFilter"));
+  fillCategorySelectV28($("reviewCategoryFilter"));
+}
+function readFormPreferencesV28() {
+  try { return JSON.parse(localStorage.getItem(FORM_PREF_KEY) || "{}") || {}; }
+  catch { return {}; }
+}
+function saveFormPreferences() {
+  const prefs = {
+    subject: els.subjectInput?.value || "언어",
+    year: normalizedYear(els.yearInput?.value),
+    imageQuality: els.imageQualityInput?.value || "sharp",
+    category: categoryValueV28($("categoryInput")?.value || "")
+  };
+  localStorage.setItem(FORM_PREF_KEY, JSON.stringify(prefs));
+}
+function applyFormPreferences() {
+  const prefs = readFormPreferencesV28();
+  if (els.subjectInput) {
+    const subject = SUBJECT_GROUPS.includes(canonicalSubject(prefs.subject)) ? canonicalSubject(prefs.subject) : "언어";
+    els.subjectInput.value = subject;
+  }
+  if (els.yearInput) els.yearInput.value = normalizedYear(prefs.year);
+  if (els.imageQualityInput) {
+    const quality = ["sharp", "bulk", "original"].includes(prefs.imageQuality) ? prefs.imageQuality : "sharp";
+    els.imageQualityInput.value = quality;
+  }
+  if ($("categoryInput")) $("categoryInput").value = categoryValueV28(prefs.category || "");
+}
+const resetFormV28Original = resetForm;
+resetForm = function() {
+  resetFormV28Original();
+  const prefs = readFormPreferencesV28();
+  if ($("categoryInput")) $("categoryInput").value = categoryValueV28(prefs.category || "");
+};
+const editProblemV28Original = editProblem;
+editProblem = function(problem, options = {}) {
+  editProblemV28Original(problem, options);
+  if ($("categoryInput")) $("categoryInput").value = problemCategoryV28(problem);
 };
 
-/* '답안 수정'으로 풀이화면 복귀 시 숨겨졌던 원본 답안 캔버스를 재계산 */
-function restoreEditableAnswerV28() {
+function filterProblems(mode, subject, year = "") {
+  const targetYear = normalizedYear(year);
+  const category = $("categoryFilter")?.value || "";
+  return state.problems.filter((p) => {
+    if (subject && !subjectMatches(p, subject)) return false;
+    if (!categoryMatchesV28(p, category)) return false;
+    if (targetYear && normalizedYear(p.year) !== targetYear) return false;
+    if (mode === "wrong") return !!p.wrongActive;
+    if (mode === "slow") return averageTime(p) >= SLOW_MS || (p.lastTimeMs || 0) >= SLOW_MS;
+    if (mode === "unseen") return !p.attempts;
+    if (mode === "flagged") return !!p.flagged;
+    return true;
+  });
+}
+function getVisibleProblemList() {
+  const query = els.searchInput.value.trim().toLowerCase();
+  const subject = els.listSubjectFilter.value;
+  const category = $("listCategoryFilter")?.value || "";
+  const year = els.listYearFilter?.value || "";
+  const yearText = els.listYearTextFilter?.value?.trim().toLowerCase() || "";
+  return state.problems.filter((p) => {
+    const problemYear = normalizedYear(p.year);
+    if (subject && !subjectMatches(p, subject)) return false;
+    if (!categoryMatchesV28(p, category)) return false;
+    if (year && problemYear !== year) return false;
+    if (yearText && !problemYear.toLowerCase().includes(yearText)) return false;
+    if (!query) return true;
+    const imageKeyword = problemExplanationPagesV61(p).length ? "해설이미지 스크린샷" : "";
+    const hay = [canonicalSubject(p.subject), p.subject, problemCategoryV28(p), p.year, p.explanation, imageKeyword].join(" ").toLowerCase();
+    return hay.includes(query);
+  });
+}
+function reviewListForMode(mode) {
+  const subject = els.reviewSubjectFilter?.value || "";
+  const category = $("reviewCategoryFilter")?.value || "";
+  const year = els.reviewYearFilter?.value || "";
+  const yearText = (els.reviewYearTextFilter?.value || "").trim().toLowerCase();
+  const applyReviewFilters = (list) => list.filter((p) => {
+    const problemYear = normalizedYear(p.year);
+    if (subject && !subjectMatches(p, subject)) return false;
+    if (!categoryMatchesV28(p, category)) return false;
+    if (year && problemYear !== year) return false;
+    if (yearText && !problemYear.toLowerCase().includes(yearText)) return false;
+    return true;
+  });
+  if (mode === "correct") {
+    return applyReviewFilters(state.problems)
+      .filter((p) => (p.correct || 0) > 0 && !p.wrongActive)
+      .sort((a, b) => (b.lastAnsweredAt || 0) - (a.lastAnsweredAt || 0));
+  }
+  return applyReviewFilters(state.problems)
+    .filter((p) => p.wrongActive)
+    .sort((a, b) => (b.lastAnsweredAt || 0) - (a.lastAnsweredAt || 0));
+}
+const problemItemV28Original = problemItem;
+problemItem = function(p, wrongOnly, displayNumber = "", reviewMode = "") {
+  const div = problemItemV28Original(p, wrongOnly, displayNumber, reviewMode);
+  const category = problemCategoryV28(p);
+  if (category) {
+    const title = div.querySelector("h3");
+    if (title && !title.querySelector(".category-pill")) {
+      title.insertAdjacentHTML("beforeend", ` <span class="category-pill">${escapeHtml(category)}</span>`);
+    }
+  }
+  return div;
+};
+function renderWrongList() {
+  const mode = state.reviewMode || "wrong";
+  const list = reviewListForMode(mode);
+  els.wrongList.innerHTML = "";
+  if (els.reviewListTitle) {
+    const subject = els.reviewSubjectFilter?.value || "전체";
+    const category = $("reviewCategoryFilter")?.value || "전체";
+    const year = els.reviewYearFilter?.value || els.reviewYearTextFilter?.value || "전체";
+    els.reviewListTitle.textContent = `${mode === "correct" ? "정답복습" : "오답복습"} · 대분류 ${subject} · 중간분류 ${category} · 연도/회차 ${year}`;
+  }
+  if (!list.length) {
+    els.wrongList.innerHTML = mode === "correct"
+      ? '<p class="hint">아직 정답복습할 문제가 없어.</p>'
+      : '<p class="hint">현재 복습할 오답이 없어.</p>';
+    return;
+  }
+  for (const p of list) els.wrongList.appendChild(problemItem(p, true, "", mode));
+}
+const refreshV28Original = refresh;
+refresh = async function() {
+  await refreshV28Original();
+  populateCategoryFiltersV28();
+};
+function bindMidCategoryEventsV28() {
+  $("categoryInput")?.addEventListener("input", saveFormPreferences);
+  $("categoryFilter")?.addEventListener("change", () => {});
+  $("listCategoryFilter")?.addEventListener("change", renderProblemList);
+  $("reviewCategoryFilter")?.addEventListener("change", renderWrongList);
+  populateCategoryFiltersV28();
+}
+setTimeout(bindMidCategoryEventsV28, 500);
+
+
+/* === v29: 중간분류도 바로 전 값 유지 === */
+function getCategoryPreferenceV29() {
   try {
-    const index = Number(
-      state.solve?.answerPageIndex ??
-      state.answerPageIndex ??
-      0
-    );
-
-    if (typeof loadAnswerPageV10 === "function") {
-      loadAnswerPageV10(index);
-    }
-
-    if (typeof resetAnswerInkLayerV13 === "function") {
-      resetAnswerInkLayerV13();
-    } else if (typeof resetAnswerInkLayerV10 === "function") {
-      resetAnswerInkLayerV10();
-    }
-
-    if (typeof resizeAnswerCanvasV10 === "function") resizeAnswerCanvasV10();
-    else if (typeof resizeAnswerCanvasV9 === "function") resizeAnswerCanvasV9();
-    else if (typeof resizeAnswerCanvas === "function") resizeAnswerCanvas();
-
-    if (typeof drawAnswerInkV10 === "function") drawAnswerInkV10();
-    else if (typeof drawAnswerInkV9 === "function") drawAnswerInkV9();
-    else if (typeof drawAnswerInk === "function") drawAnswerInk();
-  } catch {}
-}
-
-if (!document.documentElement.dataset.v28BackToAnswerReady) {
-  document.documentElement.dataset.v28BackToAnswerReady = "1";
-
-  document.addEventListener("click", event => {
-    if (!event.target?.closest?.("#backToAnswerBtn")) return;
-
-    // 기존 버튼 동작은 그대로 실행시키고, 화면이 열린 다음 필기층만 재구성
-    [30, 120, 320, 700].forEach(delay => {
-      setTimeout(restoreEditableAnswerV28, delay);
-    });
-  }, true);
-}
-
-window.addEventListener("resize", () => {
-  if (!$("scoreOverlay")?.classList.contains("hidden")) {
-    setTimeout(resetScoreAnswerCanvasV28, 220);
+    const prefs = JSON.parse(localStorage.getItem(FORM_PREF_KEY) || "{}") || {};
+    return categoryValueV28(prefs.category || "");
+  } catch {
+    return "";
   }
-});
+}
+function setCategoryPreferenceV29(category) {
+  let prefs = {};
+  try { prefs = JSON.parse(localStorage.getItem(FORM_PREF_KEY) || "{}") || {}; } catch { prefs = {}; }
+  prefs.category = categoryValueV28(category);
+  if (els.subjectInput) prefs.subject = els.subjectInput.value || prefs.subject || "언어";
+  if (els.yearInput) prefs.year = normalizedYear(els.yearInput.value || prefs.year || "");
+  if (els.imageQualityInput) prefs.imageQuality = els.imageQualityInput.value || prefs.imageQuality || "sharp";
+  localStorage.setItem(FORM_PREF_KEY, JSON.stringify(prefs));
+}
 
+const saveFormPreferencesV29Base = saveFormPreferences;
+saveFormPreferences = function() {
+  saveFormPreferencesV29Base();
+  setCategoryPreferenceV29($("categoryInput")?.value || getCategoryPreferenceV29());
+};
+
+const resetFormV29Base = resetForm;
+resetForm = function() {
+  const keepCategory = categoryValueV28($("categoryInput")?.value || getCategoryPreferenceV29());
+  resetFormV29Base();
+  if ($("categoryInput")) $("categoryInput").value = keepCategory;
+  setCategoryPreferenceV29(keepCategory);
+};
+
+const editProblemV29Base = editProblem;
+editProblem = function(problem, options = {}) {
+  editProblemV29Base(problem, options);
+  const category = problemCategoryV28(problem) || getCategoryPreferenceV29();
+  if ($("categoryInput")) $("categoryInput").value = category;
+  setCategoryPreferenceV29(category);
+};
+
+const saveProblemFromFormV29Base = saveProblemFromForm;
+saveProblemFromForm = async function(event) {
+  const categoryBeforeSave = categoryValueV28($("categoryInput")?.value || getCategoryPreferenceV29());
+  setCategoryPreferenceV29(categoryBeforeSave);
+  await saveProblemFromFormV29Base(event);
+  // 저장 뒤 새 문제 등록 모드로 넘어가도 중간분류 유지
+  if (!$("editingId")?.value && $("categoryInput")) {
+    $("categoryInput").value = categoryBeforeSave;
+    setCategoryPreferenceV29(categoryBeforeSave);
+  }
+};
+
+function bindMidCategoryKeepV29() {
+  const input = $("categoryInput");
+  if (!input) return;
+  input.value = categoryValueV28(input.value || getCategoryPreferenceV29());
+  input.addEventListener("input", () => setCategoryPreferenceV29(input.value));
+  input.addEventListener("change", () => setCategoryPreferenceV29(input.value));
+}
+setTimeout(bindMidCategoryKeepV29, 700);
+
+
+/* === v30: 중간분류 이전 입력값 확실히 유지 === */
+function categoryValueV30(value) {
+  return String(value || "").trim();
+}
+function readPrefsV30() {
+  try { return JSON.parse(localStorage.getItem(FORM_PREF_KEY) || "{}") || {}; }
+  catch { return {}; }
+}
+function writePrefsV30(prefs) {
+  localStorage.setItem(FORM_PREF_KEY, JSON.stringify(prefs || {}));
+}
+function categoryInputV30() {
+  return $("categoryInput");
+}
+function currentCategoryV30() {
+  return categoryValueV30(categoryInputV30()?.value || "");
+}
+function lastCategoryV30() {
+  return categoryValueV30(readPrefsV30().category || localStorage.getItem("psatLastMidCategoryV30") || "");
+}
+function setLastCategoryV30(value) {
+  const category = categoryValueV30(value);
+  const prefs = readPrefsV30();
+  prefs.category = category;
+  prefs.subject = els.subjectInput?.value || prefs.subject || "언어";
+  prefs.year = normalizedYear(els.yearInput?.value ?? prefs.year ?? "");
+  prefs.imageQuality = els.imageQualityInput?.value || prefs.imageQuality || "sharp";
+  writePrefsV30(prefs);
+  localStorage.setItem("psatLastMidCategoryV30", category);
+}
+function saveFormPreferences() {
+  const typedCategory = currentCategoryV30();
+  const prefs = {
+    subject: els.subjectInput?.value || "언어",
+    year: normalizedYear(els.yearInput?.value),
+    imageQuality: els.imageQualityInput?.value || "sharp",
+    // resetForm 내부에서 categoryInput이 잠깐 비어도 직전 중간분류를 날리지 않음
+    category: typedCategory || lastCategoryV30()
+  };
+  writePrefsV30(prefs);
+  localStorage.setItem("psatLastMidCategoryV30", prefs.category || "");
+}
+function applyFormPreferences() {
+  const prefs = readPrefsV30();
+  if (els.subjectInput) {
+    const subject = SUBJECT_GROUPS.includes(canonicalSubject(prefs.subject)) ? canonicalSubject(prefs.subject) : "언어";
+    els.subjectInput.value = subject;
+  }
+  if (els.yearInput) els.yearInput.value = normalizedYear(prefs.year);
+  if (els.imageQualityInput) {
+    const quality = ["sharp", "bulk", "original"].includes(prefs.imageQuality) ? prefs.imageQuality : "sharp";
+    els.imageQualityInput.value = quality;
+  }
+  if (categoryInputV30()) categoryInputV30().value = categoryValueV30(prefs.category || "");
+}
+const resetFormV30Original = resetForm;
+resetForm = function() {
+  const keepCategory = currentCategoryV30() || lastCategoryV30();
+  resetFormV30Original();
+  if (categoryInputV30()) categoryInputV30().value = keepCategory;
+  setLastCategoryV30(keepCategory);
+};
+const editProblemV30Original = editProblem;
+editProblem = function(problem, options = {}) {
+  editProblemV30Original(problem, options);
+  const category = categoryValueV30(problem?.category || "");
+  if (categoryInputV30()) categoryInputV30().value = category;
+  setLastCategoryV30(category);
+  populateCategoryDatalistV30();
+};
+function populateCategoryDatalistV30() {
+  const input = categoryInputV30();
+  if (!input) return;
+  input.setAttribute("list", "categoryDatalistV30");
+  let list = $("categoryDatalistV30");
+  if (!list) {
+    list = document.createElement("datalist");
+    list.id = "categoryDatalistV30";
+    input.insertAdjacentElement("afterend", list);
+  }
+  const values = [...new Set([
+    lastCategoryV30(),
+    ...(state.problems || []).map(p => categoryValueV30(p.category || ""))
+  ].filter(Boolean))].sort((a, b) => a.localeCompare(b, "ko", { numeric: true, sensitivity: "base" }));
+  list.innerHTML = "";
+  for (const value of values) {
+    const option = document.createElement("option");
+    option.value = value;
+    list.appendChild(option);
+  }
+}
+function bindCategoryKeepV30() {
+  const input = categoryInputV30();
+  if (input && !input.dataset.v30KeepReady) {
+    input.dataset.v30KeepReady = "1";
+    input.addEventListener("input", () => {
+      setLastCategoryV30(input.value);
+      try { populateCategoryFiltersV28?.(); } catch {}
+      populateCategoryDatalistV30();
+    });
+    input.addEventListener("change", () => {
+      setLastCategoryV30(input.value);
+      try { populateCategoryFiltersV28?.(); } catch {}
+      populateCategoryDatalistV30();
+    });
+  }
+  populateCategoryDatalistV30();
+}
+const saveProblemFromFormV30Original = saveProblemFromForm;
+saveProblemFromForm = async function(event) {
+  const beforeCategory = currentCategoryV30() || lastCategoryV30();
+  if (categoryInputV30() && !currentCategoryV30()) {
+    categoryInputV30().value = beforeCategory;
+  }
+  setLastCategoryV30(categoryInputV30()?.value || beforeCategory);
+  await saveProblemFromFormV30Original(event);
+  // 새 문제 저장 뒤 원래 resetForm이 돌면서 비우는 문제를 다시 복구
+  const keep = beforeCategory || lastCategoryV30();
+  setTimeout(() => {
+    if (!els.editingId?.value && categoryInputV30()) {
+      categoryInputV30().value = keep;
+      setLastCategoryV30(keep);
+    }
+    bindCategoryKeepV30();
+  }, 80);
+};
+const refreshV30Original = refresh;
+refresh = async function() {
+  await refreshV30Original();
+  bindCategoryKeepV30();
+};
 setTimeout(() => {
-  if (!$("scoreOverlay")?.classList.contains("hidden")) {
-    scheduleScoreAnswerCanvasV28();
+  bindCategoryKeepV30();
+  applyFormPreferences();
+}, 600);
+
+
+/* === v31: 중간분류 빈칸 복귀 버그 강제 보정 === */
+(function midCategoryKeepV31(){
+  const LAST_KEY = "psatLastMidCategoryV31";
+  const OLD_KEYS = ["psatLastMidCategoryV30", "psatLastMidCategoryV29"];
+
+  function catInput() { return document.getElementById("categoryInput"); }
+  function catValue(v) { return String(v || "").trim(); }
+
+  function readPrefs31() {
+    try { return JSON.parse(localStorage.getItem(FORM_PREF_KEY) || "{}") || {}; }
+    catch { return {}; }
   }
-}, 1800);
+  function writePrefs31(prefs) {
+    try { localStorage.setItem(FORM_PREF_KEY, JSON.stringify(prefs || {})); } catch {}
+  }
+  function lastCat31() {
+    const prefs = readPrefs31();
+    const fromPrefs = catValue(prefs.category);
+    const fromNew = catValue(localStorage.getItem(LAST_KEY));
+    const fromOld = OLD_KEYS.map(k => catValue(localStorage.getItem(k))).find(Boolean) || "";
+    return fromPrefs || fromNew || fromOld;
+  }
+  function setLastCat31(value) {
+    const v = catValue(value);
+    if (!v && lastCat31()) return; // 빈값으로 직전값을 지우지 않음
+    const prefs = readPrefs31();
+    prefs.category = v || prefs.category || "";
+    prefs.subject = els.subjectInput?.value || prefs.subject || "언어";
+    prefs.year = normalizedYear(els.yearInput?.value ?? prefs.year ?? "");
+    prefs.imageQuality = els.imageQualityInput?.value || prefs.imageQuality || "sharp";
+    writePrefs31(prefs);
+    try { localStorage.setItem(LAST_KEY, prefs.category || ""); } catch {}
+  }
+  function fillIfBlank31() {
+    const input = catInput();
+    if (!input) return "";
+    const current = catValue(input.value);
+    if (current) {
+      setLastCat31(current);
+      return current;
+    }
+    const keep = lastCat31();
+    if (keep) {
+      input.value = keep;
+      setLastCat31(keep);
+    }
+    return keep;
+  }
+  function updateDatalist31() {
+    const input = catInput();
+    if (!input) return;
+    input.setAttribute("list", "categoryDatalistV31");
+    let list = document.getElementById("categoryDatalistV31");
+    if (!list) {
+      list = document.createElement("datalist");
+      list.id = "categoryDatalistV31";
+      input.insertAdjacentElement("afterend", list);
+    }
+    const values = [...new Set([
+      lastCat31(),
+      ...(state.problems || []).map(p => catValue(p.category))
+    ].filter(Boolean))].sort((a,b) => a.localeCompare(b, "ko", { numeric: true, sensitivity: "base" }));
+    list.innerHTML = "";
+    for (const v of values) {
+      const opt = document.createElement("option");
+      opt.value = v;
+      list.appendChild(opt);
+    }
+  }
+
+  // 기존 저장 preference 함수 자체도 보정
+  if (typeof saveFormPreferences === "function") {
+    const oldSavePrefs31 = saveFormPreferences;
+    saveFormPreferences = function(...args) {
+      const before = fillIfBlank31();
+      const result = oldSavePrefs31.apply(this, args);
+      const input = catInput();
+      const prefs = readPrefs31();
+      prefs.category = catValue(input?.value) || before || prefs.category || "";
+      writePrefs31(prefs);
+      try { localStorage.setItem(LAST_KEY, prefs.category || ""); } catch {}
+      return result;
+    };
+  }
+
+  // 새 문제 초기화 후 빈칸이 되면 즉시 복구
+  if (typeof resetForm === "function") {
+    const oldReset31 = resetForm;
+    resetForm = function(...args) {
+      const keep = fillIfBlank31() || lastCat31();
+      const result = oldReset31.apply(this, args);
+      const input = catInput();
+      if (input && keep) input.value = keep;
+      setLastCat31(keep);
+      updateDatalist31();
+      return result;
+    };
+  }
+
+  // 수정 화면: 해당 문제 중간분류가 있으면 그것, 없으면 직전값
+  if (typeof editProblem === "function") {
+    const oldEdit31 = editProblem;
+    editProblem = function(problem, options = {}) {
+      const result = oldEdit31.call(this, problem, options);
+      const input = catInput();
+      const category = catValue(problem?.category) || lastCat31();
+      if (input && category) input.value = category;
+      setLastCat31(category);
+      updateDatalist31();
+      return result;
+    };
+  }
+
+  // 혹시 submit 이벤트가 이전 함수로 묶여 있어도, 캡처 단계에서 먼저 채움
+  document.addEventListener("submit", (event) => {
+    if (event.target && event.target.id === "problemForm") {
+      const editing = !!document.getElementById("editingId")?.value;
+      if (!editing) fillIfBlank31();
+      updateDatalist31();
+    }
+  }, true);
+
+  document.addEventListener("input", (event) => {
+    if (event.target && event.target.id === "categoryInput") {
+      setLastCat31(event.target.value);
+      updateDatalist31();
+    }
+  }, true);
+
+  document.addEventListener("change", (event) => {
+    if (event.target && event.target.id === "categoryInput") {
+      setLastCat31(event.target.value);
+      updateDatalist31();
+    }
+  }, true);
+
+  // 기존 reset/save 버튼 리스너가 먼저 실행되어도 직후 복구
+  document.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!target) return;
+    const clicked = target.closest?.("#resetFormBtn, #saveProblemBtn, #saveOnlyBtn, #newProblemModeBtn");
+    if (!clicked) return;
+    fillIfBlank31();
+    setTimeout(() => { fillIfBlank31(); updateDatalist31(); }, 80);
+    setTimeout(() => { fillIfBlank31(); updateDatalist31(); }, 350);
+  }, true);
+
+  // 목록/복습/문제풀기 필터는 기존 함수가 다시 그린 뒤에도 채움
+  if (typeof refresh === "function") {
+    const oldRefresh31 = refresh;
+    refresh = async function(...args) {
+      const result = await oldRefresh31.apply(this, args);
+      fillIfBlank31();
+      updateDatalist31();
+      return result;
+    };
+  }
+
+  function boot31() {
+    fillIfBlank31();
+    updateDatalist31();
+  }
+  [100, 400, 900, 1600, 3000].forEach(ms => setTimeout(boot31, ms));
+
+  // addView에서 빈칸으로 돌아가는 순간 계속 복구
+  setInterval(() => {
+    const addView = document.getElementById("addView");
+    const editing = !!document.getElementById("editingId")?.value;
+    const typingCategory = document.activeElement?.id === "categoryInput";
+    if (addView?.classList.contains("active") && !editing && !typingCategory) {
+      fillIfBlank31();
+    }
+  }, 500);
+})();
 
 
-/* === v50: 손가락=이동/확대, 스타일러스=필기, 기본배율 해설창 이동 === */
-/* === v51: 해설 내부 터치 시 바깥 자가채점 스크롤 완전 잠금 === */
-/* 활성 필기 경로(v28 답안수정 / v47 해설 / v26 텍스트해설 / 문제·답안 최신 캔버스)는 pointerType=pen만 stroke 생성. */
-/* === v47: v44 검증된 확대이동 + 기본 native scroll + 확대 경계 scroll-chain === */
-(function essayIsolatedExplanationViewerV47(){
-  const V={
-    scale:1,min:1,max:5,
-    panX:0,panY:0,
-    pointers:new Map(),
-    mode:"",
-    startScale:1,startDist:1,
-    startPanX:0,startPanY:0,
-    startX:0,startY:0,
-    focusLocalX:0,focusLocalY:0,
-    scrollStartTop:0,
-    scrollStartY:0,
-    outerStartTop:0,
-    lockedShellTop:0,
-    raf:0,
-    baseW:0,baseH:0,
-    inkStroke:null,
-    answerTimer:0,
-    textTimer:0
+/* === v32: 대분류별 중간분류 기억 === */
+(function midCategoryBySubjectV32(){
+  const GLOBAL_KEY = "psatLastMidCategoryV32";
+  const BY_SUBJECT_KEY = "psatLastMidCategoryBySubjectV32";
+
+  function input() { return document.getElementById("categoryInput"); }
+  function subjectEl() { return document.getElementById("subjectInput"); }
+  function clean(v) { return String(v || "").trim(); }
+  function subj(v) { 
+    try { return canonicalSubject(v || subjectEl()?.value || "언어"); }
+    catch { return clean(v || subjectEl()?.value || "언어") || "언어"; }
+  }
+  function readPrefs() {
+    try { return JSON.parse(localStorage.getItem(FORM_PREF_KEY) || "{}") || {}; }
+    catch { return {}; }
+  }
+  function writePrefs(p) {
+    try { localStorage.setItem(FORM_PREF_KEY, JSON.stringify(p || {})); } catch {}
+  }
+  function readMap() {
+    try { return JSON.parse(localStorage.getItem(BY_SUBJECT_KEY) || "{}") || {}; }
+    catch { return {}; }
+  }
+  function writeMap(map) {
+    try { localStorage.setItem(BY_SUBJECT_KEY, JSON.stringify(map || {})); } catch {}
+  }
+  function remember(category, subject) {
+    const c = clean(category);
+    if (!c) return;
+    const s = subj(subject);
+    const map = readMap();
+    map[s] = c;
+    writeMap(map);
+    localStorage.setItem(GLOBAL_KEY, c);
+
+    const prefs = readPrefs();
+    prefs.category = c;
+    prefs.categoryBySubject = map;
+    prefs.subject = s;
+    prefs.year = normalizedYear(els.yearInput?.value ?? prefs.year ?? "");
+    prefs.imageQuality = els.imageQualityInput?.value || prefs.imageQuality || "sharp";
+    writePrefs(prefs);
+  }
+  function remembered(subject) {
+    const s = subj(subject);
+    const prefs = readPrefs();
+    const map = Object.assign({}, prefs.categoryBySubject || {}, readMap());
+    return clean(map[s]) ||
+      clean(prefs.category) ||
+      clean(localStorage.getItem(GLOBAL_KEY)) ||
+      clean(localStorage.getItem("psatLastMidCategoryV31")) ||
+      clean(localStorage.getItem("psatLastMidCategoryV30")) ||
+      clean(localStorage.getItem("psatLastMidCategoryV29")) ||
+      "";
+  }
+  function setInput(category) {
+    const el = input();
+    if (!el) return "";
+    const c = clean(category);
+    if (c) el.value = c;
+    return clean(el.value);
+  }
+  function fillBlank(subject) {
+    const el = input();
+    if (!el) return "";
+    const current = clean(el.value);
+    if (current) {
+      remember(current, subject);
+      return current;
+    }
+    return setInput(remembered(subject));
+  }
+  function replaceForSubject(subject) {
+    const el = input();
+    if (!el) return "";
+    const c = remembered(subject);
+    el.value = c || "";
+    if (c) remember(c, subject);
+    return c;
+  }
+  function updateDatalist() {
+    const el = input();
+    if (!el) return;
+    el.setAttribute("list", "categoryDatalistV32");
+    let list = document.getElementById("categoryDatalistV32");
+    if (!list) {
+      list = document.createElement("datalist");
+      list.id = "categoryDatalistV32";
+      el.insertAdjacentElement("afterend", list);
+    }
+    const map = readMap();
+    const values = [...new Set([
+      ...Object.values(map),
+      remembered(subj()),
+      ...(state.problems || []).map(p => clean(p.category))
+    ].filter(Boolean))].sort((a,b) => a.localeCompare(b, "ko", { numeric:true, sensitivity:"base" }));
+    list.innerHTML = "";
+    for (const v of values) {
+      const opt = document.createElement("option");
+      opt.value = v;
+      list.appendChild(opt);
+    }
+  }
+
+  // 기존 saveFormPreferences가 빈칸을 저장하지 못하게 막음
+  if (typeof saveFormPreferences === "function") {
+    const oldSave = saveFormPreferences;
+    saveFormPreferences = function(...args) {
+      const before = fillBlank(subj());
+      const result = oldSave.apply(this, args);
+      const after = clean(input()?.value) || before || remembered(subj());
+      if (after) remember(after, subj());
+      updateDatalist();
+      return result;
+    };
+  }
+
+  if (typeof applyFormPreferences === "function") {
+    const oldApply = applyFormPreferences;
+    applyFormPreferences = function(...args) {
+      const result = oldApply.apply(this, args);
+      fillBlank(subj());
+      updateDatalist();
+      return result;
+    };
+  }
+
+  if (typeof resetForm === "function") {
+    const oldReset = resetForm;
+    resetForm = function(...args) {
+      const s = subj();
+      const keep = clean(input()?.value) || remembered(s);
+      if (keep) remember(keep, s);
+      const result = oldReset.apply(this, args);
+      setTimeout(() => {
+        const ss = subj();
+        const finalKeep = remembered(ss) || keep;
+        if (finalKeep) {
+          setInput(finalKeep);
+          remember(finalKeep, ss);
+        }
+        updateDatalist();
+      }, 0);
+      return result;
+    };
+  }
+
+  if (typeof editProblem === "function") {
+    const oldEdit = editProblem;
+    editProblem = function(problem, options = {}) {
+      const result = oldEdit.call(this, problem, options);
+      const s = subj(problem?.subject || subj());
+      const c = clean(problem?.category) || remembered(s);
+      if (c) {
+        setInput(c);
+        remember(c, s);
+      }
+      updateDatalist();
+      return result;
+    };
+  }
+
+  // 저장 전에는 무조건 빈칸 채움
+  document.addEventListener("submit", (event) => {
+    if (event.target?.id === "problemForm") {
+      const editing = !!document.getElementById("editingId")?.value;
+      if (!editing) fillBlank(subj());
+      updateDatalist();
+    }
+  }, true);
+
+  // 중간분류 직접 입력 시 해당 대분류에 저장
+  document.addEventListener("input", (event) => {
+    if (event.target?.id === "categoryInput") {
+      const c = clean(event.target.value);
+      if (c) remember(c, subj());
+      updateDatalist();
+    }
+  }, true);
+  document.addEventListener("change", (event) => {
+    if (event.target?.id === "categoryInput") {
+      const c = clean(event.target.value);
+      if (c) remember(c, subj());
+      updateDatalist();
+    }
+  }, true);
+
+  // 핵심: 대분류 바뀌면 그 대분류의 마지막 중간분류로 즉시 교체
+  document.addEventListener("change", (event) => {
+    if (event.target?.id === "subjectInput") {
+      const s = subj(event.target.value);
+      replaceForSubject(s);
+      updateDatalist();
+    }
+  }, true);
+
+  // 저장/초기화/새문제 버튼 직후에도 복구
+  document.addEventListener("click", (event) => {
+    const btn = event.target?.closest?.("#saveProblemBtn, #saveOnlyBtn, #resetFormBtn, #newProblemModeBtn");
+    if (!btn) return;
+
+    const editing = !!document.getElementById("editingId")?.value;
+    const isSave = btn.matches?.("#saveProblemBtn, #saveOnlyBtn");
+
+    // 기존 문제 수정 저장 시에는 사용자가 입력한 중간분류를 절대 자동복구로 덮지 않는다.
+    if (editing && isSave) {
+      updateDatalist();
+      return;
+    }
+
+    const s = subj();
+    fillBlank(s);
+    setTimeout(() => {
+      if (!document.getElementById("editingId")?.value &&
+          document.activeElement?.id !== "categoryInput") {
+        fillBlank(subj());
+      }
+      updateDatalist();
+    }, 80);
+    setTimeout(() => {
+      if (!document.getElementById("editingId")?.value &&
+          document.activeElement?.id !== "categoryInput") {
+        fillBlank(subj());
+      }
+      updateDatalist();
+    }, 350);
+  }, true);
+
+  if (typeof refresh === "function") {
+    const oldRefresh = refresh;
+    refresh = async function(...args) {
+      const result = await oldRefresh.apply(this, args);
+      fillBlank(subj());
+      updateDatalist();
+      return result;
+    };
+  }
+
+  function boot() {
+    fillBlank(subj());
+    updateDatalist();
+  }
+  [100, 400, 900, 1800, 3000].forEach(ms => setTimeout(boot, ms));
+
+  setInterval(() => {
+    const add = document.getElementById("addView");
+    const editing = !!document.getElementById("editingId")?.value;
+    const typingCategory = document.activeElement?.id === "categoryInput";
+    if (add?.classList.contains("active") && !editing && !typingCategory) {
+      fillBlank(subj());
+    }
+  }, 500);
+})();
+
+
+/* === v40: 해설 전체화면을 현재 fullscreen host 내부에 생성 === */
+(function psatExplanationFullscreenHostV40(){
+  const view = {
+    scale: 1,
+    x: 0,
+    y: 0,
+    minScale: 0.1,
+    maxScale: 8,
+    touch: null,
+    pointers: new Map(),
+    pointerStart: null,
+    expPageV61: 0,
+    problemIdV61: ""
   };
 
-  const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
-  const shell=()=>document.querySelector("#scoreOverlay .score-shell");
-  const legacyWrap=()=>document.getElementById("scoreExplanationEditWrap");
-  const viewer=()=>document.getElementById("scoreExplanationViewerV47");
-  const viewport=()=>document.getElementById("scoreExplanationViewportV47");
-  const stage=()=>document.getElementById("scoreExplanationStageV47");
-  const image=()=>document.getElementById("scoreExplanationImageV47");
-  const ink=()=>document.getElementById("scoreExplanationInkV47");
+  function q(id) { return document.getElementById(id); }
+  function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
 
-  function currentPagesV47(){
-    try{
-      const p=currentProblem?.();
-      return typeof realPages==="function"
-        ? realPages(p?.explanationPages||[])
-        : (p?.explanationPages||[]).filter(x=>typeof x==="string"&&x.startsWith("data:image/"));
-    }catch{
-      return [];
-    }
+  function currentProblemV40() {
+    try { return state && state.current ? state.current : null; } catch { return null; }
   }
 
-  function currentSrcV47(){
-    const pages=currentPagesV47();
-    if(!pages.length)return "";
-    const idx=clamp(Number(state.expPage||0),0,pages.length-1);
-    return pages[idx]||"";
+  function expPagesV61() {
+    const p = currentProblemV40();
+    if (!p) return [];
+    const pages = Array.isArray(p.explanationImagePages)
+      ? p.explanationImagePages.filter(Boolean)
+      : [];
+    if (pages.length) return pages;
+    return p.explanationImageData ? [p.explanationImageData] : [];
   }
 
-  function inkKeyV47(){
-    try{
-      if(typeof scoreExpKeyV24==="function")return scoreExpKeyV24();
-      if(typeof scoreKeyV11==="function")return scoreKeyV11("exp");
-    }catch{}
-    const p=currentProblem?.();
-    return `${p?.id||"unknown"}:exp:${state.expPage||0}`;
+  function expSrcV40() {
+    const pages = expPagesV61();
+    if (!pages.length) return "";
+    view.expPageV61 = clamp(view.expPageV61, 0, pages.length - 1);
+    return pages[view.expPageV61] || "";
   }
 
-  function inkStoreV47(){
-    if(!state.scoreExpEdits || typeof state.scoreExpEdits!=="object"){
-      state.scoreExpEdits={};
-    }
-    return state.scoreExpEdits;
+  function expTextV40() {
+    return String(currentProblemV40()?.explanation || "").trim();
   }
 
-  function strokesV47(){
-    return inkStoreV47()[inkKeyV47()]||[];
+  function hostV40() {
+    return document.fullscreenElement || q("solvePanel") || document.body;
   }
 
-  function saveInkV47(){
-    try{
-      localStorage.setItem(
-        "essayScoreExpEditsV11",
-        JSON.stringify(state.scoreExpEdits||{})
-      );
-    }catch{}
-  }
+  function ensurePortalV40() {
+    let portal = q("psatExpPortalV40");
+    const host = hostV40();
 
-  function ensureViewerV47(){
-    let v=viewer();
-    if(v)return v;
-
-    const old=legacyWrap();
-    if(!old)return null;
-
-    v=document.createElement("div");
-    v.id="scoreExplanationViewerV47";
-    v.innerHTML=`
-      <div id="scoreExplanationViewportV47">
-        <div id="scoreExplanationStageV47">
-          <img id="scoreExplanationImageV47" alt="해설 이미지" />
-          <canvas id="scoreExplanationInkV47" aria-label="해설 필기"></canvas>
+    if (!portal) {
+      portal = document.createElement("div");
+      portal.id = "psatExpPortalV40";
+      portal.className = "hidden";
+      portal.innerHTML = `
+        <div id="psatExpToolbarV40">
+          <button id="psatExpCloseV40" type="button">닫기</button>
+          <button id="psatExpPrevV61" type="button">이전</button>
+          <span id="psatExpPageLabelV61">1/1</span>
+          <button id="psatExpNextV61" type="button">다음</button>
+          <button id="psatExpZoomOutV40" type="button">축소</button>
+          <button id="psatExpFitV40" type="button">맞춤</button>
+          <button id="psatExpZoomInV40" type="button">확대</button>
+          <span id="psatExpZoomLabelV40">100%</span>
         </div>
-      </div>
-    `;
-    old.insertAdjacentElement("afterend",v);
-
-    bindPointerV47();
-    return v;
-  }
-
-  function setLegacyDisabledV47(){
-    /*
-      기존 해설 영역은 완전히 숨긴다.
-      예전 v11~v34 이벤트/캔버스가 화면 터치를 받을 수 없다.
-    */
-    const old=legacyWrap();
-    if(old){
-      old.style.setProperty("display","none","important");
-      old.style.setProperty("pointer-events","none","important");
-      old.setAttribute("aria-hidden","true");
+        <div id="psatExpStageV40">
+          <img id="psatExpImgV40" alt="해설 전체화면 이미지" />
+        </div>
+      `;
     }
 
-    const oldCanvas=document.getElementById("scoreExplanationCanvas");
-    if(oldCanvas){
-      oldCanvas.style.setProperty("display","none","important");
-      oldCanvas.style.setProperty("pointer-events","none","important");
-      // 숨은 legacy canvas가 큰 bitmap을 유지하지 않게 함.
-      if(oldCanvas.width>8)oldCanvas.width=1;
-      if(oldCanvas.height>8)oldCanvas.height=1;
-    }
-  }
-
-  function makeShellV47(){
-    const s=shell();
-    if(!s)return;
-    s.style.setProperty("height","100dvh","important");
-    s.style.setProperty("max-height","100dvh","important");
-    s.style.setProperty("overflow-y","auto","important");
-    s.style.setProperty("overflow-x","hidden","important");
-    s.style.setProperty("-webkit-overflow-scrolling","touch","important");
-    s.style.setProperty("touch-action","pan-y","important");
-    s.style.setProperty("overscroll-behavior-y","auto","important");
-    s.style.setProperty("padding-bottom","160px","important");
-  }
-
-  function fitBaseV47(force=false){
-    ensureViewerV47();
-    const vp=viewport(),img=image(),st=stage();
-    if(!vp||!img||!st||!img.naturalWidth)return false;
-
-    const w=Math.max(
-      1,
-      Math.floor(
-        vp.clientWidth ||
-        vp.getBoundingClientRect().width ||
-        window.innerWidth-24
-      )
-    );
-
-    if(force||!V.baseW||!V.baseH||Math.abs(V.baseW-w)>2){
-      V.baseW=w;
-      V.baseH=Math.max(
-        1,
-        Math.round(w*img.naturalHeight/Math.max(1,img.naturalWidth))
-      );
+    // 핵심: 브라우저 fullscreen 상태면 body가 아니라 fullscreenElement 안에 넣어야 터치가 먹음
+    if (portal.parentElement !== host) {
+      host.appendChild(portal);
     }
 
-    st.style.width=V.baseW+"px";
-    st.style.height=V.baseH+"px";
-    img.style.width=V.baseW+"px";
-    img.style.height=V.baseH+"px";
-    img.style.maxWidth="none";
-    img.style.maxHeight="none";
-
-    sizeInkBackingV47(false);
-    return true;
+    bindPortalV40();
+    return portal;
   }
 
-  function backingScaleV47(){
-    const pixels=Math.max(1,V.baseW*V.baseH);
-    return Math.max(.30,Math.min(1,Math.sqrt(1_800_000/pixels)));
+  function stageV40() { return q("psatExpStageV40"); }
+  function imgV40() { return q("psatExpImgV40"); }
+
+  function isOpenV40() {
+    const portal = q("psatExpPortalV40");
+    return !!portal && !portal.classList.contains("hidden");
   }
 
-  function sizeInkBackingV47(force=false){
-    const c=ink();
-    if(!c||!V.baseW||!V.baseH)return;
-    const hasInk=strokesV47().length>0;
+  function updateLabelV40() {
+    const label = q("psatExpZoomLabelV40");
+    if (label) label.textContent = Math.round(view.scale * 100) + "%";
 
-    c.style.width=V.baseW+"px";
-    c.style.height=V.baseH+"px";
+    const pages = expPagesV61();
+    const total = Math.max(1, pages.length);
+    const pageLabel = q("psatExpPageLabelV61");
+    if (pageLabel) pageLabel.textContent = `${view.expPageV61 + 1}/${total}`;
 
-    if(!hasInk&&!force){
-      c.width=1;
-      c.height=1;
-      c.dataset.scaleV47="0";
+    const prev = q("psatExpPrevV61");
+    const next = q("psatExpNextV61");
+    if (prev) prev.disabled = pages.length <= 1 || view.expPageV61 <= 0;
+    if (next) next.disabled = pages.length <= 1 || view.expPageV61 >= pages.length - 1;
+  }
+
+  function applyV40() {
+    const img = imgV40();
+    if (!img) return;
+    img.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.scale})`;
+    updateLabelV40();
+  }
+
+  function fitV40() {
+    const st = stageV40();
+    const img = imgV40();
+    if (!st || !img || !img.naturalWidth || !img.naturalHeight) return;
+    const sw = Math.max(1, st.clientWidth);
+    const sh = Math.max(1, st.clientHeight);
+    const iw = img.naturalWidth;
+    const ih = img.naturalHeight;
+    const s = Math.min(sw / iw, sh / ih);
+
+    view.minScale = Math.max(0.05, s * 0.4);
+    view.scale = Math.max(0.05, s);
+    view.x = (sw - iw * view.scale) / 2;
+    view.y = (sh - ih * view.scale) / 2;
+    applyV40();
+  }
+
+  function zoomAtV40(mult, clientX, clientY) {
+    const st = stageV40();
+    if (!st) return;
+    const rect = st.getBoundingClientRect();
+    const px = clientX == null ? rect.left + rect.width / 2 : clientX;
+    const py = clientY == null ? rect.top + rect.height / 2 : clientY;
+    const localX = px - rect.left;
+    const localY = py - rect.top;
+    const old = view.scale || 1;
+    const next = clamp(old * mult, view.minScale, view.maxScale);
+    const imageX = (localX - view.x) / old;
+    const imageY = (localY - view.y) / old;
+
+    view.scale = next;
+    view.x = localX - imageX * next;
+    view.y = localY - imageY * next;
+    applyV40();
+  }
+
+  function setExplanationPageV61(index) {
+    const pages = expPagesV61();
+    if (!pages.length) return;
+
+    view.expPageV61 = clamp(Number(index || 0), 0, pages.length - 1);
+    view.touch = null;
+    view.pointers.clear();
+    view.pointerStart = null;
+
+    const img = imgV40();
+    if (img) {
+      img.onload = () => setTimeout(fitV40, 20);
+      img.src = pages[view.expPageV61];
+    }
+    updateLabelV40();
+    setTimeout(fitV40, 80);
+  }
+
+  function openPortalV40(src) {
+    const portal = ensurePortalV40();
+    const img = imgV40();
+    const pages = expPagesV61();
+
+    if (src && pages.length) {
+      const found = pages.indexOf(src);
+      if (found >= 0) view.expPageV61 = found;
+    }
+
+    src = pages[view.expPageV61] || src || "";
+
+    if (!portal || !img || !src) {
+      try { showToast("해설 이미지가 없어"); } catch {}
       return;
     }
 
-    const d=backingScaleV47();
-    const bw=Math.max(1,Math.round(V.baseW*d));
-    const bh=Math.max(1,Math.round(V.baseH*d));
-    if(c.width!==bw||c.height!==bh||Number(c.dataset.scaleV47||0)!==d){
-      c.width=bw;
-      c.height=bh;
-      c.dataset.scaleV47=String(d);
-    }
-    drawInkV47();
+    view.touch = null;
+    view.pointers.clear();
+    view.pointerStart = null;
+
+    img.onload = () => setTimeout(fitV40, 30);
+    img.src = src;
+
+    portal.classList.remove("hidden");
+    document.documentElement.classList.add("psat-exp-v40-open");
+    document.body.classList.add("psat-exp-v40-open");
+
+    setTimeout(() => {
+      ensurePortalV40();
+      fitV40();
+    }, 80);
+    setTimeout(fitV40, 300);
   }
 
-  function drawInkV47(){
-    const c=ink();
-    if(!c||!V.baseW||!V.baseH)return;
-    const arr=strokesV47();
-    if(!arr.length){
-      if(c.width>1||c.height>1){
-        const ctx=c.getContext("2d");
-        ctx.clearRect(0,0,c.width,c.height);
+  function closePortalV40() {
+    q("psatExpPortalV40")?.classList.add("hidden");
+    document.documentElement.classList.remove("psat-exp-v40-open");
+    document.body.classList.remove("psat-exp-v40-open");
+    view.touch = null;
+    view.pointers.clear();
+    view.pointerStart = null;
+  }
+
+  function pointFromTouch(t) { return { x: t.clientX, y: t.clientY }; }
+  function pointFromPointer(e) { return { x: e.clientX, y: e.clientY, id: e.pointerId }; }
+  function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y) || 1; }
+  function mid(a, b) { return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
+
+  function startGestureV40(points) {
+    const st = stageV40();
+    if (!st || !points.length) return;
+    if (points.length >= 2) {
+      const a = points[0], b = points[1], c = mid(a, b);
+      view.touch = {
+        mode: "pinch",
+        startDist: Math.max(1, dist(a, b)),
+        startScale: view.scale,
+        centerX: c.x,
+        centerY: c.y,
+        baseX: view.x,
+        baseY: view.y
+      };
+    } else {
+      const a = points[0];
+      view.touch = {
+        mode: "pan",
+        startX: a.x,
+        startY: a.y,
+        baseX: view.x,
+        baseY: view.y
+      };
+    }
+  }
+
+  function moveGestureV40(points) {
+    const st = stageV40();
+    if (!st || !points.length) return;
+
+    if (points.length >= 2) {
+      if (!view.touch || view.touch.mode !== "pinch") {
+        startGestureV40(points);
+        return;
       }
+
+      const a = points[0], b = points[1], c = mid(a, b);
+      const start = view.touch;
+      const rect = st.getBoundingClientRect();
+
+      view.scale = clamp(start.startScale * dist(a, b) / start.startDist, view.minScale, view.maxScale);
+
+      const startLocalX = start.centerX - rect.left;
+      const startLocalY = start.centerY - rect.top;
+      const imageX = (startLocalX - start.baseX) / start.startScale;
+      const imageY = (startLocalY - start.baseY) / start.startScale;
+
+      view.x = (c.x - rect.left) - imageX * view.scale;
+      view.y = (c.y - rect.top) - imageY * view.scale;
+      applyV40();
       return;
     }
 
-    const d=Number(c.dataset.scaleV47||backingScaleV47());
-    const ctx=c.getContext("2d");
-    ctx.setTransform(d,0,0,d,0,0);
-    ctx.clearRect(0,0,V.baseW,V.baseH);
+    if (points.length === 1) {
+      if (!view.touch || view.touch.mode !== "pan") {
+        startGestureV40(points);
+        return;
+      }
+      const a = points[0];
+      view.x = view.touch.baseX + (a.x - view.touch.startX);
+      view.y = view.touch.baseY + (a.y - view.touch.startY);
+      applyV40();
+    }
+  }
 
-    for(const stroke of arr){
-      if(!stroke?.points?.length)continue;
-      ctx.save();
-      ctx.globalCompositeOperation=
-        stroke.tool==="eraser"?"destination-out":"source-over";
-      ctx.lineCap="round";
-      ctx.lineJoin="round";
-      ctx.strokeStyle=
-        stroke.tool==="eraser"?"rgba(0,0,0,1)":"#0ea5e9";
-      ctx.lineWidth=Number(stroke.size||4);
-      ctx.beginPath();
-      stroke.points.forEach((pt,n)=>{
-        const x=pt.x*V.baseW;
-        const y=pt.y*V.baseH;
-        if(n===0)ctx.moveTo(x,y);
-        else ctx.lineTo(x,y);
+  function isToolbarTargetV40(e) {
+    return !!e.target?.closest?.("#psatExpToolbarV40");
+  }
+
+  function touchStartV40(e) {
+    if (!isOpenV40() || isToolbarTargetV40(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+    startGestureV40(Array.from(e.touches).map(pointFromTouch));
+  }
+
+  function touchMoveV40(e) {
+    if (!isOpenV40() || isToolbarTargetV40(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+    moveGestureV40(Array.from(e.touches).map(pointFromTouch));
+  }
+
+  function touchEndV40(e) {
+    if (!isOpenV40() || isToolbarTargetV40(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+    const points = Array.from(e.touches).map(pointFromTouch);
+    if (points.length) startGestureV40(points);
+    else view.touch = null;
+  }
+
+  function pointerDownV40(e) {
+    if (!isOpenV40() || isToolbarTargetV40(e)) return;
+    if (e.pointerType === "mouse") return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+    view.pointers.set(e.pointerId, pointFromPointer(e));
+    try { stageV40()?.setPointerCapture?.(e.pointerId); } catch {}
+    startGestureV40(Array.from(view.pointers.values()));
+  }
+
+  function pointerMoveV40(e) {
+    if (!isOpenV40() || isToolbarTargetV40(e)) return;
+    if (!view.pointers.has(e.pointerId)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+    view.pointers.set(e.pointerId, pointFromPointer(e));
+    moveGestureV40(Array.from(view.pointers.values()));
+  }
+
+  function pointerEndV40(e) {
+    if (!view.pointers.has(e.pointerId)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+    view.pointers.delete(e.pointerId);
+    const points = Array.from(view.pointers.values());
+    if (points.length) startGestureV40(points);
+    else view.touch = null;
+  }
+
+  function bindPortalV40() {
+    q("psatExpCloseV40") && (q("psatExpCloseV40").onclick = closePortalV40);
+    q("psatExpPrevV61") && (q("psatExpPrevV61").onclick = () => setExplanationPageV61(view.expPageV61 - 1));
+    q("psatExpNextV61") && (q("psatExpNextV61").onclick = () => setExplanationPageV61(view.expPageV61 + 1));
+    q("psatExpFitV40") && (q("psatExpFitV40").onclick = fitV40);
+    q("psatExpZoomInV40") && (q("psatExpZoomInV40").onclick = () => zoomAtV40(1.25));
+    q("psatExpZoomOutV40") && (q("psatExpZoomOutV40").onclick = () => zoomAtV40(0.8));
+
+    const st = stageV40();
+    if (st && !st.dataset.v40Ready) {
+      st.dataset.v40Ready = "1";
+      st.addEventListener("touchstart", touchStartV40, { capture: true, passive: false });
+      st.addEventListener("touchmove", touchMoveV40, { capture: true, passive: false });
+      st.addEventListener("touchend", touchEndV40, { capture: true, passive: false });
+      st.addEventListener("touchcancel", touchEndV40, { capture: true, passive: false });
+      st.addEventListener("pointerdown", pointerDownV40, { capture: true, passive: false });
+      st.addEventListener("pointermove", pointerMoveV40, { capture: true, passive: false });
+      st.addEventListener("pointerup", pointerEndV40, { capture: true, passive: false });
+      st.addEventListener("pointercancel", pointerEndV40, { capture: true, passive: false });
+      st.addEventListener("lostpointercapture", pointerEndV40, { capture: true, passive: false });
+    }
+
+    if (!document.documentElement.dataset.v40GlobalReady) {
+      document.documentElement.dataset.v40GlobalReady = "1";
+      window.addEventListener("resize", () => {
+        if (isOpenV40()) setTimeout(fitV40, 120);
       });
-      ctx.stroke();
-      ctx.restore();
-    }
-  }
-
-  function limitsV47(){
-    const vp=viewport();
-    if(!vp)return {minX:0,maxX:0,minY:0,maxY:0};
-
-    const cw=V.baseW*V.scale;
-    const ch=V.baseH*V.scale;
-    const vw=vp.clientWidth;
-    const vh=vp.clientHeight;
-
-    return {
-      minX:Math.min(0,vw-cw),
-      maxX:0,
-      minY:Math.min(0,vh-ch),
-      maxY:0
-    };
-  }
-
-  function clampPanV47(){
-    const l=limitsV47();
-    V.panX=clamp(V.panX,l.minX,l.maxX);
-    V.panY=clamp(V.panY,l.minY,l.maxY);
-  }
-
-  function applyTransformV47(){
-    V.raf=0;
-    const v=viewer(),vp=viewport(),st=stage();
-    if(!v||!vp||!st||!V.baseW||!V.baseH)return;
-
-    if(V.scale<=1.001){
-      V.scale=1;
-      V.panX=0;
-      v.classList.remove("v47-zoomed");
-
-      // v50: 기본배율에서도 문제화면처럼 해설창 안에서 위/아래 이동.
-      let baseVh=Math.max(
-        280,
-        Math.floor((window.visualViewport?.height||window.innerHeight)*.72)
-      );
-      const paneV58=vp.closest(".score-box");
-      const overlayV58=document.getElementById("scoreOverlay");
-      if(overlayV58?.classList.contains("v58-one-screen") && paneV58){
-        const paneRectV58=paneV58.getBoundingClientRect();
-        const vpRectV58=vp.getBoundingClientRect();
-        baseVh=Math.max(
-          120,
-          Math.floor(paneRectV58.bottom-vpRectV58.top-8)
-        );
-      }
-      vp.style.height=baseVh+"px";
-      vp.style.setProperty("touch-action","none","important");
-      clampPanV47();
-      st.style.transform=
-        `translate3d(0px,${V.panY}px,0) scale(1)`;
-    }else{
-      v.classList.add("v47-zoomed");
-      let vh=Math.max(
-        280,
-        Math.floor((window.visualViewport?.height||window.innerHeight)*.72)
-      );
-      const paneV58=vp.closest(".score-box");
-      const overlayV58=document.getElementById("scoreOverlay");
-      if(overlayV58?.classList.contains("v58-one-screen") && paneV58){
-        const paneRectV58=paneV58.getBoundingClientRect();
-        const vpRectV58=vp.getBoundingClientRect();
-        vh=Math.max(
-          120,
-          Math.floor(paneRectV58.bottom-vpRectV58.top-8)
-        );
-      }
-      vp.style.height=vh+"px";
-      // 확대 후 새 손가락 제스처는 이미지 상하좌우 pan이 전담.
-      vp.style.setProperty("touch-action","none","important");
-      clampPanV47();
-      st.style.transform=
-        `translate3d(${V.panX}px,${V.panY}px,0) scale(${V.scale})`;
-    }
-  }
-
-  function scheduleTransformV47(){
-    if(!V.raf)V.raf=requestAnimationFrame(applyTransformV47);
-  }
-
-  function pointerListV47(){
-    return [...V.pointers.values()];
-  }
-
-  function distanceV47(){
-    const p=pointerListV47();
-    if(p.length<2)return 1;
-    return Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y)||1;
-  }
-
-  function midpointV47(){
-    const p=pointerListV47();
-    if(p.length<2)return {x:0,y:0};
-    return {x:(p[0].x+p[1].x)/2,y:(p[0].y+p[1].y)/2};
-  }
-
-  function startPinchV47(){
-    const vp=viewport();
-    if(!vp)return;
-    const m=midpointV47();
-    const r=vp.getBoundingClientRect();
-
-    V.mode="pinch";
-    V.startDist=distanceV47();
-    V.startScale=V.scale;
-    V.startPanX=V.panX;
-    V.startPanY=V.panY;
-
-    const localX=m.x-r.left;
-    const localY=m.y-r.top;
-    V.focusLocalX=(localX-V.panX)/Math.max(.0001,V.scale);
-    V.focusLocalY=(localY-V.panY)/Math.max(.0001,V.scale);
-  }
-
-  function startPanV47(){
-    const p=pointerListV47()[0];
-    if(!p)return;
-    V.mode="pan";
-    V.startX=p.x;
-    V.startY=p.y;
-    V.startPanX=V.panX;
-    V.startPanY=V.panY;
-    V.outerStartTop=shell()?.scrollTop||0;
-    // v51: 해설 안을 터치한 동안 바깥 자가채점 화면 위치 고정
-    V.lockedShellTop=V.outerStartTop;
-  }
-
-  function startOuterScrollV47(){
-    const p=pointerListV47()[0];
-    const s=shell();
-    if(!p||!s)return;
-    V.mode="outer-scroll";
-    V.scrollStartY=p.y;
-    V.scrollStartTop=s.scrollTop;
-  }
-
-  function penPointV47(event){
-    const st=stage();
-    const r=st.getBoundingClientRect();
-    return {
-      x:clamp((event.clientX-r.left)/Math.max(1,r.width),0,1),
-      y:clamp((event.clientY-r.top)/Math.max(1,r.height),0,1)
-    };
-  }
-
-  function handlePenDownV47(event){
-    event.preventDefault();
-    event.stopPropagation();
-
-    const tool=state.scoreExpEditTool==="eraser"?"eraser":"pen";
-    const size=Number(
-      state.scoreExpSize ||
-      document.getElementById("scoreExpSizeInput")?.value ||
-      4
-    )*(tool==="eraser"?5:1);
-
-    V.inkStroke={
-      tool,
-      size,
-      points:[penPointV47(event)]
-    };
-
-    const store=inkStoreV47();
-    const key=inkKeyV47();
-    if(!store[key])store[key]=[];
-    store[key].push(V.inkStroke);
-
-    sizeInkBackingV47(true);
-    drawInkV47();
-  }
-
-  function bindPointerV47(){
-    const vp=viewport();
-    if(!vp||vp.dataset.boundV47)return;
-    vp.dataset.boundV47="1";
-
-    /*
-      v47 원칙
-      - 100% + 손가락 1개: 해설창 안에서 위/아래 pan
-      - 손가락 2개: pinch 확대/축소
-      - 확대 후 손가락 1개: 상하좌우 pan
-      - 해설칸 안을 터치한 동안 바깥 score-shell은 고정
-    */
-    vp.addEventListener("pointerdown",event=>{
-      if(event.pointerType==="pen"){
-        try{vp.setPointerCapture(event.pointerId)}catch{}
-        handlePenDownV47(event);
-        return;
-      }
-      if(event.pointerType!=="touch")return;
-
-      V.pointers.set(event.pointerId,{x:event.clientX,y:event.clientY});
-
-      if(V.pointers.size>=2){
-        event.preventDefault();
-        event.stopPropagation();
-        try{vp.setPointerCapture(event.pointerId)}catch{}
-        // 첫 번째 손가락도 가능하면 capture해서 pinch 중 pointercancel을 줄임.
-        for(const id of V.pointers.keys())try{vp.setPointerCapture(id)}catch{}
-        startPinchV47();
-        return;
-      }
-
-      // v50: 손가락 1개는 배율과 관계없이 해설창 이동 전용.
-      // 스타일러스(pointerType=pen)만 필기한다.
-      event.preventDefault();
-      event.stopPropagation();
-      try{vp.setPointerCapture(event.pointerId)}catch{}
-      startPanV47();
-    },true);
-
-    vp.addEventListener("pointermove",event=>{
-      if(event.pointerType==="pen"){
-        if(!V.inkStroke)return;
-        event.preventDefault();
-        event.stopPropagation();
-        V.inkStroke.points.push(penPointV47(event));
-        drawInkV47();
-        return;
-      }
-      if(event.pointerType!=="touch"||!V.pointers.has(event.pointerId))return;
-      V.pointers.set(event.pointerId,{x:event.clientX,y:event.clientY});
-
-      if(V.pointers.size>=2){
-        event.preventDefault();
-        event.stopPropagation();
-        if(V.mode!=="pinch")startPinchV47();
-
-        const next=clamp(
-          V.startScale*(distanceV47()/Math.max(1,V.startDist)),
-          V.min,V.max
-        );
-        V.scale=next<1.02?1:next;
-
-        const m=midpointV47();
-        const r=vp.getBoundingClientRect();
-        const lx=m.x-r.left;
-        const ly=m.y-r.top;
-        V.panX=lx-V.focusLocalX*V.scale;
-        V.panY=ly-V.focusLocalY*V.scale;
-        clampPanV47();
-        scheduleTransformV47();
-        return;
-      }
-
-      // v50: 100%에서도 한 손가락으로 해설창을 위/아래 이동.
-      // 확대된 상태에서는 상하좌우 이동.
-      event.preventDefault();
-      event.stopPropagation();
-      const p=pointerListV47()[0];
-      if(!p)return;
-      if(V.mode!=="pan")startPanV47();
-
-      const rawX=V.scale>1.001
-        ? V.startPanX+(p.x-V.startX)
-        : 0;
-      const rawY=V.startPanY+(p.y-V.startY);
-      const lim=limitsV47();
-      const clampedX=clamp(rawX,lim.minX,lim.maxX);
-      const clampedY=clamp(rawY,lim.minY,lim.maxY);
-
-      V.panX=clampedX;
-      V.panY=clampedY;
-
-      // v51: 해설칸 안에서는 절대로 바깥 score-shell로 스크롤을 넘기지 않는다.
-      // 이미지 끝에 닿으면 그 자리에서 멈춘다.
-      const s=shell();
-      if(s && Math.abs(s.scrollTop-V.lockedShellTop)>.5){
-        s.scrollTop=V.lockedShellTop;
-      }
-      scheduleTransformV47();
-    },true);
-
-    function endPointerV47(event){
-      if(event.pointerType==="pen"){
-        if(V.inkStroke){
-          event.preventDefault();
-          V.inkStroke=null;
-          saveInkV47();
+      document.addEventListener("fullscreenchange", () => {
+        if (isOpenV40()) {
+          ensurePortalV40();
+          setTimeout(fitV40, 100);
         }
-        return;
-      }
-      if(event.pointerType!=="touch"||!V.pointers.has(event.pointerId))return;
-
-      event.preventDefault();
-      V.pointers.delete(event.pointerId);
-
-      if(V.pointers.size>=2){
-        startPinchV47();
-      }else if(V.pointers.size===1){
-        startPanV47();
-      }else{
-        V.mode="";
-      }
-
-      if(V.scale<=1.001){
-        V.scale=1;
-        V.panX=0;
-        clampPanV47();
-        scheduleTransformV47();
-      }
+      });
     }
-
-    vp.addEventListener("pointerup",endPointerV47,true);
-    vp.addEventListener("pointercancel",endPointerV47,true);
-    vp.addEventListener("lostpointercapture",endPointerV47,true);
   }
 
-  function loadCurrentImageV47(force=false){
-    ensureViewerV47();
-    setLegacyDisabledV47();
-    makeShellV47();
+  function renderExplanationV40() {
+    const box = q("explanationBox");
+    const p = currentProblemV40();
 
-    const v=viewer(),img=image();
-    if(!v||!img)return;
-
-    const src=currentSrcV47();
-    if(!src){
-      v.style.setProperty("display","none","important");
+    if (!box || !p) {
+      try { showToast("현재 문제가 없어"); } catch {}
       return;
     }
 
-    v.style.setProperty("display","block","important");
+    const pages = expPagesV61();
+    const text = expTextV40();
 
-    const finish=()=>{
-      if(!img.naturalWidth)return;
-      fitBaseV47(force);
-      drawInkV47();
-      scheduleTransformV47();
-    };
-
-    if(img.src!==src){
-      img.onload=finish;
-      img.src=src;
-    }else{
-      finish();
+    if (view.problemIdV61 !== String(p.id || "")) {
+      view.problemIdV61 = String(p.id || "");
+      view.expPageV61 = 0;
     }
-  }
 
-  function resetViewerV47(){
-    V.scale=1;
-    V.panX=0;
-    V.panY=0;
-    V.pointers.clear();
-    V.mode="";
-    loadCurrentImageV47(true);
-  }
-
-  /* legacy 해설 캔버스/gesture를 더 이상 만들지 않도록 전부 무력화 */
-  function noLegacyExpV47(){
-    setLegacyDisabledV47();
-    loadCurrentImageV47(false);
-  }
-
-  try{resetScoreExplanationCanvasV24=noLegacyExpV47}catch{}
-  try{sizeScoreExplanationCanvasV24=()=>false}catch{}
-  try{drawScoreExplanationCanvasV24=()=>{}}catch{}
-  try{resetScoreExplanationCanvasV14=noLegacyExpV47}catch{}
-  try{resetScoreExplanationCanvasV13=noLegacyExpV47}catch{}
-  try{resetScoreExplanationCanvasV12=noLegacyExpV47}catch{}
-  try{resetScoreExplanationCanvasV11=noLegacyExpV47}catch{}
-  try{fitExplanationAndCanvasV14=noLegacyExpV47}catch{}
-  try{fitScoreExplanationV12=noLegacyExpV47}catch{}
-
-  /*
-    v28은 채점 화면을 열면서 답안 캔버스를 5번 재생성한다.
-    이 반복 작업도 한 번으로 줄여 스크롤 시작 직후의 버벅임 제거.
-  */
-  if(typeof resetScoreAnswerCanvasV28==="function"){
-    const realAnswerResetV47=resetScoreAnswerCanvasV28;
-    scheduleScoreAnswerCanvasV28=function(){
-      clearTimeout(V.answerTimer);
-      V.answerTimer=setTimeout(()=>{
-        try{realAnswerResetV47()}catch{}
-      },40);
-    };
-  }
-
-  /*
-    텍스트 해설 캔버스도 여러 차례 다시 그리지 않도록 debounce.
-  */
-  if(typeof resetScoreModelTextCanvasV26==="function"){
-    const realTextResetV47=resetScoreModelTextCanvasV26;
-    resetScoreModelTextCanvasV26=function(){
-      clearTimeout(V.textTimer);
-      V.textTimer=setTimeout(()=>{
-        try{realTextResetV47()}catch{}
-      },60);
-    };
-  }
-
-  /* 해설 펜/지우개 버튼은 새 viewer state만 사용 */
-  document.addEventListener("click",event=>{
-    const pen=event.target?.closest?.("#scoreExpPenBtn");
-    if(pen){
-      state.scoreExpEditTool="pen";
-      return;
+    if (pages.length) {
+      view.expPageV61 = clamp(view.expPageV61, 0, pages.length - 1);
+    } else {
+      view.expPageV61 = 0;
     }
-    const eraser=event.target?.closest?.("#scoreExpEraserBtn");
-    if(eraser){
-      state.scoreExpEditTool="eraser";
-      return;
+
+    const src = expSrcV40();
+
+    box.classList.remove("hidden");
+    box.innerHTML = "";
+
+    if (pages.length) {
+      const nav = document.createElement("div");
+      nav.className = "exp-page-nav-v61";
+
+      const prev = document.createElement("button");
+      prev.type = "button";
+      prev.className = "secondary";
+      prev.textContent = "이전";
+      prev.disabled = view.expPageV61 <= 0;
+
+      const badge = document.createElement("span");
+      badge.className = "badge";
+      badge.textContent = `해설 ${view.expPageV61 + 1}/${pages.length}쪽`;
+
+      const next = document.createElement("button");
+      next.type = "button";
+      next.className = "secondary";
+      next.textContent = "다음";
+      next.disabled = view.expPageV61 >= pages.length - 1;
+
+      const fullscreen = document.createElement("button");
+      fullscreen.id = "expOpenFullscreenV40";
+      fullscreen.type = "button";
+      fullscreen.className = "secondary exp-open-btn-v40";
+      fullscreen.textContent = "전체화면";
+
+      prev.addEventListener("click", e => {
+        e.preventDefault();
+        e.stopPropagation();
+        view.expPageV61 = Math.max(0, view.expPageV61 - 1);
+        renderExplanationV40();
+      });
+
+      next.addEventListener("click", e => {
+        e.preventDefault();
+        e.stopPropagation();
+        view.expPageV61 = Math.min(pages.length - 1, view.expPageV61 + 1);
+        renderExplanationV40();
+      });
+
+      fullscreen.addEventListener("click", e => {
+        e.preventDefault();
+        e.stopPropagation();
+        openPortalV40(expSrcV40());
+      });
+
+      nav.append(prev, badge, next, fullscreen);
+      box.appendChild(nav);
+
+      const img = document.createElement("img");
+      img.className = "explanation-v40-img";
+      img.alt = `해설 ${view.expPageV61 + 1}쪽`;
+      img.src = src;
+      img.addEventListener("click", () => openPortalV40(src));
+      box.appendChild(img);
+
+      setTimeout(() => openPortalV40(src), 30);
     }
-    const clear=event.target?.closest?.("#clearScoreExpInkBtn");
-    if(clear){
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
 
-      if(!confirm("현재 해설 필기를 지울까?"))return;
-      const store=inkStoreV47();
-      delete store[inkKeyV47()];
-      saveInkV47();
-      sizeInkBackingV47(false);
-      drawInkV47();
+    if (text) {
+      const div = document.createElement("div");
+      div.className = "explanation-v40-text";
+      div.textContent = text;
+      box.appendChild(div);
     }
-  },true);
 
-  /* 문제풀이 화면 핀치는 v34 설명부와 분리해서 유지 */
-  function ensureSolvePinchV47(){
-    const h=document.getElementById("questionImageScroller");
-    if(!h||h.dataset.solvePinchV47)return;
-    h.dataset.solvePinchV47="1";
+    if (!pages.length && !text) {
+      box.innerHTML = '<p class="hint">등록된 해설이 없어.</p>';
+    }
 
-    let startDist=0,startZoom=1;
-    h.addEventListener("touchstart",e=>{
-      if(e.touches.length<2)return;
-      e.preventDefault();
-      startDist=Math.hypot(
-        e.touches[0].clientX-e.touches[1].clientX,
-        e.touches[0].clientY-e.touches[1].clientY
-      )||1;
-      startZoom=Number(state.zoom||1);
-    },{passive:false,capture:true});
-
-    h.addEventListener("touchmove",e=>{
-      if(e.touches.length<2||!startDist)return;
-      e.preventDefault();
-      const d=Math.hypot(
-        e.touches[0].clientX-e.touches[1].clientX,
-        e.touches[0].clientY-e.touches[1].clientY
-      )||1;
-      state.zoom=clamp(startZoom*(d/startDist),.35,6);
-      try{applyZoom()}catch{}
-      try{resizeInkCanvas()}catch{}
-      try{drawInk()}catch{}
-    },{passive:false,capture:true});
-
-    const end=()=>{startDist=0};
-    h.addEventListener("touchend",end,{passive:true});
-    h.addEventListener("touchcancel",end,{passive:true});
+    ensurePortalV40();
+    updateLabelV40();
   }
 
-  const openScoreBeforeV47=openScore;
-  openScore=function(){
-    V.scale=1;
-    V.panX=0;
-    V.panY=0;
-    openScoreBeforeV47();
-    ensureViewerV47();
-    setLegacyDisabledV47();
-    makeShellV47();
-    loadCurrentImageV47(true);
-    setTimeout(()=>loadCurrentImageV47(false),120);
-  };
+  // 기존 showExplanation 이벤트가 실행되기 전에 차단
+  document.addEventListener("click", (e) => {
+    const btn = e.target?.closest?.("#showExpBtn, #expOpenFullscreenV40");
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+    if (btn.id === "expOpenFullscreenV40") openPortalV40(expSrcV40());
+    else renderExplanationV40();
+  }, true);
 
-  const showExplanationPageBeforeV47=showExplanationPage;
-  showExplanationPage=function(index){
-    V.scale=1;
-    V.panX=0;
-    V.panY=0;
-    showExplanationPageBeforeV47(index);
-    loadCurrentImageV47(true);
-    setTimeout(()=>loadCurrentImageV47(false),100);
-  };
+  try {
+    window.showExplanation = renderExplanationV40;
+    showExplanation = renderExplanationV40;
+  } catch {}
 
-  const openCurrentProblemBeforeV47=openCurrentProblem;
-  openCurrentProblem=function(){
-    openCurrentProblemBeforeV47();
-    setTimeout(ensureSolvePinchV47,80);
-  };
-
-  window.addEventListener("resize",()=>{
-    setTimeout(()=>loadCurrentImageV47(true),180);
-  });
-
-  setTimeout(()=>{
-    ensureViewerV47();
-    setLegacyDisabledV47();
-    ensureSolvePinchV47();
-    loadCurrentImageV47(true);
-  },700);
+  [100, 500, 1200, 2500].forEach(ms => setTimeout(() => {
+    const btn = q("showExpBtn");
+    if (btn) {
+      btn.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        renderExplanationV40();
+      };
+    }
+    ensurePortalV40();
+  }, ms));
 })();
 
 
-/* === v35: 답안 페이지 추가/이동 먹통 수정 ===
-   페이지 전환 때 canvas.toDataURL()을 실행하지 않는다.
-   페이지별 text/strokes만 즉시 메모리에 저장하고 draft 저장은 debounce 처리.
+/* === v41: 복습 목록 번호 표시 + 안 푼 문제 선택 === */
+(function reviewNumbersAndUnseenV41() {
+  function reviewModeLabelV41(mode) {
+    if (mode === "correct") return "정답복습";
+    if (mode === "unseen") return "안 푼 문제";
+    return "오답복습";
+  }
+
+  function reviewEmptyMessageV41(mode) {
+    if (mode === "correct") return "아직 정답복습할 문제가 없어.";
+    if (mode === "unseen") return "현재 조건에 맞는 안 푼 문제가 없어.";
+    return "현재 복습할 오답이 없어.";
+  }
+
+  function reviewFiltersV41(list) {
+    const subject = els.reviewSubjectFilter?.value || "";
+    const category = $("reviewCategoryFilter")?.value || "";
+    const year = els.reviewYearFilter?.value || "";
+    const yearText = (els.reviewYearTextFilter?.value || "").trim().toLowerCase();
+
+    return list.filter((p) => {
+      const problemYear = normalizedYear(p.year);
+      if (subject && !subjectMatches(p, subject)) return false;
+      if (typeof categoryMatchesV28 === "function" && !categoryMatchesV28(p, category)) return false;
+      if (year && problemYear !== year) return false;
+      if (yearText && !problemYear.toLowerCase().includes(yearText)) return false;
+      return true;
+    });
+  }
+
+  const reviewListForModeV41Original = reviewListForMode;
+  reviewListForMode = function(mode) {
+    if (mode !== "unseen") return reviewListForModeV41Original(mode);
+
+    // 아직 한 번도 풀지 않은 문제만.
+    // 목록 탭과 같은 기본 문제 순서를 유지한다.
+    return reviewFiltersV41(state.problems)
+      .filter((p) => !(Number(p.attempts) > 0));
+  };
+
+  const problemItemV41Original = problemItem;
+  problemItem = function(p, wrongOnly, displayNumber = "", reviewMode = "") {
+    const div = problemItemV41Original(p, wrongOnly, displayNumber, reviewMode);
+
+    if (wrongOnly && displayNumber !== "" && displayNumber != null) {
+      div.classList.add("numbered");
+
+      if (!div.querySelector(".list-number")) {
+        const badge = document.createElement("div");
+        badge.className = "list-number";
+        badge.setAttribute("aria-label", "문제 번호");
+        badge.textContent = String(displayNumber);
+        div.prepend(badge);
+      }
+    }
+
+    if (wrongOnly && reviewMode === "unseen") {
+      const paragraphs = div.querySelectorAll(":scope > div > p");
+      if (paragraphs[1]) {
+        let suffix = "";
+        if (p.flagged) suffix += " · 다시보기 지정";
+        if (p.explanationImageData) suffix += " · 해설이미지 있음";
+        paragraphs[1].textContent = `안 푼 문제 · 아직 풀이기록 없음${suffix}`;
+      }
+
+      div.querySelectorAll('button[data-action="solve"]').forEach((btn) => {
+        btn.textContent = "풀기";
+      });
+
+      const detail = div.querySelector(".review-time-detail");
+      if (detail) {
+        detail.innerHTML = `
+          <strong>풀이 기록</strong>
+          <span>아직 풀이기록 없음</span>
+          <button data-action="solve" data-id="${p.id}" data-context="wrong" type="button">이 문제 풀기</button>
+        `;
+      }
+    }
+
+    return div;
+  };
+
+  function setReviewModeV41(mode) {
+    state.reviewMode = mode;
+
+    if (els.reviewWrongBtn) {
+      els.reviewWrongBtn.classList.toggle("secondary", mode !== "wrong");
+    }
+    if (els.reviewCorrectBtn) {
+      els.reviewCorrectBtn.classList.toggle("secondary", mode !== "correct");
+    }
+
+    const unseenBtn = $("reviewUnseenBtn");
+    if (unseenBtn) {
+      unseenBtn.classList.toggle("secondary", mode !== "unseen");
+    }
+
+    if (els.reviewWrongRandomBtn) {
+      els.reviewWrongRandomBtn.classList.add("secondary");
+    }
+
+    renderWrongList();
+  }
+
+  // 기존 버튼의 화살표 함수도 실행 시점에 setReviewMode를 참조하므로
+  // 최종 함수를 v41로 교체한다.
+  setReviewMode = setReviewModeV41;
+
+  renderWrongList = function() {
+    const mode = state.reviewMode || "wrong";
+    const list = reviewListForMode(mode);
+    els.wrongList.innerHTML = "";
+
+    if (els.reviewListTitle) {
+      const subject = els.reviewSubjectFilter?.value || "전체";
+      const category = $("reviewCategoryFilter")?.value || "전체";
+      const year = els.reviewYearFilter?.value || els.reviewYearTextFilter?.value || "전체";
+      els.reviewListTitle.textContent =
+        `${reviewModeLabelV41(mode)} · 대분류 ${subject} · 중간분류 ${category} · 연도/회차 ${year}`;
+    }
+
+    if (!list.length) {
+      els.wrongList.innerHTML = `<p class="hint">${reviewEmptyMessageV41(mode)}</p>`;
+      return;
+    }
+
+    list.forEach((p, index) => {
+      // 목록 탭과 동일하게 현재 표시목록의 맨 아래가 1번
+      const displayNumber = list.length - index;
+      els.wrongList.appendChild(
+        problemItem(p, true, displayNumber, mode)
+      );
+    });
+  };
+
+  const handleItemClickV41Original = handleItemClick;
+  handleItemClick = async function(event) {
+    const btn = event.target.closest('button[data-action]');
+
+    if (
+      btn &&
+      btn.dataset.action === "solve" &&
+      btn.dataset.context === "wrong" &&
+      state.reviewMode === "unseen"
+    ) {
+      const p = state.problems.find((item) => String(item.id) === String(btn.dataset.id));
+      if (!p) return;
+      startReviewProblem(p, "안 푼 문제 복습");
+      return;
+    }
+
+    return handleItemClickV41Original(event);
+  };
+
+  function bindV41ReviewButton() {
+    const btn = $("reviewUnseenBtn");
+    if (!btn || btn.dataset.v41Ready) return;
+    btn.dataset.v41Ready = "1";
+    btn.addEventListener("click", () => setReviewModeV41("unseen"));
+  }
+
+  bindV41ReviewButton();
+  setTimeout(bindV41ReviewButton, 300);
+  setTimeout(bindV41ReviewButton, 900);
+
+  // 초기 화면이 이미 그려진 경우도 v41 번호 형식으로 다시 그림.
+  setTimeout(() => {
+    if ($("wrongView")?.classList.contains("active")) renderWrongList();
+  }, 700);
+})();
+
+
+/* === v42: 복습에서 대분류/중간분류 필터 후에도 목록 순번 유지 === */
+(function reviewStableListNumbersV42() {
+  function listNumberForProblemV42(problem) {
+    if (!problem) return "";
+
+    // 문제 목록 탭의 전체 정렬 순서를 기준으로 번호 계산.
+    // 맨 아래 문제 = 1번이라는 기존 규칙 유지.
+    const sorted = typeof sortProblemsForDisplay === "function"
+      ? sortProblemsForDisplay(state.problems)
+      : [...state.problems];
+
+    const index = sorted.findIndex((p) => String(p.id) === String(problem.id));
+    if (index < 0) return "";
+
+    return sorted.length - index;
+  }
+
+  renderWrongList = function() {
+    const mode = state.reviewMode || "wrong";
+    const list = reviewListForMode(mode);
+    els.wrongList.innerHTML = "";
+
+    if (els.reviewListTitle) {
+      const subject = els.reviewSubjectFilter?.value || "전체";
+      const category = $("reviewCategoryFilter")?.value || "전체";
+      const year = els.reviewYearFilter?.value || els.reviewYearTextFilter?.value || "전체";
+
+      let modeLabel = "오답복습";
+      if (mode === "correct") modeLabel = "정답복습";
+      if (mode === "unseen") modeLabel = "안 푼 문제";
+
+      els.reviewListTitle.textContent =
+        `${modeLabel} · 대분류 ${subject} · 중간분류 ${category} · 연도/회차 ${year}`;
+    }
+
+    if (!list.length) {
+      let message = "현재 복습할 오답이 없어.";
+      if (mode === "correct") message = "아직 정답복습할 문제가 없어.";
+      if (mode === "unseen") message = "현재 조건에 맞는 안 푼 문제가 없어.";
+      els.wrongList.innerHTML = `<p class="hint">${message}</p>`;
+      return;
+    }
+
+    for (const p of list) {
+      const displayNumber = listNumberForProblemV42(p);
+      els.wrongList.appendChild(
+        problemItem(p, true, displayNumber, mode)
+      );
+    }
+  };
+
+  // 필터 변경 직후도 번호를 다시 계산해서 표시.
+  $("reviewSubjectFilter")?.addEventListener("change", () => {
+    setTimeout(renderWrongList, 0);
+  });
+  $("reviewCategoryFilter")?.addEventListener("change", () => {
+    setTimeout(renderWrongList, 0);
+  });
+  $("reviewYearFilter")?.addEventListener("change", () => {
+    setTimeout(renderWrongList, 0);
+  });
+  $("reviewYearTextFilter")?.addEventListener("input", () => {
+    setTimeout(renderWrongList, 0);
+  });
+
+  setTimeout(() => {
+    if ($("wrongView")?.classList.contains("active")) renderWrongList();
+  }, 600);
+})();
+
+
+/* === v43: 복습 분류 선택 시 해당 분류 안에서 번호 다시 매기기 === */
+(function reviewFilteredSequenceV43() {
+  renderWrongList = function(event) {
+    if (event?.type) state.reviewLimitV63 = LIST_BATCH_V63;
+    const mode = state.reviewMode || "wrong";
+    const list = reviewListForMode(mode);
+    els.wrongList.innerHTML = "";
+
+    if (els.reviewListTitle) {
+      const subject = els.reviewSubjectFilter?.value || "전체";
+      const category = $("reviewCategoryFilter")?.value || "전체";
+      const year = els.reviewYearFilter?.value || els.reviewYearTextFilter?.value || "전체";
+      let modeLabel = "오답복습";
+      if (mode === "correct") modeLabel = "정답복습";
+      if (mode === "unseen") modeLabel = "안 푼 문제";
+      els.reviewListTitle.textContent = `${modeLabel} · 대분류 ${subject} · 중간분류 ${category} · 연도/회차 ${year}`;
+    }
+
+    if (!list.length) {
+      let message = "현재 복습할 오답이 없어.";
+      if (mode === "correct") message = "아직 정답복습할 문제가 없어.";
+      if (mode === "unseen") message = "현재 조건에 맞는 안 푼 문제가 없어.";
+      els.wrongList.innerHTML = `<p class="hint">${message}</p>`;
+      return;
+    }
+
+    const limit = Math.min(Number(state.reviewLimitV63 || LIST_BATCH_V63), list.length);
+    const frag = document.createDocumentFragment();
+    for (let index = 0; index < limit; index += 1) {
+      const displayNumber = list.length - index;
+      frag.appendChild(problemItem(list[index], true, displayNumber, mode));
+    }
+    els.wrongList.appendChild(frag);
+    if (limit < list.length) {
+      const more = document.createElement("button");
+      more.type = "button";
+      more.className = "secondary v63-load-more";
+      more.textContent = `더 보기 (${limit}/${list.length})`;
+      more.addEventListener("click", () => {
+        state.reviewLimitV63 = Math.min(list.length, limit + LIST_BATCH_V63);
+        renderWrongList();
+      });
+      els.wrongList.appendChild(more);
+    }
+  };
+
+  $("reviewSubjectFilter")?.addEventListener("change", () => {
+    setTimeout(renderWrongList, 0);
+  });
+  $("reviewCategoryFilter")?.addEventListener("change", () => {
+    setTimeout(renderWrongList, 0);
+  });
+  $("reviewYearFilter")?.addEventListener("change", () => {
+    setTimeout(renderWrongList, 0);
+  });
+  $("reviewYearTextFilter")?.addEventListener("input", () => {
+    setTimeout(renderWrongList, 0);
+  });
+
+  setTimeout(() => {
+    if ($("wrongView")?.classList.contains("active")) renderWrongList();
+  }, 500);
+})();
+
+
+/* === v44: 채점 후 왼쪽 다음 문제 버튼 === */
+window.psatManualNextLeftV44 = true;
+/* === v61: 해설 멀티페이지
+   - 등록 시 + 해설 페이지 추가
+   - explanationImagePages 배열 저장
+   - 기존 explanationImageData는 1쪽으로 호환
+   - 풀이 후 해설 이전/다음 + 전체화면 페이지 이동
+   - v60 동기화 복구 로직 유지
 */
-(function answerPageFreezeFixV35() {
-  let persistTimerV35 = 0;
-  let pageBusyV35 = false;
 
-  function answerPagesReadyV35() {
-    if (!state.solve) return false;
-
-    if (!Array.isArray(state.solve.answerPages) || !state.solve.answerPages.length) {
-      state.solve.answerPages = [{
-        text: $("answerText")?.value || state.solve.answer || "",
-        strokes: Array.isArray(state.answerInkStrokes) ? state.answerInkStrokes : []
-      }];
-    }
-
-    if (!Number.isFinite(Number(state.solve.answerPageIndex))) {
-      state.solve.answerPageIndex = 0;
-    }
-
-    state.solve.answerPageIndex = Math.max(
-      0,
-      Math.min(
-        Number(state.solve.answerPageIndex) || 0,
-        state.solve.answerPages.length - 1
-      )
-    );
-
-    return true;
-  }
-
-  function rebuildCombinedAnswerV35() {
-    if (!state.solve || !Array.isArray(state.solve.answerPages)) return;
-
-    state.solve.answer = state.solve.answerPages
-      .map((page, i) => `[${i + 1}쪽]\n${page?.text || ""}`)
-      .join("\n\n");
-  }
-
-  function saveCurrentAnswerPageLightV35() {
-    if (!answerPagesReadyV35()) return;
-
-    const index = state.solve.answerPageIndex || 0;
-    const page = state.solve.answerPages[index];
-    if (!page) return;
-
-    // 페이지 전환에서는 벡터 필기 데이터만 저장.
-    // 무거운 canvas PNG 변환은 하지 않는다.
-    page.text = $("answerText")?.value || "";
-    page.strokes = Array.isArray(state.answerInkStrokes)
-      ? state.answerInkStrokes
-      : [];
-
-    state.solve.answerInkStrokes = page.strokes;
-    rebuildCombinedAnswerV35();
-
-    try {
-      renderAnswerPageBadgeV10();
-    } catch {}
-  }
-
-  function persistDraftV35() {
-    if (!state.solve) return;
-
-    clearTimeout(persistTimerV35);
-
-    persistTimerV35 = setTimeout(() => {
-      if (!state.solve) return;
-
-      try {
-        // 초안에는 대용량 PNG를 넣지 않는다.
-        // answerPages의 좌표 데이터로 이어풀기가 가능하다.
-        const draft = {
-          ...state.solve,
-          answerInkData: ""
-        };
-
-        localStorage.setItem(
-          "essayPsatBaseDraft",
-          JSON.stringify(draft)
-        );
-
-        try {
-          if (typeof renderContinue === "function") renderContinue();
-        } catch {}
-      } catch (err) {
-        console.warn("v35 draft save failed", err);
-      }
-    }, 120);
-  }
-
-  function clearAnswerCanvasPixelsV35() {
-    const canvas = $("answerInkCanvas");
-    if (!canvas) return;
-
-    try {
-      const ctx = canvas.getContext("2d");
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-    } catch {}
-  }
-
-  function loadAnswerPageFastV35(index) {
-    if (!answerPagesReadyV35()) return;
-
-    const max = state.solve.answerPages.length - 1;
-    const next = Math.max(0, Math.min(Number(index) || 0, max));
-
-    state.solve.answerPageIndex = next;
-
-    const page = state.solve.answerPages[next] || {
-      text: "",
-      strokes: []
-    };
-
-    const answerText = $("answerText");
-    if (answerText) answerText.value = page.text || "";
-
-    state.answerInkCurrentStroke = null;
-    state.answerInkStrokes = Array.isArray(page.strokes)
-      ? page.strokes
-      : [];
-
-    clearAnswerCanvasPixelsV35();
-
-    try {
-      renderAnswerPageBadgeV10();
-    } catch {}
-
-    requestAnimationFrame(() => {
-      try {
-        if (typeof resizeAnswerCanvasV10 === "function") {
-          resizeAnswerCanvasV10();
-        } else if (typeof resizeAnswerCanvasV9 === "function") {
-          resizeAnswerCanvasV9();
-        } else if (typeof resizeAnswerCanvas === "function") {
-          resizeAnswerCanvas();
-        }
-      } catch {}
-
-      try {
-        if (typeof drawAnswerInkV10 === "function") {
-          drawAnswerInkV10();
-        } else if (typeof drawAnswerInkV9 === "function") {
-          drawAnswerInkV9();
-        } else if (typeof drawAnswerInk === "function") {
-          drawAnswerInk();
-        }
-      } catch {}
-    });
-  }
-
-  function addAnswerPageFastV35() {
-    if (!state.solve || pageBusyV35) return;
-
-    pageBusyV35 = true;
-
-    try {
-      saveCurrentAnswerPageLightV35();
-
-      state.solve.answerPages.push({
-        text: "",
-        strokes: []
-      });
-
-      loadAnswerPageFastV35(
-        state.solve.answerPages.length - 1
-      );
-
-      rebuildCombinedAnswerV35();
-      persistDraftV35();
-    } finally {
-      // 연속 탭에 의한 중복 실행만 잠깐 방지
-      setTimeout(() => {
-        pageBusyV35 = false;
-      }, 80);
-    }
-  }
-
-  function moveAnswerPageFastV35(delta) {
-    if (!state.solve || pageBusyV35) return;
-
-    pageBusyV35 = true;
-
-    try {
-      saveCurrentAnswerPageLightV35();
-
-      const current = Number(
-        state.solve.answerPageIndex || 0
-      );
-
-      loadAnswerPageFastV35(current + Number(delta || 0));
-      persistDraftV35();
-    } finally {
-      setTimeout(() => {
-        pageBusyV35 = false;
-      }, 60);
-    }
-  }
-
-  // 기존 v10 save 함수도 경량 저장으로 교체.
-  // 답안 입력 중/페이지 전환 중 PNG 인코딩 방지.
-  saveCurrentAnswerPageV10 = function() {
-    saveCurrentAnswerPageLightV35();
-    persistDraftV35();
-  };
-
-  // 기존 함수 이름도 교체해서 다른 버전 코드가 호출해도 동일 동작.
-  addAnswerPageV10 = addAnswerPageFastV35;
-  nextAnswerPageV10 = moveAnswerPageFastV35;
-
-  function bindAnswerPageButtonsV35() {
-    const prev = $("prevAnswerPageBtn");
-    const next = $("nextAnswerPageBtn");
-    const add = $("addAnswerPageBtn");
-
-    if (prev) {
-      prev.onclick = (event) => {
-        event?.preventDefault?.();
-        moveAnswerPageFastV35(-1);
-      };
-    }
-
-    if (next) {
-      next.onclick = (event) => {
-        event?.preventDefault?.();
-        moveAnswerPageFastV35(1);
-      };
-    }
-
-    if (add) {
-      add.onclick = (event) => {
-        event?.preventDefault?.();
-        addAnswerPageFastV35();
-      };
-    }
-  }
-
-  // 혹시 이전 버전의 addEventListener가 남아 있어도
-  // 페이지 버튼은 capture 단계에서 v35가 먼저 처리.
-  if (!document.documentElement.dataset.v35AnswerPageCapture) {
-    document.documentElement.dataset.v35AnswerPageCapture = "1";
-
-    document.addEventListener("click", event => {
-      const button = event.target?.closest?.(
-        "#prevAnswerPageBtn, #nextAnswerPageBtn, #addAnswerPageBtn"
-      );
-      if (!button) return;
-
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
-
-      if (button.id === "addAnswerPageBtn") {
-        addAnswerPageFastV35();
-      } else if (button.id === "prevAnswerPageBtn") {
-        moveAnswerPageFastV35(-1);
-      } else if (button.id === "nextAnswerPageBtn") {
-        moveAnswerPageFastV35(1);
-      }
-    }, true);
-  }
-
-  // 문제 화면이 다시 열릴 때 버튼이 교체/재연결돼도 v35를 마지막에 적용.
-  const openCurrentProblemV35Original = openCurrentProblem;
-  openCurrentProblem = function() {
-    openCurrentProblemV35Original();
-
-    [80, 220, 500, 900].forEach(delay => {
-      setTimeout(() => {
-        bindAnswerPageButtonsV35();
-
-        if (state.solve) {
-          answerPagesReadyV35();
-          loadAnswerPageFastV35(
-            state.solve.answerPageIndex || 0
-          );
-        }
-      }, delay);
-    });
-  };
-
-  // 앱 최초 로딩 시도
-  [500, 1000, 1800].forEach(delay => {
-    setTimeout(bindAnswerPageButtonsV35, delay);
-  });
-})();
-
-
-/* === v36: Essay 폰/태블릿 Firebase 실시간 동기화 === */
-(function essayFirebaseSyncV36() {
+/* === v60: 꼬인 데이터 복구 + 정상 동기화 === */
+(function psatFirebaseSyncV60() {
   const FIREBASE_CONFIG = {
     apiKey: "AIzaSyDrjifzM4Gjbs7EpHCKarrI_E96FrDZLKo",
     authDomain: "psat-sync.firebaseapp.com",
@@ -6451,1622 +5742,2211 @@ setTimeout(() => {
     appId: "1:18268452172:web:6700a64f9828e496da4be9"
   };
 
-  // PSAT과 같은 계정이지만 데이터 경로는 완전히 분리
-  const ROOT = "essayData";
-  const CHUNK_SIZE = 220000;
-  const WRITE_TIMEOUT_MS = 25000;
-  const RETRIES = 3;
-  const EMAIL_KEY = "essay-firebase-email-v36";
+  const ROOT="psatData";
+  const SYNC_SCHEMA=60;
+  const LAST_EMAIL_KEY="psat-firebase-email-v46";
+  const REPAIR_LOCAL_PREFIX="psat-sync-repair-v60:";
+  const CHUNK_SIZE=110000;
+  const WRITE_TIMEOUT_MS=90000;
+  const RETRIES=4;
+  const PERF_SYNC_SCHEMA=64;
+  const FAST_SYNC_SCHEMA_V65=65;
+  const INDEX_BATCH_V65=180;
 
-  // 기기 간 공유할 Essay 로컬 필기/이어풀기 데이터
-  const LOCAL_KEYS = [
-    "essayPsatBaseInk_v2",
-    "essayScoreAnswerEditsV11",
-    "essayScoreExpEditsV11",
-    "essayPsatBaseDraft"
-  ];
+  let app=null,auth=null,db=null,user=null;
+  let applyingRemote=false,fullPushRunning=false,repairRunning=false,uiBound=false;
+  let dirtyTimer=null,dirtyRunning=false,refreshTimer=null;
+  let problemsRef=null,historyRef=null,deletionsRef=null,progressRefV64=null;
+  let problemIndexRefV65=null,historyLiveRefV65=null;
+  const dirty=new Map();
 
-  let fbApp = null;
-  let fbAuth = null;
-  let fbDb = null;
-  let fbUser = null;
+  const el=id=>document.getElementById(id);
+  const pathForStore=name=>name===STORES.problems?"problems":name===STORES.history?"history":null;
 
-  let applyingRemote = false;
-  let pushing = false;
-  let pushTimer = null;
-  let localTimer = null;
-  let lastLocalSignature = "";
-
-  let remoteProblemsRef = null;
-  let remoteAttemptsRef = null;
-  let remoteLocalRef = null;
-  let remoteDeletionRefV71 = null;
-  let remoteTimer = null;
-  let uiBound = false;
-
-  const v36el = (id) => document.getElementById(id);
-
-  function setStatusV36(message, ok = false, error = false) {
-    const node = v36el("essayFirebaseStatusV36");
-    if (!node) return;
-    node.textContent = message;
-    node.classList.toggle("essay-sync-ok-v36", !!ok);
-    node.classList.toggle("essay-sync-error-v36", !!error);
+  function status(msg,ok=false,err=false){
+    const n=el("firebaseSyncStatusV45");
+    if(!n)return;
+    n.textContent=msg;
+    n.classList.toggle("sync-ok-v45",!!ok);
+    n.classList.toggle("sync-error-v46",!!err);
   }
 
-  function friendlyErrorV36(err) {
-    const code = String(err?.code || "");
-    const msg = String(err?.message || err || "");
-
-    if (code.includes("permission-denied") || /permission_denied/i.test(msg)) {
-      return "Firebase 권한 거부 · Rules에 essayData 추가 필요";
-    }
-    if (code.includes("network-request-failed")) return "인터넷 연결 확인";
-    if (code.includes("invalid-credential") || code.includes("wrong-password")) {
-      return "이메일 또는 비밀번호 확인";
-    }
-    if (/timeout/i.test(msg)) return "업로드 시간초과";
-    return msg || "동기화 오류";
+  function niceError(e){
+    const code=String(e?.code||"");
+    const msg=String(e?.message||e||"");
+    if(code.includes("permission-denied")||/permission_denied/i.test(msg))return "Firebase 권한 거부 · Rules 확인";
+    if(code.includes("network-request-failed"))return "인터넷 연결 확인";
+    if(code.includes("invalid-credential")||code.includes("wrong-password"))return "이메일 또는 비밀번호 확인";
+    if(code.includes("email-already-in-use"))return "이미 만든 계정이야 · 로그인 버튼 사용";
+    if(/timeout/i.test(msg))return "동기화 시간초과";
+    return msg||"동기화 오류";
   }
 
-  function initFirebaseV36() {
-    if (fbApp) return;
-    if (!window.firebase) throw new Error("Firebase SDK 로딩 실패");
-
-    try {
-      fbApp = firebase.initializeApp(FIREBASE_CONFIG, "essay-v36");
-    } catch (err) {
-      fbApp = firebase.app("essay-v36");
-    }
-
-    fbAuth = fbApp.auth();
-    fbDb = fbApp.database();
-    fbAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(() => {});
+  function initFirebase(){
+    if(app)return;
+    if(!window.firebase)throw new Error("Firebase SDK 로딩 실패");
+    try{app=firebase.initializeApp(FIREBASE_CONFIG,"psat-v60");}
+    catch(e){app=firebase.app("psat-v60");}
+    auth=app.auth();
+    db=app.database();
+    auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(()=>{});
   }
 
-  function safeKeyV36(id) {
-    return encodeURIComponent(String(id || ""))
-      .replace(/\./g, "%2E")
-      .replace(/#/g, "%23")
-      .replace(/\$/g, "%24")
-      .replace(/\[/g, "%5B")
-      .replace(/\]/g, "%5D")
-      .replace(/\//g, "%2F");
+  function keyOf(id){
+    return encodeURIComponent(String(id||""))
+      .replace(/\./g,"%2E").replace(/#/g,"%23").replace(/\$/g,"%24")
+      .replace(/\[/g,"%5B").replace(/\]/g,"%5D").replace(/\//g,"%2F");
   }
-
-  function sleepV36(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
+  function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
+  async function withTimeout(promise,ms,label){
+    let timer;
+    const timeout=new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error(`timeout:${label}`)),ms);});
+    try{return await Promise.race([promise,timeout]);}finally{clearTimeout(timer);}
   }
-
-  async function withTimeoutV36(promise, ms, label) {
-    let timer = null;
-    const timeout = new Promise((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`timeout:${label}`)), ms);
-    });
-
-    try {
-      return await Promise.race([promise, timeout]);
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  async function retryWriteV36(fn, label) {
-    let lastError = null;
-
-    for (let attempt = 1; attempt <= RETRIES; attempt++) {
-      try {
-        return await withTimeoutV36(fn(), WRITE_TIMEOUT_MS, label);
-      } catch (err) {
-        lastError = err;
-        if (attempt < RETRIES) {
-          setStatusV36(`${label} 재시도 ${attempt}/${RETRIES - 1}`);
-          await sleepV36(700 * attempt);
-        }
+  async function retryWrite(fn,label){
+    let last;
+    for(let a=1;a<=RETRIES;a++){
+      try{return await withTimeout(fn(),WRITE_TIMEOUT_MS,label);}catch(e){
+        last=e;
+        if(a<RETRIES){status(`${label} 재시도 ${a}/${RETRIES-1}`);await sleep(700*a);}
       }
     }
-
-    throw lastError;
+    throw last;
+  }
+  function splitText(text){
+    const out=[];
+    for(let i=0;i<text.length;i+=CHUNK_SIZE)out.push(text.slice(i,i+CHUNK_SIZE));
+    return out.length?out:[""];
+  }
+  function hashText(text){
+    let h=2166136261;
+    for(let i=0;i<text.length;i++){h^=text.charCodeAt(i);h=Math.imul(h,16777619);}
+    return (h>>>0).toString(16)+":"+text.length;
+  }
+  function sameJson(a,b){
+    try{return JSON.stringify(a)===JSON.stringify(b);}catch{return false;}
   }
 
-  function splitTextV36(text) {
-    const parts = [];
-    for (let i = 0; i < text.length; i += CHUNK_SIZE) {
-      parts.push(text.slice(i, i + CHUNK_SIZE));
-    }
-    return parts.length ? parts : [""];
-  }
-
-  function hashTextV36(text) {
-    let h = 2166136261;
-    for (let i = 0; i < text.length; i++) {
-      h ^= text.charCodeAt(i);
-      h = Math.imul(h, 16777619);
-    }
-    return (h >>> 0).toString(16) + ":" + text.length;
-  }
-
-  async function uploadRowV36(path, row, index, total, label) {
-    const key = safeKeyV36(row.id);
-    const ref = fbDb.ref(`${ROOT}/${fbUser.uid}/${path}/${key}`);
-    const jsonText = JSON.stringify(row);
-    const fingerprint = hashTextV36(jsonText);
-
-    const oldSnap = await withTimeoutV36(
-      ref.once("value"),
-      WRITE_TIMEOUT_MS,
-      `${label} ${index}/${total} 확인`
-    );
-    const old = oldSnap.val();
-
-    if (
-      old &&
-      old.__essayV36 === 1 &&
-      old.complete === true &&
-      old.fingerprint === fingerprint
-    ) {
-      return "skip";
-    }
-
-    const chunks = splitTextV36(jsonText);
-
-    await retryWriteV36(
-      () => ref.set({
-        __essayV36: 1,
-        complete: false,
-        fingerprint,
-        chunkCount: chunks.length,
-        totalChars: jsonText.length,
-        chunks: {}
-      }),
-      `${label} ${index}/${total} 준비`
-    );
-
-    for (let i = 0; i < chunks.length; i++) {
-      setStatusV36(`${label} ${index}/${total} · 조각 ${i + 1}/${chunks.length}`);
-
-      await retryWriteV36(
-        () => ref.child(`chunks/${i}`).set(chunks[i]),
-        `${label} ${index}/${total} 조각 ${i + 1}`
-      );
-    }
-
-    await retryWriteV36(
-      () => ref.update({
-        complete: true,
-        finishedAt: Date.now()
-      }),
-      `${label} ${index}/${total} 완료`
-    );
-
-    return "uploaded";
-  }
-
-  async function removeDeletedRowsV36(path, rows) {
-    // v70: 로컬에 없다는 이유로 클라우드 데이터를 삭제하지 않는다.
-    return;
-  }
-
-  async function uploadStoreV36(path, storeName, label) {
-    const rows = await getAll(storeName);
-    await removeDeletedRowsV36(path, rows);
-
-    for (let i = 0; i < rows.length; i++) {
-      setStatusV36(`${label} 업로드 중 · ${i + 1}/${rows.length}`);
-      await uploadRowV36(path, rows[i], i + 1, rows.length, label);
-    }
-
-    return rows.length;
-  }
-
-  function readSharedLocalV36() {
-    const data = {};
-    for (const key of LOCAL_KEYS) {
-      data[key] = localStorage.getItem(key) || "";
-    }
-    return data;
-  }
-
-  function localSignatureV36(data = readSharedLocalV36()) {
-    return hashTextV36(JSON.stringify(data));
-  }
-
-  async function uploadLocalDataV36(force = false) {
-    if (!fbUser || !fbDb || applyingRemote) return;
-
-    const data = readSharedLocalV36();
-    const signature = localSignatureV36(data);
-
-    if (!force && signature === lastLocalSignature) return;
-
-    const row = {
-      id: "sharedLocal",
-      data,
-      updatedAt: Date.now()
+  function problemContentFingerprintV64(row){
+    if(!row)return "";
+    const content={
+      id:row.id, subject:row.subject, year:row.year, category:row.category,
+      answer:row.answer, difficulty:row.difficulty,
+      imageData:row.imageData,
+      explanation:row.explanation,
+      explanationImageData:row.explanationImageData,
+      explanationImagePages:row.explanationImagePages,
+      tags:row.tags,
+      createdAt:row.createdAt
     };
-
-    await uploadRowV36("local", row, 1, 1, "필기/이어풀기");
-    lastLocalSignature = signature;
+    try{return hashText(JSON.stringify(content));}catch{return "";}
   }
 
-  async function pushAllV36() {
-    if (!fbUser || !fbDb) throw new Error("먼저 로그인해줘");
-    if (applyingRemote) return;
+  function progressFromProblemV64(row){
+    return {
+      id:String(row?.id||""),
+      attempts:Number(row?.attempts||0),
+      correct:Number(row?.correct||0),
+      wrong:Number(row?.wrong||0),
+      totalTimeMs:Number(row?.totalTimeMs||0),
+      lastTimeMs:Number(row?.lastTimeMs||0),
+      lastAnsweredAt:Number(row?.lastAnsweredAt||0),
+      lastResult:row?.lastResult||"",
+      wrongActive:!!row?.wrongActive,
+      correctStreak:Number(row?.correctStreak||0),
+      flagged:!!row?.flagged,
+      annotations:Array.isArray(row?.annotations)?row.annotations:[],
+      order:Number(row?.order),
+      canonicalOrderV60:row?.canonicalOrderV60===true,
+      orderModifiedAtV60:Number(row?.orderModifiedAtV60||0),
+      progressUpdatedAtV64:Number(row?.progressUpdatedAtV64||row?.syncModifiedAtV60||Date.now()),
+      syncSchemaV64:PERF_SYNC_SCHEMA
+    };
+  }
 
-    if (pushing) {
-      setStatusV36("이미 업로드 진행 중이야");
-      return;
+  function applyProgressFieldsV64(local,progress){
+    if(!local||!progress)return local;
+    const localStamp=Number(local.progressUpdatedAtV64||0);
+    const remoteStamp=Number(progress.progressUpdatedAtV64||0);
+    if(localStamp>remoteStamp)return local;
+    const merged={...local};
+    for(const k of [
+      "attempts","correct","wrong","totalTimeMs","lastTimeMs","lastAnsweredAt",
+      "lastResult","wrongActive","correctStreak","flagged","annotations",
+      "order","canonicalOrderV60","orderModifiedAtV60"
+    ]){
+      if(progress[k]!==undefined)merged[k]=progress[k];
     }
+    merged.progressUpdatedAtV64=remoteStamp;
+    return merged;
+  }
 
-    pushing = true;
+  async function uploadProgressV64(row,label="진행상태"){
+    if(!row?.id)return;
+    const progress=progressFromProblemV64(row);
+    await retryWrite(
+      ()=>db.ref(`${ROOT}/${user.uid}/progress/${keyOf(row.id)}`).set(progress),
+      label
+    );
+  }
 
-    try {
-      setStatusV36("이 기기 데이터 확인 중...");
+  function contentRevV65(row){
+    return Number(row?.contentUpdatedAtV65 || row?.updatedAt || row?.createdAt || 0);
+  }
 
-      const problemCount = await uploadStoreV36(
-        "problems",
-        STORE_PROBLEMS,
-        "문제"
+  function problemIndexRowV65(row,stamp=Date.now()){
+    return {
+      id:String(row?.id||""),
+      contentUpdatedAtV65:contentRevV65(row),
+      createdAt:Number(row?.createdAt||0),
+      subject:String(row?.subject||""),
+      year:String(row?.year||""),
+      category:String(row?.category||""),
+      indexUpdatedAtV65:stamp,
+      schemaV65:FAST_SYNC_SCHEMA_V65
+    };
+  }
+
+  async function uploadProblemIndexV65(row,label="문제 인덱스"){
+    if(!row?.id)return;
+    const idx=problemIndexRowV65(row);
+    await retryWrite(
+      ()=>db.ref(`${ROOT}/${user.uid}/problemIndex/${keyOf(row.id)}`).set(idx),
+      label
+    );
+  }
+
+  async function uploadProblemWithIndexV65(row,label="문제"){
+    await uploadOne("problems",row,label);
+    await uploadProblemIndexV65(row,`${label} 인덱스`);
+  }
+
+  async function uploadIndexBatchV65(rows,label="인덱스"){
+    if(!rows?.length)return;
+    for(let offset=0; offset<rows.length; offset+=INDEX_BATCH_V65){
+      const part=rows.slice(offset,offset+INDEX_BATCH_V65);
+      const stamp=Date.now();
+      const updates={};
+      for(const row of part) updates[keyOf(row.id)]=problemIndexRowV65(row,stamp);
+      status(`${label} · ${Math.min(offset+part.length,rows.length)}/${rows.length}`);
+      await retryWrite(
+        ()=>db.ref(`${ROOT}/${user.uid}/problemIndex`).update(updates),
+        label
       );
-
-      const attemptCount = await uploadStoreV36(
-        "attempts",
-        STORE_ATTEMPTS,
-        "풀이기록"
-      );
-
-      await uploadLocalDataV36(true);
-
-      await retryWriteV36(
-        () => fbDb.ref(`${ROOT}/${fbUser.uid}/_meta`).set({
-          updatedAt: firebase.database.ServerValue.TIMESTAMP,
-          problemCount,
-          attemptCount,
-          version: 36
-        }),
-        "마지막 저장"
-      );
-
-      setStatusV36(`클라우드 저장 완료 · ${problemCount}문제`, true);
-    } finally {
-      pushing = false;
+      await sleep(0);
     }
   }
 
-  function decodeRowV36(value) {
-    if (!value) return null;
-
-    if (value.__essayV36 !== 1) {
-      return value;
-    }
-
-    // v70: complete=false라도 조각이 모두 있으면 아래에서 복구한다.
-
-    const count = Number(value.chunkCount || 0);
-    const chunks = value.chunks || {};
-    let text = "";
-
-    for (let i = 0; i < count; i++) {
-      if (typeof chunks[i] !== "string") return null;
-      text += chunks[i];
-    }
-
-    try {
-      return JSON.parse(text);
-    } catch (err) {
-      console.warn("Essay v36 cloud row parse failed", err);
+  async function shallowCloudKeysV65(path){
+    try{
+      const token=await user.getIdToken();
+      const base=String(FIREBASE_CONFIG.databaseURL||"").replace(/\/+$/,"");
+      const url=`${base}/${ROOT}/${user.uid}/${path}.json?shallow=true&auth=${encodeURIComponent(token)}`;
+      const controller=new AbortController();
+      const timer=setTimeout(()=>controller.abort(),WRITE_TIMEOUT_MS);
+      try{
+        const res=await fetch(url,{signal:controller.signal,cache:"no-store"});
+        if(!res.ok)throw new Error(`shallow ${res.status}`);
+        const obj=await res.json();
+        return new Set(Object.keys(obj||{}));
+      }finally{clearTimeout(timer);}
+    }catch(err){
+      console.warn("v65 shallow keys failed",err);
       return null;
     }
   }
 
-  function decodeCollectionV36(obj) {
-    if (!obj || typeof obj !== "object") return [];
-
-    const rows = [];
-    for (const value of Object.values(obj)) {
-      const row = decodeRowV36(value);
-      if (row && row.id) rows.push(row);
-    }
-    return rows;
-  }
-
-  async function replaceStoreV36(storeName, rows) {
-    await clearStore(storeName);
-    for (const row of rows) {
-      await put(storeName, row);
-    }
-  }
-
-  async function applySharedLocalV36(localObj) {
-    const rows = decodeCollectionV36(localObj);
-    const row = rows.find(item => item.id === "sharedLocal");
-    if (!row?.data) return;
-
-    for (const key of LOCAL_KEYS) {
-      const value = row.data[key];
-      if (typeof value === "string") {
-        if (value) localStorage.setItem(key, value);
-        else localStorage.removeItem(key);
-      }
-    }
-
-    // 현재 메모리 상태에도 바로 반영
-    try {
-      state.inkData = JSON.parse(
-        localStorage.getItem("essayPsatBaseInk_v2") || "{}"
-      );
-    } catch {}
-
-    try {
-      state.scoreAnswerEdits = JSON.parse(
-        localStorage.getItem("essayScoreAnswerEditsV11") || "{}"
-      );
-    } catch {}
-
-    try {
-      state.scoreExpEdits = JSON.parse(
-        localStorage.getItem("essayScoreExpEditsV11") || "{}"
-      );
-    } catch {}
-
-    lastLocalSignature = localSignatureV36();
-  }
-
-  /* === v46: 공부 화면을 건드리지 않는 증분 동기화 === */
-  let pendingUiRefreshV46 = false;
-  let pendingLocalSnapshotV46 = null;
-  let safeRefreshTimerV46 = null;
-  const rowPushTimersV46 = new Map();
-  const ownRemoteKeysV46 = new Map();
-
-  function studyScreenActiveV46() {
-    const solve = document.getElementById("solveOverlay");
-    const score = document.getElementById("scoreOverlay");
-    return !!(
-      (solve && !solve.classList.contains("hidden")) ||
-      (score && !score.classList.contains("hidden"))
+  async function fetchProblemRowV65(id){
+    const snap=await withTimeout(
+      db.ref(`${ROOT}/${user.uid}/problems/${keyOf(id)}`).once("value"),
+      WRITE_TIMEOUT_MS,
+      "문제 1개 받기"
     );
+    return decodeRowForRepair(snap.val());
   }
 
-  function ownKeyV46(path, key) {
-    return `${path}:${key}`;
-  }
-
-  function markOwnRemoteV46(path, key) {
-    ownRemoteKeysV46.set(ownKeyV46(path, key), Date.now() + 5000);
-  }
-
-  function consumeOwnRemoteV46(path, key) {
-    const k = ownKeyV46(path, key);
-    const until = Number(ownRemoteKeysV46.get(k) || 0);
-    if (until > Date.now()) {
-      ownRemoteKeysV46.delete(k);
+  async function applyCloudProblemV65(id){
+    const remote=await fetchProblemRowV65(id);
+    if(!remote?.id)return false;
+    const local=await nativeGet(STORES.problems,remote.id);
+    const merged=mergeRemoteIntoLocal(local,remote);
+    if(!local||!sameJson(local,merged)){
+      applyingRemote=true;
+      try{await nativePut(STORES.problems,merged);}finally{applyingRemote=false;}
+      upsertStateProblemV63(merged,false);
       return true;
     }
-    if (until) ownRemoteKeysV46.delete(k);
     return false;
   }
 
-  async function flushDeferredSyncV46() {
-    clearTimeout(safeRefreshTimerV46);
-    safeRefreshTimerV46 = null;
-
-    if (studyScreenActiveV46()) {
-      safeRefreshTimerV46 = setTimeout(flushDeferredSyncV46, 900);
-      return;
-    }
-
-    if (pendingLocalSnapshotV46) {
-      const snap = pendingLocalSnapshotV46;
-      pendingLocalSnapshotV46 = null;
-      applyingRemote = true;
-      try {
-        await applySharedLocalV36({ [snap.key]: snap.val() });
-      } finally {
-        applyingRemote = false;
-      }
-    }
-
-    if (pendingUiRefreshV46) {
-      pendingUiRefreshV46 = false;
-      await loadData();
-      try { renderAll(); } catch {}
-    }
-  }
-
-  function requestSafeUiRefreshV46() {
-    pendingUiRefreshV46 = true;
-    clearTimeout(safeRefreshTimerV46);
-    safeRefreshTimerV46 = setTimeout(flushDeferredSyncV46, 300);
-  }
-
-  async function applyRemoteRowV46(storeName, path, snap, removed = false) {
-    if (!snap?.key) return;
-    if (consumeOwnRemoteV46(path, snap.key)) return;
-
-    applyingRemote = true;
-    try {
-      if (removed) {
-        await originalDelV36(storeName, snap.key);
-      } else {
-        const row = decodeRowV36(snap.val());
-        if (!row?.id) return;
-        await originalPutV36(storeName, row);
-      }
-    } finally {
-      applyingRemote = false;
-    }
-
-    // DB만 갱신하고, 풀이/해설 중에는 절대 renderAll 하지 않는다.
-    requestSafeUiRefreshV46();
-  }
-
-  async function applyRemoteLocalV46(snap, removed = false) {
-    if (!snap?.key) return;
-    if (consumeOwnRemoteV46("local", snap.key)) return;
-
-    if (removed) {
-      pendingLocalSnapshotV46 = null;
-      return;
-    }
-
-    const row = decodeRowV36(snap.val());
-    if (!row?.data) return;
-
-    // 같은 데이터면 아무것도 하지 않는다(자기 업로드 echo 방지).
-    const remoteSig = hashTextV36(JSON.stringify(row.data));
-    if (remoteSig === localSignatureV36()) return;
-
-    if (studyScreenActiveV46()) {
-      pendingLocalSnapshotV46 = snap;
-      clearTimeout(safeRefreshTimerV46);
-      safeRefreshTimerV46 = setTimeout(flushDeferredSyncV46, 900);
-      return;
-    }
-
-    applyingRemote = true;
-    try {
-      await applySharedLocalV36({ [snap.key]: snap.val() });
-    } finally {
-      applyingRemote = false;
-    }
-  }
-
-  function cloudPathForStoreV46(name) {
-    if (name === STORE_PROBLEMS) return "problems";
-    if (name === STORE_ATTEMPTS) return "attempts";
-    return "";
-  }
-
-  function labelForStoreV46(name) {
-    return name === STORE_PROBLEMS ? "문제" : "풀이기록";
-  }
-
-  function scheduleRowPushV46(name, value) {
-    if (!fbUser || !fbDb || applyingRemote || pushing || !value?.id) return;
-    const path = cloudPathForStoreV46(name);
-    if (!path) return;
-
-    const timerKey = `${path}:${value.id}`;
-    clearTimeout(rowPushTimersV46.get(timerKey));
-    rowPushTimersV46.set(timerKey, setTimeout(async () => {
-      rowPushTimersV46.delete(timerKey);
-      try {
-        markOwnRemoteV46(path, value.id);
-        await uploadRowV36(path, value, 1, 1, labelForStoreV46(name));
-        setStatusV36(`자동 동기화됨 · ${labelForStoreV46(name)} 1건`, true);
-      } catch (err) {
-        setStatusV36(
-          `자동 업로드 실패 · ${friendlyErrorV36(err)}`,
-          false,
-          true
-        );
-      }
-    }, 450));
-  }
-
-  function scheduleRowDeleteV46(name, key) {
-    if (applyingRemote || !fbUser || !key) return;
-    if (name === STORE_PROBLEMS) {
-      markProblemDeletedV71(key).catch(err => {
-        console.warn("v71 problem delete sync failed", err);
-        setStatusV36("문제 삭제 동기화 실패 · 다시 동기화해줘", false, true);
-      });
-    }
-  }
-
-
-
-  /* === v71 의도적 문제삭제 tombstone === */
-  const TOMBSTONE_PATH_V71 = "_deletions/problems";
-  async function readTombstonesV71(){
-    if(!fbUser||!fbDb)return {};
-    const snap=await withTimeoutV36(fbDb.ref(`${ROOT}/${fbUser.uid}/${TOMBSTONE_PATH_V71}`).once("value"),WRITE_TIMEOUT_MS,"삭제표식 확인");
-    return snap.val()||{};
-  }
-  function deletedProblemIdsV71(t){
-    return new Set(Object.values(t||{}).filter(x=>x&&Number(x.schema)>=71&&x.id).map(x=>String(x.id)));
-  }
-  function filterProblemsV71(rows,t){const d=deletedProblemIdsV71(t);return (rows||[]).filter(r=>r?.id&&!d.has(String(r.id)));}
-  function filterAttemptsV71(rows,t){
-    const d=deletedProblemIdsV71(t); if(!d.size)return rows||[];
-    return (rows||[]).filter(r=>{const pid=r?.problemId??r?.problemID??r?.problem?.id;return !pid||!d.has(String(pid));});
-  }
-  async function markProblemDeletedV71(id){
-    id=String(id); const k=safeKeyV36(id);
-    await retryWriteV36(()=>fbDb.ref(`${ROOT}/${fbUser.uid}/${TOMBSTONE_PATH_V71}/${k}`).set({id,deletedAt:firebase.database.ServerValue.TIMESTAMP,schema:71}),"문제 삭제표식");
-    await retryWriteV36(()=>fbDb.ref(`${ROOT}/${fbUser.uid}/problems/${k}`).remove(),"문제 삭제");
-  }
-
-  /* === v70 문제/풀이기록 합집합 복구 === */
-  function stampV70(row){
-    let best=0;
-    for(const v of [row?.syncModifiedAtV70,row?.updatedAt,row?.completedAt,row?.createdAt]){
-      if(typeof v==="number"&&isFinite(v)) best=Math.max(best,v);
-      else if(typeof v==="string"){const t=Date.parse(v);if(isFinite(t))best=Math.max(best,t);}
-    }
-    return best;
-  }
-  function mergeProblemV70(a,b){
-    if(!a)return b;if(!b)return a;
-    const newer=stampV70(b)>=stampV70(a)?{...b}:{...a};
-    const older=stampV70(b)>=stampV70(a)?a:b;
-    for(const k of ["questionPages","explanationPages"]){
-      const n=Array.isArray(newer[k])?newer[k].filter(Boolean):[];
-      const o=Array.isArray(older?.[k])?older[k].filter(Boolean):[];
-      if(!n.length&&o.length)newer[k]=o;
-    }
-    for(const k of ["title","subject","session","pointsText","modelText"]){
-      if(!String(newer[k]??"").trim()&&String(older?.[k]??"").trim())newer[k]=older[k];
-    }
-    return newer;
-  }
-  function unionRowsV70(localRows,cloudRows,kind){
-    const m=new Map();
-    for(const r of [...(cloudRows||[]),...(localRows||[])]){
-      if(!r?.id)continue;
-      if(!m.has(r.id))m.set(r.id,r);
-      else if(kind==="problems")m.set(r.id,mergeProblemV70(m.get(r.id),r));
-      else if(stampV70(r)>=stampV70(m.get(r.id)))m.set(r.id,r);
-    }
-    return [...m.values()];
-  }
-  async function upsertRowsV70(path,rows,label){
-    for(let i=0;i<rows.length;i++){
-      setStatusV36(`복구 ${label} · ${i+1}/${rows.length}`);
-      await uploadRowV36(path,rows[i],i+1,rows.length,label);
-    }
-  }
-  async function repairUnionV70(){
-    if(!fbUser||!fbDb)throw new Error("먼저 로그인해줘");
-    stopRemoteV36(); applyingRemote=true;
-    try{
-      setStatusV36("복구 중 · 이 기기 + 클라우드 합치는 중...");
-      const [lp,la,ps,as,tombstones]=await Promise.all([
-        getAll(STORE_PROBLEMS),getAll(STORE_ATTEMPTS),
-        withTimeoutV36(fbDb.ref(`${ROOT}/${fbUser.uid}/problems`).once("value"),WRITE_TIMEOUT_MS,"문제 복구"),
-        withTimeoutV36(fbDb.ref(`${ROOT}/${fbUser.uid}/attempts`).once("value"),WRITE_TIMEOUT_MS,"기록 복구"),
-        readTombstonesV71()
-      ]);
-      const problems=filterProblemsV71(unionRowsV70(lp,decodeCollectionV36(ps.val()),"problems"),tombstones);
-      const attempts=filterAttemptsV71(unionRowsV70(la,decodeCollectionV36(as.val()),"attempts"),tombstones);
-      await replaceStoreV36(STORE_PROBLEMS,problems);
-      await replaceStoreV36(STORE_ATTEMPTS,attempts);
-      await upsertRowsV70("problems",problems,"문제");
-      await upsertRowsV70("attempts",attempts,"풀이기록");
-      await retryWriteV36(()=>fbDb.ref(`${ROOT}/${fbUser.uid}/_meta`).update({
-        repairVersion:71,repairAt:firebase.database.ServerValue.TIMESTAMP,
-        problemCount:problems.length,attemptCount:attempts.length,version:70
-      }),"복구 마무리");
-      localStorage.setItem("essay-sync-repair-v71:"+fbUser.uid,String(Date.now()));
-      await loadData();try{renderAll()}catch{}
-      setStatusV36(`복구 완료 · ${problems.length}문제 · ${attempts.length}기록`,true);
-      return {problems:problems.length,attempts:attempts.length};
-    }finally{
-      applyingRemote=false;
-      await startRemoteV36();
-    }
-  }
-
-  async function pullAllV36() {
-    if (!fbUser || !fbDb) throw new Error("먼저 로그인해줘");
-    if (pushing) return false;
-
-    applyingRemote = true;
-
-    try {
-      setStatusV36("클라우드 데이터 받는 중...");
-
-      const [pSnap, aSnap, lSnap] = await Promise.all([
-        withTimeoutV36(
-          fbDb.ref(`${ROOT}/${fbUser.uid}/problems`).once("value"),
-          WRITE_TIMEOUT_MS,
-          "문제 받기"
-        ),
-        withTimeoutV36(
-          fbDb.ref(`${ROOT}/${fbUser.uid}/attempts`).once("value"),
-          WRITE_TIMEOUT_MS,
-          "풀이기록 받기"
-        ),
-        withTimeoutV36(
-          fbDb.ref(`${ROOT}/${fbUser.uid}/local`).once("value"),
-          WRITE_TIMEOUT_MS,
-          "필기 받기"
-        )
-      ]);
-
-      if (!pSnap.exists() && !aSnap.exists() && !lSnap.exists()) {
-        setStatusV36("클라우드 Essay 데이터가 아직 없어");
-        return false;
-      }
-
-      const tombstonesV71 = await readTombstonesV71();
-      const problems = filterProblemsV71(unionRowsV70(await getAll(STORE_PROBLEMS), decodeCollectionV36(pSnap.val()), "problems"), tombstonesV71);
-      const attempts = filterAttemptsV71(unionRowsV70(await getAll(STORE_ATTEMPTS), decodeCollectionV36(aSnap.val()), "attempts"), tombstonesV71);
-
-      await replaceStoreV36(STORE_PROBLEMS, problems);
-      await replaceStoreV36(STORE_ATTEMPTS, attempts);
-      // v70: 문제/기록 복구 중 공유 localStorage 자동 덮어쓰기 금지
-
-      if (studyScreenActiveV46()) {
-        pendingUiRefreshV46 = true;
-        clearTimeout(safeRefreshTimerV46);
-        safeRefreshTimerV46 = setTimeout(flushDeferredSyncV46, 900);
-      } else {
-        await loadData();
-        try { renderAll(); } catch {}
-      }
-
-      setStatusV36(`동기화됨 · ${problems.length}문제`, true);
-      return true;
-    } finally {
-      applyingRemote = false;
-    }
-  }
-
-  function stopRemoteV36() {
-    if (remoteProblemsRef) remoteProblemsRef.off();
-    if (remoteAttemptsRef) remoteAttemptsRef.off();
-    if (remoteLocalRef) remoteLocalRef.off();
-    if (remoteDeletionRefV71) remoteDeletionRefV71.off();
-
-    remoteProblemsRef = null;
-    remoteAttemptsRef = null;
-    remoteLocalRef = null;
-    remoteDeletionRefV71 = null;
-  }
-
-  async function startRemoteV36() {
-    stopRemoteV36();
-    if (!fbUser || !fbDb) return;
-
-    remoteProblemsRef = fbDb.ref(`${ROOT}/${fbUser.uid}/problems`);
-    remoteAttemptsRef = fbDb.ref(`${ROOT}/${fbUser.uid}/attempts`);
-    remoteLocalRef = fbDb.ref(`${ROOT}/${fbUser.uid}/local`);
-    remoteDeletionRefV71 = fbDb.ref(`${ROOT}/${fbUser.uid}/${TOMBSTONE_PATH_V71}`);
-    remoteDeletionRefV71.on("child_added", snap => {
-      const m=snap.val(); if(!m||Number(m.schema)<71||!m.id)return;
-      applyingRemote=true;
-      (async()=>{
-        try{
-          await originalDelV36(STORE_PROBLEMS,m.id);
-          for(const a of await getAll(STORE_ATTEMPTS)){
-            const pid=a?.problemId??a?.problemID??a?.problem?.id;
-            if(pid&&String(pid)===String(m.id))await originalDelV36(STORE_ATTEMPTS,a.id);
-          }
-          await loadData(); if(!studyScreenActiveV46())try{renderAll()}catch{}
-        }finally{applyingRemote=false;}
-      })().catch(()=>{applyingRemote=false;});
-    });
-
-    /*
-      v36의 value 리스너 3개 → 전체 pullAll/renderAll 반복 구조 제거.
-      로그인 시 전체 pull은 1회만 하고, 그 뒤에는 바뀐 child 1개만 반영.
-    */
-    const [p0, a0, l0] = await Promise.all([
-      remoteProblemsRef.once("value"),
-      remoteAttemptsRef.once("value"),
-      remoteLocalRef.once("value")
+  async function smallSnapshotsV65(){
+    const [is,pg,hs,ds,meta]=await Promise.all([
+      withTimeout(db.ref(`${ROOT}/${user.uid}/problemIndex`).once("value"),WRITE_TIMEOUT_MS,"문제 인덱스"),
+      withTimeout(db.ref(`${ROOT}/${user.uid}/progress`).once("value"),WRITE_TIMEOUT_MS,"진행상태"),
+      withTimeout(db.ref(`${ROOT}/${user.uid}/history`).once("value"),WRITE_TIMEOUT_MS,"풀이기록"),
+      withTimeout(db.ref(`${ROOT}/${user.uid}/_deletions/problems`).once("value"),WRITE_TIMEOUT_MS,"삭제기록"),
+      withTimeout(db.ref(`${ROOT}/${user.uid}/_meta`).once("value"),WRITE_TIMEOUT_MS,"메타")
     ]);
-
-    const knownP = new Set(Object.keys(p0.val() || {}));
-    const knownA = new Set(Object.keys(a0.val() || {}));
-    const knownL = new Set(Object.keys(l0.val() || {}));
-
-    remoteProblemsRef.on("child_added", snap => {
-      if (knownP.delete(snap.key)) return;
-      applyRemoteRowV46(STORE_PROBLEMS, "problems", snap, false).catch(() => {});
-    });
-    remoteProblemsRef.on("child_changed", snap => {
-      applyRemoteRowV46(STORE_PROBLEMS, "problems", snap, false).catch(() => {});
-    });
-    remoteProblemsRef.on("child_removed", snap => {
-      // v70: 원격 누락/삭제를 이 기기의 문제 삭제로 전파하지 않는다.
-    });
-
-    remoteAttemptsRef.on("child_added", snap => {
-      if (knownA.delete(snap.key)) return;
-      applyRemoteRowV46(STORE_ATTEMPTS, "attempts", snap, false).catch(() => {});
-    });
-    remoteAttemptsRef.on("child_changed", snap => {
-      applyRemoteRowV46(STORE_ATTEMPTS, "attempts", snap, false).catch(() => {});
-    });
-    remoteAttemptsRef.on("child_removed", snap => {
-      // v70: 원격 누락/삭제를 이 기기의 풀이기록 삭제로 전파하지 않는다.
-    });
-
-    remoteLocalRef.on("child_added", snap => {
-      if (knownL.delete(snap.key)) return;
-      applyRemoteLocalV46(snap, false).catch(() => {});
-    });
-    remoteLocalRef.on("child_changed", snap => {
-      applyRemoteLocalV46(snap, false).catch(() => {});
-    });
-    remoteLocalRef.on("child_removed", snap => {
-      applyRemoteLocalV46(snap, true).catch(() => {});
-    });
-  }
-
-  /* 수동 전체 일치 확인/온라인 복구 때만 full push 사용 */
-  function schedulePushV36() {
-    if (!fbUser || applyingRemote || pushing) return;
-    clearTimeout(pushTimer);
-    pushTimer = setTimeout(() => {
-      pushAllV36().catch(err => {
-        setStatusV36(
-          `전체 동기화 실패 · ${friendlyErrorV36(err)}`,
-          false,
-          true
-        );
-      });
-    }, 1600);
-  }
-
-  async function afterLoginV36(user) {
-    fbUser = user;
-
-    localStorage.setItem(EMAIL_KEY, user.email || "");
-    // PSAT 앱과 같은 origin이라 기존 이메일도 재사용 가능
-    localStorage.setItem("psat-firebase-email-v46", user.email || "");
-
-    if (v36el("essayFirebaseEmailV36") && user.email) {
-      v36el("essayFirebaseEmailV36").value = user.email;
-    }
-
-    v36el("essayFirebaseLogoutBtnV36")?.classList.remove("hidden");
-    setStatusV36(`로그인됨 · ${user.email || ""}`, true);
-
-    const meta = await withTimeoutV36(
-      fbDb.ref(`${ROOT}/${user.uid}/_meta`).once("value"),
-      WRITE_TIMEOUT_MS,
-      "Essay 클라우드 확인"
-    );
-
-    const repairKeyV70="essay-sync-repair-v71:"+user.uid;
-    const cloudRepairV70=Number(meta.val()?.repairVersion||0);
-    if(!localStorage.getItem(repairKeyV70)||cloudRepairV70<71){
-      await repairUnionV70();
-    }else{
-      await pullAllV36();
-      await startRemoteV36();
-    }
-    lastLocalSignature = localSignatureV36();
-  }
-
-  function bindUiV36() {
-    if (uiBound) return;
-    uiBound = true;
-
-    const email = v36el("essayFirebaseEmailV36");
-    if (email) {
-      email.value =
-        localStorage.getItem(EMAIL_KEY) ||
-        localStorage.getItem("psat-firebase-email-v46") ||
-        "";
-    }
-
-    v36el("essayFirebaseLoginBtnV36")?.addEventListener("click", async () => {
-      try {
-        const e = v36el("essayFirebaseEmailV36")?.value.trim() || "";
-        const p = v36el("essayFirebasePasswordV36")?.value || "";
-
-        if (!e || !p) throw new Error("이메일/비밀번호 입력");
-
-        initFirebaseV36();
-        setStatusV36("로그인 중...");
-
-        const credential = await fbAuth.signInWithEmailAndPassword(e, p);
-        await afterLoginV36(credential.user);
-
-        toast("Essay 실시간 동기화 시작");
-      } catch (err) {
-        const message = friendlyErrorV36(err);
-        setStatusV36(`로그인 실패 · ${message}`, false, true);
-        toast(message);
-      }
-    });
-
-    v36el("essayFirebaseLogoutBtnV36")?.addEventListener("click", async () => {
-      try {
-        stopRemoteV36();
-        if (fbAuth) await fbAuth.signOut();
-        fbUser = null;
-        v36el("essayFirebaseLogoutBtnV36")?.classList.add("hidden");
-        setStatusV36("로그아웃됨");
-      } catch (err) {
-        setStatusV36(friendlyErrorV36(err), false, true);
-      }
-    });
-
-    v36el("essayFirebasePushBtnV36")?.addEventListener("click", async () => {
-      try {
-        await pushAllV36();
-        toast("Essay 데이터 업로드 완료");
-      } catch (err) {
-        const message = friendlyErrorV36(err);
-        setStatusV36(`업로드 실패 · ${message}`, false, true);
-        toast(message);
-      }
-    });
-
-    v36el("essayFirebaseRepairBtnV70")?.addEventListener("click", async () => {
-      try{
-        const r=await repairUnionV70();
-        toast(`복구 완료 · ${r.problems}문제 · ${r.attempts}기록`);
-      }catch(err){
-        const m=friendlyErrorV36(err);
-        setStatusV36(`복구 실패 · ${m}`,false,true);toast(m);
-      }
-    });
-
-    v36el("essayFirebasePullBtnV36")?.addEventListener("click", async () => {
-      try {
-        await pullAllV36();
-        toast("Essay 클라우드 데이터 받기 완료");
-      } catch (err) {
-        const message = friendlyErrorV36(err);
-        setStatusV36(`받기 실패 · ${message}`, false, true);
-        toast(message);
-      }
-    });
-  }
-
-  // v46: IndexedDB 변경은 해당 1건만 자동 업로드
-  const originalPutV36 = put;
-  put = async function(name, value) {
-    if(value&&(name===STORE_PROBLEMS||name===STORE_ATTEMPTS)&&!applyingRemote){
-      value={...value,syncModifiedAtV70:Date.now()};
-    }
-    const result = await originalPutV36(name, value);
-    scheduleRowPushV46(name, value);
-    return result;
-  };
-
-  const originalDelV36 = del;
-  del = async function(name, key) {
-    const result = await originalDelV36(name, key);
-    scheduleRowDeleteV46(name, key);
-    return result;
-  };
-
-  const originalClearStoreV36 = clearStore;
-  clearStore = async function(name) {
-    const result = await originalClearStoreV36(name);
-    // 전체 삭제는 드문 작업이라 full consistency push로 처리.
-    if (!applyingRemote) schedulePushV36();
-    return result;
-  };
-
-  // 문제필기/채점필기/이어풀기는 localStorage이므로 변화 감시 후 따로 자동 업로드
-  function startLocalWatcherV36() {
-    lastLocalSignature = localSignatureV36();
-
-    clearInterval(localTimer);
-    localTimer = setInterval(() => {
-      if (!fbUser || applyingRemote || pushing) return;
-
-      const signature = localSignatureV36();
-      if (signature === lastLocalSignature) return;
-
-      markOwnRemoteV46("local", "sharedLocal");
-      uploadLocalDataV36(true)
-        .then(() => {
-          setStatusV36("필기/이어풀기 동기화됨", true);
-        })
-        .catch(err => {
-          setStatusV36(
-            `필기 자동동기화 실패 · ${friendlyErrorV36(err)}`,
-            false,
-            true
-          );
-        });
-    }, 2600);
-  }
-
-  function startV36() {
-    bindUiV36();
-
-    try {
-      initFirebaseV36();
-
-      fbAuth.onAuthStateChanged(user => {
-        if (!user) {
-          fbUser = null;
-          setStatusV36("Firebase 연결됨 · 로그인 필요");
-          return;
-        }
-
-        if (fbUser?.uid === user.uid) return;
-
-        afterLoginV36(user).catch(err => {
-          setStatusV36(
-            `자동 동기화 실패 · ${friendlyErrorV36(err)}`,
-            false,
-            true
-          );
-        });
-      });
-
-      startLocalWatcherV36();
-    } catch (err) {
-      setStatusV36(
-        `Firebase 초기화 실패 · ${friendlyErrorV36(err)}`,
-        false,
-        true
-      );
-    }
-  }
-
-  window.addEventListener("online", () => {
-    if (fbUser) schedulePushV36();
-  });
-
-  setTimeout(startV36, 500);
-})();
-
-/* === v67: 제출 후 내 답안으로 돌아가기 버튼 복구 === */
-(function essayReturnToWrittenAnswerV67(){
-  const btn=()=>document.getElementById("backToAnswerBtn");
-
-  function restoreV67(){
-    const score=document.getElementById("scoreOverlay");
-    const solve=document.getElementById("solveOverlay");
-
-    if(score)score.classList.add("hidden");
-
-    if(state.solve){
-      state.solve.startedProblemAt=Date.now();
-
-      try{clearInterval(state.timer)}catch{}
-      try{state.timer=setInterval(updateTimer,500)}catch{}
-
-      if(solve)solve.classList.remove("hidden");
-
-      const index=Number(
-        state.solve?.answerPageIndex ??
-        state.answerPageIndex ??
-        0
-      );
-
-      try{
-        if(typeof loadAnswerPageV10==="function"){
-          loadAnswerPageV10(index);
-        }
-      }catch{}
-
-      [30,120,280].forEach(delay=>{
-        setTimeout(()=>{
-          try{
-            if(typeof resetAnswerInkLayerV13==="function"){
-              resetAnswerInkLayerV13();
-            }else if(typeof resetAnswerInkLayerV10==="function"){
-              resetAnswerInkLayerV10();
-            }
-          }catch{}
-
-          try{
-            if(typeof resizeAnswerCanvasV10==="function")resizeAnswerCanvasV10();
-            else if(typeof resizeAnswerCanvasV9==="function")resizeAnswerCanvasV9();
-          }catch{}
-
-          try{
-            if(typeof drawAnswerInkV10==="function")drawAnswerInkV10();
-            else if(typeof drawAnswerInkV9==="function")drawAnswerInkV9();
-          }catch{}
-        },delay);
-      });
-    }
-  }
-
-  document.addEventListener("click",event=>{
-    const target=event.target?.closest?.("#backToAnswerBtn");
-    if(!target)return;
-
-    /*
-      base handler와 v28 복원 핸들러가 이미 있어도
-      v67에서 같은 기능을 한 번 더 확정 실행.
-    */
-    setTimeout(restoreV67,0);
-  },false);
-
-  window.essayReturnToWrittenAnswerV67=restoreV67;
-})();
-
-/* === v68: 문제별 답안 완전분리 + 제출후 내답안 수정펜 복구 === */
-(function essayAnswerIsolationAndScorePenV68(){
-  const byId=id=>document.getElementById(id);
-  const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
-
-  /* ---------- 1. 다른 문제로 넘어가면 이전 답안 절대 재사용 금지 ---------- */
-  function blankAnswerForProblemV68(problemId){
-    if(!state.solve)return;
-
-    state.solve.answerProblemIdV68=String(problemId||"");
-    state.solve.answer="";
-    state.solve.answerPages=[{text:"",strokes:[]}];
-    state.solve.answerPageIndex=0;
-    state.solve.answerInkStrokes=[];
-
-    state.answerInkStrokes=[];
-    state.answerInkCurrentStroke=null;
-
-    const text=byId("answerText");
-    if(text)text.value="";
-
-    const canvas=byId("answerInkCanvas");
-    if(canvas){
-      try{
-        const ctx=canvas.getContext("2d");
-        ctx.clearRect(0,0,canvas.width,canvas.height);
-      }catch{}
-    }
-  }
-
-  const openCurrentProblemBeforeV68=openCurrentProblem;
-  openCurrentProblem=function(){
-    const problem=typeof currentProblem==="function"?currentProblem():null;
-
-    if(state.solve && problem){
-      const nextId=String(problem.id||"");
-      const loadedId=String(state.solve.answerProblemIdV68||"");
-
-      /*
-        같은 문제로 '내 답안으로 돌아가기' 할 때는 보존.
-        문제 ID가 바뀌었을 때만 새 빈 답안을 만든다.
-      */
-      if(nextId && nextId!==loadedId){
-        blankAnswerForProblemV68(nextId);
-      }
-    }
-
-    return openCurrentProblemBeforeV68.apply(this,arguments);
-  };
-
-  /*
-    저장 후 다음에서 구버전 state.solve.answerPages가 남더라도
-    다음 openCurrentProblem에서 problemId 차이를 보고 반드시 초기화됨.
-  */
-  const saveAndNextBeforeV68=saveAndNext;
-  saveAndNext=async function(){
-    if(state.solve){
-      try{saveCurrentAnswerPageV10?.()}catch{}
-    }
-    return saveAndNextBeforeV68.apply(this,arguments);
-  };
-
-  /* ---------- 2. 제출후 '내 답안 수정펜'을 별도 안정 컨트롤러로 고정 ---------- */
-  function answerEditKeyV68(){
-    try{
-      if(typeof scoreAnswerKeyV28==="function")return scoreAnswerKeyV28();
-    }catch{}
-    const p=typeof currentProblem==="function"?currentProblem():null;
-    return `${p?.id||"unknown"}:answer:${state.scoreAnswerPageIndex||0}`;
-  }
-
-  function ensureEditStoreV68(){
-    if(!state.scoreAnswerEdits || typeof state.scoreAnswerEdits!=="object"){
-      try{
-        state.scoreAnswerEdits=JSON.parse(
-          localStorage.getItem("essayScoreAnswerEditsV11")||"{}"
-        );
-      }catch{
-        state.scoreAnswerEdits={};
-      }
-    }
-  }
-
-  function saveEditStoreV68(){
-    ensureEditStoreV68();
-    try{
-      localStorage.setItem(
-        "essayScoreAnswerEditsV11",
-        JSON.stringify(state.scoreAnswerEdits||{})
-      );
-    }catch{}
-    try{scheduleFirebaseSyncV36?.("local")}catch{}
-    try{scheduleCloudSyncV46?.()}catch{}
-  }
-
-  function pointV68(event,canvas){
-    const r=canvas.getBoundingClientRect();
-    return{
-      x:clamp((event.clientX-r.left)/Math.max(1,r.width),0,1),
-      y:clamp((event.clientY-r.top)/Math.max(1,r.height),0,1)
+    return {
+      indexRaw:is.val()||{},
+      progressRaw:pg.val()||{},
+      historyRaw:hs.val()||{},
+      deletionRaw:ds.val()||{},
+      meta:meta.val()||{}
     };
   }
 
-  function ensureScoreCanvasSizeV68(canvas,wrap){
-    if(!canvas||!wrap)return false;
+  async function fastSyncV65(){
+    if(!user||!db)throw new Error("먼저 로그인해줘");
+    if(repairRunning||fullPushRunning)return false;
 
-    const rect=canvas.getBoundingClientRect();
-    if(rect.width>2 && rect.height>2 && canvas.width>2 && canvas.height>2){
-      return true;
+    stopRemote();
+    const syncStarted=Date.now()-3000;
+    status("빠른 동기화 · 작은 인덱스 확인 중...");
+    const small=await smallSnapshotsV65();
+    let indexRows=Object.values(small.indexRaw||{}).filter(x=>x?.id);
+    const localRows=state.problems?.length ? [...state.problems] : await getAll(STORES.problems);
+    const localMap=new Map(localRows.filter(x=>x?.id).map(x=>[String(x.id),x]));
+    let changed=false;
+
+    // v65 첫 실행: 거대한 문제 본문을 내려받지 않고 cloud key + 로컬 메타로 인덱스만 만든다.
+    if(!indexRows.length && !localRows.length){
+      const cloudKeys=await shallowCloudKeysV65("problems");
+      if(cloudKeys?.size){
+        const restored=[];
+        let i=0;
+        for(const rawKey of cloudKeys){
+          i+=1;
+          let id=rawKey;
+          try{id=decodeURIComponent(rawKey);}catch{}
+          status(`새 기기 문제 받기 · ${i}/${cloudKeys.size}`);
+          const remote=await fetchProblemRowV65(id);
+          if(remote?.id){
+            applyingRemote=true;
+            try{await nativePut(STORES.problems,remote);}finally{applyingRemote=false;}
+            upsertStateProblemV63(remote,false);
+            restored.push(remote);
+          }
+          if(i%3===0)await sleep(0);
+        }
+        if(restored.length){
+          state.problems=sortProblemsForDisplay(state.problems);
+          rebuildProblemIndexV63();
+          await uploadIndexBatchV65(restored,"새 기기 인덱스");
+          changed=true;
+        }
+      }
+      const idxAgain=await withTimeout(
+        db.ref(`${ROOT}/${user.uid}/problemIndex`).once("value"),
+        WRITE_TIMEOUT_MS,"인덱스 재확인"
+      );
+      indexRows=Object.values(idxAgain.val()||{}).filter(x=>x?.id);
     }
 
-    const width=Math.max(
-      1,
-      Math.floor(wrap.clientWidth||wrap.getBoundingClientRect().width||window.innerWidth-24)
+    if(!indexRows.length && localRows.length){
+      status("빠른 동기화 · 최초 인덱스 만드는 중...");
+      const cloudKeys=await shallowCloudKeysV65("problems");
+      if(cloudKeys){
+        const existingLocal=[];
+        const missingRemote=[];
+        for(const row of localRows){
+          if(cloudKeys.has(keyOf(row.id))) existingLocal.push(row);
+          else missingRemote.push(row);
+        }
+        await uploadIndexBatchV65(existingLocal,"기존 문제 인덱스");
+        for(let i=0;i<missingRemote.length;i++){
+          status(`새 문제 올리기 · ${i+1}/${missingRemote.length}`);
+          await uploadProblemWithIndexV65(missingRemote[i],`새 문제 ${i+1}/${missingRemote.length}`);
+          if(i%4===3)await sleep(0);
+        }
+        // 클라우드에만 있는 문제는 필요한 것만 1개씩 받는다.
+        const localKeys=new Set(localRows.map(r=>keyOf(r.id)));
+        const remoteOnly=[...cloudKeys].filter(k=>!localKeys.has(k));
+        for(let i=0;i<remoteOnly.length;i++){
+          const rawKey=remoteOnly[i];
+          // Firebase key는 encodeURIComponent 기반이므로 decodeURIComponent로 원 ID 복원.
+          let id=rawKey;
+          try{id=decodeURIComponent(rawKey);}catch{}
+          status(`누락 문제 복원 · ${i+1}/${remoteOnly.length}`);
+          if(await applyCloudProblemV65(id))changed=true;
+        }
+      }else{
+        // shallow를 못 쓰는 환경에서도 로컬 기준 인덱스는 빠르게 구성.
+        await uploadIndexBatchV65(localRows,"문제 인덱스");
+      }
+      const snap=await withTimeout(
+        db.ref(`${ROOT}/${user.uid}/problemIndex`).once("value"),
+        WRITE_TIMEOUT_MS,"인덱스 재확인"
+      );
+      indexRows=Object.values(snap.val()||{}).filter(x=>x?.id);
+    }
+
+    const indexMap=new Map(indexRows.map(x=>[String(x.id),x]));
+
+    // 원격 인덱스가 더 새롭거나 로컬에 없을 때만 큰 문제 1개를 받는다.
+    const needDownload=[];
+    for(const idx of indexRows){
+      const local=localMap.get(String(idx.id));
+      if(!local || Number(idx.contentUpdatedAtV65||0)>contentRevV65(local)){
+        needDownload.push(String(idx.id));
+      }
+    }
+    for(let i=0;i<needDownload.length;i++){
+      status(`변경 문제 받기 · ${i+1}/${needDownload.length}`);
+      if(await applyCloudProblemV65(needDownload[i]))changed=true;
+      if(i%3===2)await sleep(0);
+    }
+
+    // 이 기기의 새/수정 문제만 큰 본문 업로드.
+    const needUpload=[];
+    for(const row of localRows){
+      const idx=indexMap.get(String(row.id));
+      if(!idx || contentRevV65(row)>Number(idx.contentUpdatedAtV65||0)){
+        needUpload.push(row);
+      }
+    }
+    for(let i=0;i<needUpload.length;i++){
+      status(`변경 문제 올리기 · ${i+1}/${needUpload.length}`);
+      await uploadProblemWithIndexV65(needUpload[i],`변경 문제 ${i+1}/${needUpload.length}`);
+      if(i%3===2)await sleep(0);
+    }
+
+    // 풀이기록은 이미지가 없어 상대적으로 작으므로 병합.
+    const cloudHistory=decodeCollection(small.historyRaw,false);
+    applyingRemote=true;
+    try{
+      for(const remote of cloudHistory){
+        const local=await nativeGet(STORES.history,remote.id);
+        const merged=mergeHistoryRows(local,remote);
+        if(!local||!sameJson(local,merged)){
+          await nativePut(STORES.history,merged);
+          changed=true;
+        }
+      }
+      for(const progress of Object.values(small.progressRaw||{})){
+        if(!progress?.id)continue;
+        const local=await nativeGet(STORES.problems,progress.id);
+        if(!local)continue;
+        const merged=applyProgressFieldsV64(local,progress);
+        if(!sameJson(local,merged)){
+          await nativePut(STORES.problems,merged);
+          upsertStateProblemV63(merged,false);
+          changed=true;
+        }
+      }
+    }finally{applyingRemote=false;}
+
+    // v66: 시작 동기화에서는 과거 삭제표식을 다시 적용하지 않는다.
+    // 이전 버전에서 남은 tombstone이 정상 문제를 지우는 사고를 막는다.
+    try{
+      localStorage.setItem(`psatDeletionCutoffV66:${user.uid}`,String(Date.now()));
+    }catch{}
+
+    if(changed){
+      state.problems=sortProblemsForDisplay(state.problems);
+      rebuildProblemIndexV63();
+      renderEmptyState();
+      const active=activeViewIdV63();
+      if(active==="listView")renderProblemList();
+      else if(active==="wrongView")renderWrongList();
+      else if(active==="statsView")renderStats();
+    }
+
+    await retryWrite(()=>db.ref(`${ROOT}/${user.uid}/_meta`).update({
+      syncSchemaV65:FAST_SYNC_SCHEMA_V65,
+      fastSyncAtV65:firebase.database.ServerValue.TIMESTAMP,
+      problemCount:state.problems?.length||localRows.length
+    }),"빠른 동기화 마무리");
+
+    startRemoteV65(syncStarted);
+    status(`빠른 동기화됨 · ${state.problems?.length||localRows.length}문제`,true);
+    return changed;
+  }
+
+  async function pushChangedOnlyV65(){
+    if(!user||!db)throw new Error("먼저 로그인해줘");
+    fullPushRunning=true;
+    stopRemote();
+    try{
+      status("안전 업로드 · 인덱스 확인 중...");
+      const idxSnap=await withTimeout(
+        db.ref(`${ROOT}/${user.uid}/problemIndex`).once("value"),
+        WRITE_TIMEOUT_MS,"문제 인덱스"
+      );
+      const idxMap=new Map(Object.values(idxSnap.val()||{}).filter(x=>x?.id).map(x=>[String(x.id),x]));
+      const rows=state.problems?.length ? [...state.problems] : await getAll(STORES.problems);
+
+      // 인덱스가 전혀 없으면 cloud key를 확인해 기존 문제를 재업로드하지 않는다.
+      if(!idxMap.size && rows.length){
+        const cloudKeys=await shallowCloudKeysV65("problems");
+        if(cloudKeys){
+          const indexed=[];
+          for(const row of rows){
+            if(cloudKeys.has(keyOf(row.id))) indexed.push(row);
+          }
+          await uploadIndexBatchV65(indexed,"기존 문제 인덱스");
+          const newIdxSnap=await db.ref(`${ROOT}/${user.uid}/problemIndex`).once("value");
+          for(const x of Object.values(newIdxSnap.val()||{}))if(x?.id)idxMap.set(String(x.id),x);
+        }
+      }
+
+      const upload=[];
+      for(const meta of rows){
+        const idx=idxMap.get(String(meta.id));
+        if(!idx || contentRevV65(meta)>Number(idx.contentUpdatedAtV65||0)){
+          const full=await nativeGet(STORES.problems,meta.id);
+          if(full)upload.push(full);
+        }
+      }
+      for(let i=0;i<upload.length;i++){
+        status(`변경 문제 업로드 · ${i+1}/${upload.length}`);
+        await uploadProblemWithIndexV65(upload[i],`문제 ${i+1}/${upload.length}`);
+      }
+
+      // 진행상태는 여러 건을 한 번의 update로 묶어 네트워크 왕복을 줄인다.
+      for(let offset=0;offset<rows.length;offset+=120){
+        const part=rows.slice(offset,offset+120);
+        const updates={};
+        for(const meta of part){
+          const full=await nativeGet(STORES.problems,meta.id);
+          if(full)updates[keyOf(full.id)]=progressFromProblemV64(full);
+        }
+        status(`진행상태 업로드 · ${Math.min(offset+part.length,rows.length)}/${rows.length}`);
+        await retryWrite(
+          ()=>db.ref(`${ROOT}/${user.uid}/progress`).update(updates),
+          "진행상태 묶음 저장"
+        );
+        await sleep(0);
+      }
+
+      // 로컬에만 있는 풀이기록은 기존 안전 업로드(작은 데이터).
+      const histories=await getAll(STORES.history);
+      const remoteHistKeys=await shallowCloudKeysV65("history");
+      const missingHist=remoteHistKeys
+        ? histories.filter(h=>!remoteHistKeys.has(keyOf(h.id)))
+        : histories;
+      for(let i=0;i<missingHist.length;i++){
+        status(`풀이기록 업로드 · ${i+1}/${missingHist.length}`);
+        await uploadOne("history",missingHist[i],`풀이기록 ${i+1}/${missingHist.length}`);
+      }
+
+      status(`안전 업로드 완료 · 변경문제 ${upload.length}개`,true);
+    }finally{
+      fullPushRunning=false;
+      startRemoteV65(Date.now()-2000);
+    }
+  }
+
+  async function uploadOne(path,row,label){
+    const ref=db.ref(`${ROOT}/${user.uid}/${path}/${keyOf(row.id)}`);
+    const text=JSON.stringify(row);
+    const fp=hashText(text);
+    const chunks=splitText(text);
+    await retryWrite(()=>ref.set({
+      __v48:1,complete:false,fingerprint:fp,
+      chunkCount:chunks.length,totalChars:text.length,chunks:{}
+    }),`${label} 준비`);
+    for(let i=0;i<chunks.length;i++){
+      status(`${label} · 조각 ${i+1}/${chunks.length}`);
+      await retryWrite(()=>ref.child(`chunks/${i}`).set(chunks[i]),`${label} 조각 ${i+1}`);
+    }
+    await retryWrite(()=>ref.update({complete:true,finishedAt:Date.now()}),`${label} 완료`);
+  }
+
+  async function removeOne(path,id,label){
+    if(path==="problems"){
+      const marker={id:String(id),deletedAt:Date.now(),schemaV60:SYNC_SCHEMA,schemaV66:66};
+      await retryWrite(
+        ()=>db.ref(`${ROOT}/${user.uid}/_deletions/problems/${keyOf(id)}`).set(marker),
+        "삭제 기록 저장"
+      );
+    }
+    await retryWrite(()=>db.ref(`${ROOT}/${user.uid}/${path}/${keyOf(id)}`).remove(),label);
+    if(path==="problems"){
+      await retryWrite(
+        ()=>db.ref(`${ROOT}/${user.uid}/progress/${keyOf(id)}`).remove(),
+        "진행상태 삭제"
+      );
+      await retryWrite(
+        ()=>db.ref(`${ROOT}/${user.uid}/problemIndex/${keyOf(id)}`).remove(),
+        "문제 인덱스 삭제"
+      );
+    }
+  }
+
+  function parseChunks(value,allowIncomplete=false){
+    if(!value)return null;
+    if(value.__v48!==1&&value.__v47!==1)return value;
+    if(!allowIncomplete&&value.complete!==true)return null;
+
+    let count=Number(value.chunkCount||0);
+    const chunks=value.chunks||{};
+    if(!count){
+      const keys=Object.keys(chunks).map(Number).filter(Number.isFinite).sort((a,b)=>a-b);
+      if(keys.length)count=keys[keys.length-1]+1;
+    }
+    if(!count)return null;
+
+    let text="";
+    for(let i=0;i<count;i++){
+      if(typeof chunks[i]!=="string")return null;
+      text+=chunks[i];
+    }
+    try{return JSON.parse(text);}catch{return null;}
+  }
+  function decodeRow(value){return parseChunks(value,false);}
+  function decodeRowForRepair(value){return parseChunks(value,true);}
+  function decodeCollection(obj,repair=false){
+    if(!obj||typeof obj!=="object")return [];
+    const out=[];
+    for(const v of Object.values(obj)){
+      const row=repair?decodeRowForRepair(v):decodeRow(v);
+      if(row?.id)out.push(row);
+    }
+    return out;
+  }
+
+  async function nativePut(storeName,row){await tx(storeName,'readwrite',store=>store.put(row));}
+  async function nativeRemove(storeName,id){await tx(storeName,'readwrite',store=>store.delete(id));}
+  async function nativeGet(storeName,id){
+    const dbi=await openDb();
+    const transaction=dbi.transaction(storeName,'readonly');
+    return requestToPromise(transaction.objectStore(storeName).get(id));
+  }
+  async function replaceStoreNative(storeName,rows){
+    await tx(storeName,'readwrite',store=>{
+      store.clear();
+      for(const row of rows)store.put(row);
+    });
+  }
+
+  function finiteMax(...values){
+    const nums=values.map(Number).filter(Number.isFinite);
+    return nums.length?Math.max(...nums):0;
+  }
+  function positiveMin(...values){
+    const nums=values.map(Number).filter(v=>Number.isFinite(v)&&v>0);
+    return nums.length?Math.min(...nums):0;
+  }
+  function contentStamp(row){
+    if(!row)return 0;
+    return finiteMax(
+      row.syncModifiedAtV60,
+      row.syncModifiedAtV56,
+      row.updatedAt,
+      row.lastAnsweredAt,
+      row.createdAt
     );
-
-    const pre=byId("ownAnswerView");
-    const img=byId("ownAnswerInkView");
-
-    let contentHeight=160;
-
-    if(pre && getComputedStyle(pre).display!=="none"){
-      contentHeight=Math.max(
-        contentHeight,
-        Math.ceil((pre.offsetTop||0)+(pre.scrollHeight||pre.getBoundingClientRect().height||0))
-      );
+  }
+  function lastAnswerStamp(row){return finiteMax(row?.lastAnsweredAt,row?.updatedAt);}
+  function arrayUnion(a,b){
+    const out=[];const seen=new Set();
+    for(const item of [...(Array.isArray(a)?a:[]),...(Array.isArray(b)?b:[])]){
+      let k;try{k=JSON.stringify(item);}catch{k=String(item);}
+      if(seen.has(k))continue;seen.add(k);out.push(item);
     }
+    return out;
+  }
 
-    if(img && !img.classList.contains("hidden")){
-      contentHeight=Math.max(
-        contentHeight,
-        Math.ceil((img.offsetTop||0)+(img.offsetHeight||img.getBoundingClientRect().height||0))
-      );
+  function mergeProblemRows(a,b){
+    if(!a)return b?structuredClone(b):null;
+    if(!b)return structuredClone(a);
+
+    const aStamp=contentStamp(a),bStamp=contentStamp(b);
+    const newer=bStamp>aStamp?b:a;
+    const older=newer===a?b:a;
+    const merged={...older,...newer};
+
+    // 원본 문제/해설은 한쪽이 비어 있으면 다른 쪽 값으로 복구.
+    for(const field of ["imageData","explanationImageData","explanation","subject","year","category"]){
+      if((merged[field]===undefined||merged[field]===null||merged[field]==="") && older[field])merged[field]=older[field];
     }
+    if(!Number.isFinite(Number(merged.answer))&&Number.isFinite(Number(older.answer)))merged.answer=older.answer;
 
-    const dpr=Math.min(window.devicePixelRatio||1,1.5);
-    canvas.width=Math.max(1,Math.round(width*dpr));
-    canvas.height=Math.max(1,Math.round(contentHeight*dpr));
-    canvas.dataset.v68Dpr=String(dpr);
+    merged.createdAt=positiveMin(a.createdAt,b.createdAt)||finiteMax(a.createdAt,b.createdAt);
+    merged.updatedAt=finiteMax(a.updatedAt,b.updatedAt);
+    merged.lastAnsweredAt=finiteMax(a.lastAnsweredAt,b.lastAnsweredAt);
+    merged.syncModifiedAtV60=finiteMax(a.syncModifiedAtV60,a.syncModifiedAtV56,b.syncModifiedAtV60,b.syncModifiedAtV56);
+    merged.syncSchemaV60=SYNC_SCHEMA;
 
-    canvas.style.setProperty("width",width+"px","important");
-    canvas.style.setProperty("height",contentHeight+"px","important");
-    canvas.style.setProperty("left","0","important");
-    canvas.style.setProperty("top","0","important");
-    canvas.style.setProperty("position","absolute","important");
+    // 풀이 통계는 감소시키지 않는다.
+    for(const field of ["attempts","correct","wrong","totalTimeMs"]){
+      merged[field]=finiteMax(a[field],b[field]);
+    }
+    // 마지막 1회 시간/결과는 더 최근 풀이 쪽.
+    const latestAnswer=lastAnswerStamp(b)>lastAnswerStamp(a)?b:a;
+    if(latestAnswer.lastTimeMs!==undefined)merged.lastTimeMs=latestAnswer.lastTimeMs;
+    if(latestAnswer.lastResult!==undefined)merged.lastResult=latestAnswer.lastResult;
+    if(latestAnswer.wrongActive!==undefined)merged.wrongActive=latestAnswer.wrongActive;
+    if(latestAnswer.correctStreak!==undefined)merged.correctStreak=latestAnswer.correctStreak;
 
+    merged.flagged=!!(a.flagged||b.flagged);
+    merged.tags=arrayUnion(a.tags,b.tags);
+    merged.annotations=arrayUnion(a.annotations,b.annotations);
+    return merged;
+  }
+
+  function historyStamp(row){
+    return finiteMax(row?.completedAt,row?.createdAt,row?.updatedAt,row?.answeredAt,row?.timestamp);
+  }
+  function mergeHistoryRows(a,b){
+    if(!a)return b?structuredClone(b):null;
+    if(!b)return structuredClone(a);
+    return historyStamp(b)>historyStamp(a)?{...a,...b}:{...b,...a};
+  }
+
+  function mapUnion(rows,merger){
+    const map=new Map();
+    for(const row of rows){
+      if(!row?.id)continue;
+      const id=String(row.id);
+      map.set(id,merger(map.get(id),row));
+    }
+    return map;
+  }
+
+  function canonicalizeProblemOrder(rows,repairAt=Date.now()){
+    const list=[...rows];
+    list.sort((a,b)=>{
+      const ac=Number(a.createdAt)||0,bc=Number(b.createdAt)||0;
+      if(ac!==bc)return bc-ac; // 새로 등록한 문제가 위
+      const au=Number(a.updatedAt)||0,bu=Number(b.updatedAt)||0;
+      if(au!==bu)return bu-au;
+      return String(a.id).localeCompare(String(b.id));
+    });
+    list.forEach((row,index)=>{
+      row.order=index+1;
+      row.canonicalOrderV60=true;
+      row.orderModifiedAtV60=repairAt;
+      row.syncSchemaV60=SYNC_SCHEMA;
+    });
+    return list;
+  }
+
+  function mergeRemoteIntoLocal(local,remote){
+    const merged=mergeProblemRows(local,remote);
+    if(!merged)return merged;
+
+    // v60에서 만든 순서만 신뢰한다. 구버전의 꼬인 order는 무시.
+    const localOrderStamp=Number(local?.orderModifiedAtV60||0);
+    const remoteOrderStamp=Number(remote?.orderModifiedAtV60||0);
+    if(remote?.canonicalOrderV60===true && remoteOrderStamp>=localOrderStamp){
+      merged.order=Number(remote.order);
+      merged.canonicalOrderV60=true;
+      merged.orderModifiedAtV60=remoteOrderStamp;
+    }else if(local?.canonicalOrderV60===true){
+      merged.order=Number(local.order);
+      merged.canonicalOrderV60=true;
+      merged.orderModifiedAtV60=localOrderStamp;
+    }else{
+      // 아직 복구 전인 데이터끼리는 등록시각 기준으로 임시 위치 유지.
+      merged.order=Number.isFinite(Number(local?.order))?Number(local.order):Number(remote?.order);
+    }
+    return merged;
+  }
+
+  function scheduleRefresh(){
+    clearTimeout(refreshTimer);
+    refreshTimer=setTimeout(()=>refresh().catch(console.warn),180);
+  }
+
+  async function cloudSnapshots(repair=false){
+    const [ps,hs,ds,meta,pg]=await Promise.all([
+      withTimeout(db.ref(`${ROOT}/${user.uid}/problems`).once('value'),WRITE_TIMEOUT_MS,'문제 받기'),
+      withTimeout(db.ref(`${ROOT}/${user.uid}/history`).once('value'),WRITE_TIMEOUT_MS,'기록 받기'),
+      withTimeout(db.ref(`${ROOT}/${user.uid}/_deletions/problems`).once('value'),WRITE_TIMEOUT_MS,'삭제기록 받기'),
+      withTimeout(db.ref(`${ROOT}/${user.uid}/_meta`).once('value'),WRITE_TIMEOUT_MS,'메타 확인'),
+      withTimeout(db.ref(`${ROOT}/${user.uid}/progress`).once('value'),WRITE_TIMEOUT_MS,'진행상태 받기')
+    ]);
+    return {
+      problems:decodeCollection(ps.val(),repair),
+      history:decodeCollection(hs.val(),repair),
+      progressRaw:pg.val()||{},
+      deletionRaw:ds.val()||{},
+      meta:meta.val()||{},
+      rawProblems:ps.val()||{},
+      rawHistory:hs.val()||{}
+    };
+  }
+
+  async function applyDeletionMarker(marker){
+    if(!marker||Number(marker.schemaV60)!==SYNC_SCHEMA)return false;
+    const id=String(marker.id||"");
+    if(!id)return false;
+    const local=await nativeGet(STORES.problems,id);
+    if(!local)return false;
+
+    const deletedAt=Number(marker.deletedAt||0);
+    if(deletedAt<=contentStamp(local))return false;
+
+    applyingRemote=true;
+    try{await nativeRemove(STORES.problems,id);}finally{applyingRemote=false;}
     return true;
   }
 
-  function drawScoreAnswerV68(){
-    ensureEditStoreV68();
+  async function pullAll(){
+    if(!user||!db)throw new Error("먼저 로그인해줘");
+    applyingRemote=true;
+    try{
+      status("클라우드와 안전하게 합치는 중...");
+      const cloud=await cloudSnapshots(false);
+      let changed=false;
 
-    const canvas=byId("scoreAnswerCanvas");
-    if(!canvas)return;
-
-    const r=canvas.getBoundingClientRect();
-    if(!r.width||!r.height)return;
-
-    const dpr=
-      Number(canvas.dataset.v57Dpr||canvas.dataset.v68Dpr) ||
-      Math.min(window.devicePixelRatio||1,1.5);
-
-    const ctx=canvas.getContext("2d");
-    ctx.setTransform(dpr,0,0,dpr,0,0);
-    ctx.clearRect(0,0,r.width,r.height);
-
-    const strokes=state.scoreAnswerEdits[answerEditKeyV68()]||[];
-
-    for(const stroke of strokes){
-      if(!stroke?.points?.length)continue;
-
-      ctx.save();
-      ctx.globalCompositeOperation=
-        stroke.tool==="eraser"?"destination-out":"source-over";
-      ctx.lineCap="round";
-      ctx.lineJoin="round";
-      ctx.strokeStyle=
-        stroke.tool==="eraser"?"rgba(0,0,0,1)":"#ef4444";
-      ctx.lineWidth=Math.max(1,Number(stroke.size||4));
-      ctx.beginPath();
-
-      stroke.points.forEach((pt,i)=>{
-        const x=pt.x*r.width;
-        const y=pt.y*r.height;
-        if(i===0)ctx.moveTo(x,y);
-        else ctx.lineTo(x,y);
-      });
-
-      if(stroke.points.length===1){
-        const pt=stroke.points[0];
-        ctx.lineTo(pt.x*r.width+.01,pt.y*r.height+.01);
+      for(const remote of cloud.problems){
+        const local=await nativeGet(STORES.problems,remote.id);
+        const merged=mergeRemoteIntoLocal(local,remote);
+        if(!local||!sameJson(local,merged)){
+          await nativePut(STORES.problems,merged);
+          changed=true;
+        }
+      }
+      for(const remote of cloud.history){
+        const local=await nativeGet(STORES.history,remote.id);
+        const merged=mergeHistoryRows(local,remote);
+        if(!local||!sameJson(local,merged)){
+          await nativePut(STORES.history,merged);
+          changed=true;
+        }
+      }
+      for(const progress of Object.values(cloud.progressRaw||{})){
+        if(!progress?.id)continue;
+        const local=await nativeGet(STORES.problems,progress.id);
+        if(!local)continue;
+        const merged=applyProgressFieldsV64(local,progress);
+        if(!sameJson(local,merged)){
+          await nativePut(STORES.problems,merged);
+          changed=true;
+        }
+      }
+      for(const marker of Object.values(cloud.deletionRaw)){
+        if(await applyDeletionMarker(marker))changed=true;
       }
 
-      ctx.stroke();
-      ctx.restore();
-    }
+      if(changed)await refresh();
+      const count=(await getAll(STORES.problems)).length;
+      status(`동기화됨 · ${count}문제`,true);
+      return changed;
+    }finally{applyingRemote=false;}
   }
 
-  function bindScoreAnswerCanvasV68(canvas,wrap){
-    if(!canvas||!wrap||canvas.dataset.penV68==="1")return;
+  async function uploadRowsSafe(path,rows,cloudRaw,label){
+    let uploaded=0;
+    for(let i=0;i<rows.length;i++){
+      const row=rows[i];
+      const old=cloudRaw[keyOf(row.id)];
+      const text=JSON.stringify(row);
+      const fp=hashText(text);
 
-    canvas.dataset.penV68="1";
-    canvas.style.setProperty("pointer-events","auto","important");
-    canvas.style.setProperty("touch-action","none","important");
-    canvas.style.setProperty("z-index","80","important");
-
-    let current=null;
-    let penId=null;
-    let pan=null;
-
-    const stop=event=>{
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation?.();
-    };
-
-    canvas.addEventListener("pointerdown",event=>{
-      stop(event);
-      try{canvas.setPointerCapture(event.pointerId)}catch{}
-
-      if(event.pointerType==="touch"){
-        pan={
-          id:event.pointerId,
-          x:event.clientX,
-          y:event.clientY,
-          left:wrap.scrollLeft,
-          top:wrap.scrollTop
-        };
-        return;
+      let sameEnough=false;
+      if(old&&(old.__v48===1||old.__v47===1)&&old.complete===true&&old.fingerprint===fp){
+        sameEnough=true;
+      }else if(path==="problems"&&old){
+        const oldRow=decodeRowForRepair(old);
+        if(oldRow&&problemContentFingerprintV64(oldRow)===problemContentFingerprintV64(row)){
+          // 풀이통계/필기만 달라진 경우 거대한 문제이미지는 다시 올리지 않는다.
+          sameEnough=true;
+        }
       }
 
-      if(event.pointerType!=="pen")return;
-
-      ensureEditStoreV68();
-
-      const tool=
-        state.scoreAnswerEditTool==="eraser"?"eraser":"pen";
-      const size=
-        Math.max(
-          1,
-          Number(
-            state.scoreAnswerSize||
-            byId("scoreAnswerSizeInput")?.value||
-            4
-          )*(tool==="eraser"?5:1)
-        );
-
-      current={
-        tool,
-        size,
-        points:[pointV68(event,canvas)]
-      };
-      penId=event.pointerId;
-
-      const key=answerEditKeyV68();
-      if(!Array.isArray(state.scoreAnswerEdits[key])){
-        state.scoreAnswerEdits[key]=[];
+      if(sameEnough){
+        status(`${label} 확인 · ${i+1}/${rows.length}`);
+        continue;
       }
-      state.scoreAnswerEdits[key].push(current);
-      drawScoreAnswerV68();
-    },true);
+      status(`${label} 저장 · ${i+1}/${rows.length}`);
+      await uploadOne(path,row,`${label} ${i+1}/${rows.length}`);
+      uploaded++;
+    }
+    return uploaded;
+  }
 
-    canvas.addEventListener("pointermove",event=>{
-      stop(event);
+  async function repairAndNormalize(force=false){
+    if(!user||!db)throw new Error("먼저 로그인해줘");
+    if(repairRunning||fullPushRunning||dirtyRunning)return;
 
-      if(event.pointerType==="touch"){
-        if(!pan||pan.id!==event.pointerId)return;
-        wrap.scrollLeft=pan.left-(event.clientX-pan.x);
-        wrap.scrollTop=pan.top-(event.clientY-pan.y);
-        return;
-      }
+    const localRepairKey=REPAIR_LOCAL_PREFIX+user.uid;
+    if(!force&&localStorage.getItem(localRepairKey)==="1"){
+      return pullAll();
+    }
 
-      if(event.pointerType!=="pen"||!current||penId!==event.pointerId)return;
+    repairRunning=true;
+    stopRemote();
+    try{
+      status("동기화 복구 1/4 · 폰/태블릿/클라우드 자료 찾는 중...");
 
-      let list=[event];
+      const [localProblems,localHistory,cloud]=await Promise.all([
+        getAll(STORES.problems),
+        getAll(STORES.history),
+        cloudSnapshots(true)
+      ]);
+
+      /*
+        복구에서는 기존 삭제기록을 적용하지 않는다.
+        v56 이전/복구 전의 잘못된 삭제 신호가 살아 있는 문제를 다시 지우지 못하게 한다.
+        v60 이후 직접 삭제한 marker만 일반 동기화에서 반영된다.
+      */
+      const repairAt=Date.now();
+      const problemMap=mapUnion([...cloud.problems,...localProblems],mergeProblemRows);
+      const canonicalProblems=canonicalizeProblemOrder([...problemMap.values()],repairAt);
+
+      const historyMap=mapUnion([...cloud.history,...localHistory],mergeHistoryRows);
+      const canonicalHistory=[...historyMap.values()];
+
+      status(`동기화 복구 2/4 · ${canonicalProblems.length}문제 로컬 복원 중...`);
+      applyingRemote=true;
       try{
-        const c=event.getCoalescedEvents?.();
-        if(c?.length)list=c;
-      }catch{}
+        await replaceStoreNative(STORES.problems,canonicalProblems);
+        await replaceStoreNative(STORES.history,canonicalHistory);
+      }finally{applyingRemote=false;}
+      await refresh();
 
-      for(const item of list){
-        current.points.push(pointV68(item,canvas));
-      }
-      drawScoreAnswerV68();
-    },true);
+      status("동기화 복구 3/4 · 클라우드 기준본 만드는 중...");
+      await uploadRowsSafe('problems',canonicalProblems,cloud.rawProblems,'복구 문제');
+      await uploadRowsSafe('history',canonicalHistory,cloud.rawHistory,'복구 기록');
+      await uploadIndexBatchV65(canonicalProblems,'복구 인덱스');
 
-    const end=event=>{
-      stop(event);
+      status("동기화 복구 4/4 · 기준 확정 중...");
+      await retryWrite(()=>db.ref(`${ROOT}/${user.uid}/_meta`).update({
+        updatedAt:firebase.database.ServerValue.TIMESTAMP,
+        repairVersion:SYNC_SCHEMA,
+        repairAt,
+        problemCount:canonicalProblems.length,
+        historyCount:canonicalHistory.length,
+        syncSchema:SYNC_SCHEMA
+      }),"복구 메타 저장");
 
-      if(event.pointerType==="touch"){
-        if(pan?.id===event.pointerId)pan=null;
-        return;
-      }
-
-      if(event.pointerType!=="pen"||penId!==event.pointerId)return;
-
-      current=null;
-      penId=null;
-      saveEditStoreV68();
-      drawScoreAnswerV68();
-    };
-
-    canvas.addEventListener("pointerup",end,true);
-    canvas.addEventListener("pointercancel",end,true);
-    canvas.addEventListener("lostpointercapture",end,true);
+      localStorage.setItem(localRepairKey,"1");
+      status(`동기화 복구 완료 · ${canonicalProblems.length}문제`,true);
+      try{showToast(`동기화 복구 완료 · ${canonicalProblems.length}문제`);}catch{}
+    }finally{
+      repairRunning=false;
+      startRemoteV65(Date.now()-2000);
+    }
   }
 
-  function rebuildScoreAnswerV68(){
-    let wrap=byId("scoreAnswerEditWrap");
-    if(!wrap)return;
+  async function pushAll(){
+    if(!user||!db)throw new Error("먼저 로그인해줘");
+    if(fullPushRunning||applyingRemote||repairRunning)return;
+    fullPushRunning=true;
+    try{
+      const cloud=await cloudSnapshots(false);
+      const rows=await getAll(STORES.problems);
+      const histories=await getAll(STORES.history);
+      await uploadRowsSafe('problems',rows,cloud.rawProblems,'문제');
+      for(let i=0;i<rows.length;i++){
+        status(`진행상태 저장 · ${i+1}/${rows.length}`);
+        await uploadProgressV64(rows[i],`진행상태 ${i+1}/${rows.length}`);
+        if(i%20===19)await sleep(0);
+      }
+      await uploadRowsSafe('history',histories,cloud.rawHistory,'풀이기록');
+      await retryWrite(()=>db.ref(`${ROOT}/${user.uid}/_meta`).update({
+        updatedAt:firebase.database.ServerValue.TIMESTAMP,
+        problemCount:rows.length,
+        historyCount:histories.length,
+        syncSchema:SYNC_SCHEMA
+      }),"마지막 저장");
+      status(`클라우드 저장 완료 · ${rows.length}문제`,true);
+    }finally{fullPushRunning=false;}
+  }
 
-    /*
-      v57/v63의 wrapper 익명 pointer handler를 1회 제거.
-      dataset.penV63=1은 남겨서 구버전 handler가 다시 붙지 못하게 함.
-    */
-    if(wrap.dataset.scoreAnswerV68!=="1"){
-      const scrollLeft=wrap.scrollLeft;
-      const scrollTop=wrap.scrollTop;
+  function queueDirty(storeName,action,id,row){
+    if(!user||applyingRemote||fullPushRunning||repairRunning)return;
+    const path=action==="progress"?"progress":pathForStore(storeName);
+    if(!path||!id)return;
+    dirty.set(`${storeName}:${id}`,{storeName,path,action,id,row});
+    clearTimeout(dirtyTimer);
+    dirtyTimer=setTimeout(flushDirty,650);
+  }
 
-      const fresh=wrap.cloneNode(true);
-      fresh.dataset.scoreAnswerV68="1";
-      fresh.dataset.penV63="1";
-      fresh.dataset.penV57="1";
+  async function flushDirty(){
+    if(dirtyRunning||!user||applyingRemote||fullPushRunning||repairRunning||!dirty.size)return;
+    dirtyRunning=true;
+    const jobs=Array.from(dirty.values());dirty.clear();
+    try{
+      for(let i=0;i<jobs.length;i++){
+        const j=jobs[i];
+        status(`변경사항 동기화 · ${i+1}/${jobs.length}`);
+        if(j.action==='remove')await removeOne(j.path,j.id,'삭제 동기화');
+        else if(j.action==='progress')await uploadProgressV64(j.row,'진행상태 동기화');
+        else if(j.path==='problems')await uploadProblemWithIndexV65(j.row,'변경 문제');
+        else await uploadOne(j.path,j.row,'변경사항');
+      }
+      status(`실시간 동기화됨 · ${state.problems?.length||0}문제`,true);
+    }catch(e){
+      for(const j of jobs)dirty.set(`${j.storeName}:${j.id}`,j);
+      status(`자동 동기화 실패 · ${niceError(e)}`,false,true);
+    }finally{dirtyRunning=false;}
+  }
 
-      wrap.replaceWith(fresh);
-      wrap=fresh;
+  // 구버전의 전체 자동 업로드 예약 제거.
+  scheduleSyncForLocalChange=function(){};
+  const basePut=put,baseRemove=remove,baseClearStore=clearStore;
 
-      wrap.scrollLeft=scrollLeft;
-      wrap.scrollTop=scrollTop;
+  put=async function(storeName,value){
+    let oldProblemV65=null;
+    let contentChangedV65=true;
+
+    if(storeName===STORES.problems&&value&&!applyingRemote){
+      try{oldProblemV65=await nativeGet(STORES.problems,value.id);}catch{}
+      // v65: 거대한 이미지 문자열을 매번 JSON.stringify/hash하지 않는다.
+      // 등록/문제수정 때만 contentUpdatedAtV65가 바뀌므로 풀이/필기는 소형 progress만 전송.
+      contentChangedV65=!oldProblemV65 ||
+        Number(value.contentUpdatedAtV65||0)!==Number(oldProblemV65.contentUpdatedAtV65||0);
+
+      const now=Date.now();
+      value.syncModifiedAtV60=now;
+      value.syncSchemaV60=SYNC_SCHEMA;
+      value.progressUpdatedAtV64=now;
+      value.syncSchemaV64=PERF_SYNC_SCHEMA;
+
+      if(!oldProblemV65 || Number(oldProblemV65.order)!==Number(value.order)){
+        value.orderModifiedAtV60=now;
+        value.canonicalOrderV60=true;
+      }
     }
 
-    const canvas=byId("scoreAnswerCanvas");
-    if(!canvas)return;
-
-    ensureScoreCanvasSizeV68(canvas,wrap);
-    bindScoreAnswerCanvasV68(canvas,wrap);
-    drawScoreAnswerV68();
-
-    const pen=byId("scoreAnswerPenBtn");
-    const eraser=byId("scoreAnswerEraserBtn");
-    const clear=byId("clearScoreAnswerInkBtn");
-    const size=byId("scoreAnswerSizeInput");
-
-    if(pen)pen.onclick=()=>{
-      state.scoreAnswerEditTool="pen";
-      pen.classList.add("ink-active");
-      eraser?.classList.remove("ink-active");
-    };
-
-    if(eraser)eraser.onclick=()=>{
-      state.scoreAnswerEditTool="eraser";
-      eraser.classList.add("ink-active");
-      pen?.classList.remove("ink-active");
-    };
-
-    if(size)size.oninput=event=>{
-      state.scoreAnswerSize=Number(event.target.value||4);
-    };
-
-    if(clear)clear.onclick=()=>{
-      if(!confirm("현재 답안 수정필기를 지울까?"))return;
-      ensureEditStoreV68();
-      delete state.scoreAnswerEdits[answerEditKeyV68()];
-      saveEditStoreV68();
-      drawScoreAnswerV68();
-    };
-  }
-
-  /*
-    구버전이 reset 함수를 호출해도 최종적으로 v68 컨트롤러 사용.
-  */
-  try{resetScoreAnswerCanvasV28=rebuildScoreAnswerV68}catch{}
-  try{resetScoreAnswerCanvasV14=rebuildScoreAnswerV68}catch{}
-  try{resetScoreAnswerCanvasV13=rebuildScoreAnswerV68}catch{}
-  try{resetScoreAnswerCanvasV12=rebuildScoreAnswerV68}catch{}
-  try{resetScoreAnswerCanvasV11=rebuildScoreAnswerV68}catch{}
-
-  if(typeof renderScoreAnswerPageV11==="function"){
-    const renderBeforeV68=renderScoreAnswerPageV11;
-    renderScoreAnswerPageV11=function(index=0){
-      const result=renderBeforeV68.apply(this,arguments);
-      [90,180].forEach(delay=>setTimeout(rebuildScoreAnswerV68,delay));
-      return result;
-    };
-  }
-
-  const openScoreBeforeV68=openScore;
-  openScore=function(){
-    const result=openScoreBeforeV68.apply(this,arguments);
-    [110,220,380].forEach(delay=>setTimeout(rebuildScoreAnswerV68,delay));
+    const result=await basePut(storeName,value);
+    if(!applyingRemote){
+      if(storeName===STORES.problems&&value&&!contentChangedV65){
+        queueDirty(storeName,'progress',value.id,value);
+      }else{
+        queueDirty(storeName,'put',value?.id,value);
+      }
+    }
     return result;
   };
 
-  /*
-    v67 '내 답안으로 돌아가기' 후 다시 제출해도 수정펜 재연결.
-  */
-  document.addEventListener("click",event=>{
-    if(event.target?.closest?.("#scoreAnswerPenBtn,#scoreAnswerEraserBtn")){
-      setTimeout(rebuildScoreAnswerV68,0);
+  remove=async function(storeName,id){
+    const result=await baseRemove(storeName,id);
+    if(!applyingRemote)queueDirty(storeName,'remove',id,null);
+    return result;
+  };
+
+  clearStore=async function(storeName){
+    const rows=!applyingRemote?await getAll(storeName):[];
+    const result=await baseClearStore(storeName);
+    if(!applyingRemote){
+      for(const row of rows){
+        if(row?.id)queueDirty(storeName,'remove',row.id,null);
+      }
     }
+    return result;
+  };
+
+  async function applyRemoteProblem(snap){
+    if(fullPushRunning||dirtyRunning||repairRunning)return;
+    const remote=decodeRow(snap.val());
+    if(!remote?.id)return;
+
+    applyingRemote=true;
+    try{
+      const local=await nativeGet(STORES.problems,remote.id);
+      const merged=mergeRemoteIntoLocal(local,remote);
+      if(!local||!sameJson(local,merged)){
+        await nativePut(STORES.problems,merged);
+        scheduleRefresh();
+      }
+    }finally{applyingRemote=false;}
+  }
+
+  async function applyRemoteHistory(snap){
+    if(fullPushRunning||dirtyRunning||repairRunning)return;
+    const remote=decodeRow(snap.val());
+    if(!remote?.id)return;
+
+    applyingRemote=true;
+    try{
+      const local=await nativeGet(STORES.history,remote.id);
+      const merged=mergeHistoryRows(local,remote);
+      if(!local||!sameJson(local,merged)){
+        await nativePut(STORES.history,merged);
+        scheduleRefresh();
+      }
+    }finally{applyingRemote=false;}
+  }
+
+
+  async function applyRemoteProgressV64(snap){
+    if(fullPushRunning||dirtyRunning||repairRunning)return;
+    const remote=snap.val();
+    if(!remote?.id)return;
+    applyingRemote=true;
+    try{
+      const local=await nativeGet(STORES.problems,remote.id);
+      if(!local)return;
+      const merged=applyProgressFieldsV64(local,remote);
+      if(!sameJson(local,merged)){
+        await nativePut(STORES.problems,merged);
+        // 풀이화면을 방해하지 않도록 목록 전체 refresh는 짧게 묶어서 실행.
+        scheduleRefresh();
+      }
+    }finally{applyingRemote=false;}
+  }
+
+  async function applyRemoteDeletion(snap){
+    if(fullPushRunning||dirtyRunning||repairRunning)return;
+    const marker=snap.val();
+    const cutoff=Number(localStorage.getItem(`psatDeletionCutoffV66:${user?.uid||""}`)||0);
+    const deletedAt=Number(marker?.deletedAt||0);
+    const explicitV66=Number(marker?.schemaV66||0)>=66;
+    // Firebase child_added는 listener 연결 때 과거 marker도 전부 재생한다.
+    // v66 시작 전 marker는 무시하고, v66에서 새로 만든 정상 삭제만 적용한다.
+    if(!explicitV66 && (!deletedAt || deletedAt<cutoff))return;
+    if(await applyDeletionMarker(marker))scheduleRefresh();
+  }
+
+
+  async function applyRemoteIndexV65(snap){
+    if(fullPushRunning||dirtyRunning||repairRunning)return;
+    const idx=snap.val();
+    if(!idx?.id)return;
+    const local=await nativeGet(STORES.problems,idx.id);
+    if(local && contentRevV65(local)>=Number(idx.contentUpdatedAtV65||0))return;
+    if(await applyCloudProblemV65(idx.id)){
+      state.problems=sortProblemsForDisplay(state.problems);
+      rebuildProblemIndexV63();
+      const active=activeViewIdV63();
+      if(active==="listView")renderProblemList();
+      else if(active==="wrongView")renderWrongList();
+    }
+  }
+
+  function startRemoteV65(since=Date.now()-2000){
+    stopRemote();
+    if(!user||!db)return;
+
+    // 큰 /problems 경로를 직접 listen하지 않는다. 작은 인덱스 변화만 보고 해당 문제 1개만 받는다.
+    problemIndexRefV65=db.ref(`${ROOT}/${user.uid}/problemIndex`)
+      .orderByChild("indexUpdatedAtV65").startAt(Number(since)||0);
+    progressRefV64=db.ref(`${ROOT}/${user.uid}/progress`)
+      .orderByChild("progressUpdatedAtV64").startAt(Number(since)||0);
+    historyLiveRefV65=db.ref(`${ROOT}/${user.uid}/history`)
+      .orderByChild("finishedAt").startAt(Number(since)||0);
+    deletionsRef=db.ref(`${ROOT}/${user.uid}/_deletions/problems`);
+
+    problemIndexRefV65.on("child_added",snap=>applyRemoteIndexV65(snap).catch(console.warn));
+    problemIndexRefV65.on("child_changed",snap=>applyRemoteIndexV65(snap).catch(console.warn));
+    progressRefV64.on("child_added",snap=>applyRemoteProgressV64(snap).catch(console.warn));
+    progressRefV64.on("child_changed",snap=>applyRemoteProgressV64(snap).catch(console.warn));
+
+    // history는 기존 wrapper의 finishedAt이 uploadOne 완료 시각이라 새 기록만 들어온다.
+    historyLiveRefV65.on("child_added",snap=>applyRemoteHistory(snap).catch(console.warn));
+    historyLiveRefV65.on("child_changed",snap=>applyRemoteHistory(snap).catch(console.warn));
+    deletionsRef.on("child_added",snap=>applyRemoteDeletion(snap).catch(console.warn));
+    deletionsRef.on("child_changed",snap=>applyRemoteDeletion(snap).catch(console.warn));
+  }
+
+  function stopRemote(){
+    if(problemsRef)problemsRef.off();
+    if(historyRef)historyRef.off();
+    if(deletionsRef)deletionsRef.off();
+    if(progressRefV64)progressRefV64.off();
+    if(problemIndexRefV65)problemIndexRefV65.off();
+    if(historyLiveRefV65)historyLiveRefV65.off();
+    problemsRef=historyRef=deletionsRef=progressRefV64=null;
+    problemIndexRefV65=historyLiveRefV65=null;
+  }
+
+  function startRemote(){
+    stopRemote();
+    if(!user||!db)return;
+    problemsRef=db.ref(`${ROOT}/${user.uid}/problems`);
+    historyRef=db.ref(`${ROOT}/${user.uid}/history`);
+    deletionsRef=db.ref(`${ROOT}/${user.uid}/_deletions/problems`);
+    progressRefV64=db.ref(`${ROOT}/${user.uid}/progress`);
+
+    problemsRef.on('child_added',snap=>applyRemoteProblem(snap).catch(console.warn));
+    problemsRef.on('child_changed',snap=>applyRemoteProblem(snap).catch(console.warn));
+    historyRef.on('child_added',snap=>applyRemoteHistory(snap).catch(console.warn));
+    historyRef.on('child_changed',snap=>applyRemoteHistory(snap).catch(console.warn));
+    progressRefV64.on('child_added',snap=>applyRemoteProgressV64(snap).catch(console.warn));
+    progressRefV64.on('child_changed',snap=>applyRemoteProgressV64(snap).catch(console.warn));
+    deletionsRef.on('child_added',snap=>applyRemoteDeletion(snap).catch(console.warn));
+    deletionsRef.on('child_changed',snap=>applyRemoteDeletion(snap).catch(console.warn));
+    // child_removed만으로는 절대 로컬 문제 삭제하지 않음.
+  }
+
+
+  async function emergencyProblemRestoreV66(){
+    const current=Number(state.problems?.length||0);
+    let lastKnown=0;
+    try{lastKnown=Number(localStorage.getItem("psatLastKnownProblemCountV66")||0);}catch{}
+    let cloudCount=0;
+    try{
+      const metaSnap=await withTimeout(
+        db.ref(`${ROOT}/${user.uid}/_meta/problemCount`).once("value"),
+        WRITE_TIMEOUT_MS,"문제수 확인"
+      );
+      cloudCount=Number(metaSnap.val()||0);
+    }catch{}
+    const expected=Math.max(lastKnown,cloudCount);
+    const suspicious=(current===0&&expected>0)||(expected>=20&&current<Math.floor(expected*0.5));
+    if(!suspicious){
+      try{localStorage.setItem("psatLastKnownProblemCountV66",String(Math.max(lastKnown,current,cloudCount)));}catch{}
+      return false;
+    }
+    status(`문제목록 자동복구 중 · 현재 ${current} / 기준 ${expected}`);
+    await repairAndNormalize(true);
+    const restored=Number(state.problems?.length||0);
+    try{localStorage.setItem("psatLastKnownProblemCountV66",String(Math.max(lastKnown,restored,cloudCount)));}catch{}
+    status(`문제목록 복구됨 · ${restored}문제`,true);
+    return true;
+  }
+
+  async function afterLogin(u){
+    user=u;
+    localStorage.setItem(LAST_EMAIL_KEY,u.email||'');
+    if(el('firebaseEmailV45')&&u.email)el('firebaseEmailV45').value=u.email;
+    el('firebaseLogoutBtnV45')?.classList.remove('hidden');
+    status(`로그인됨 · ${u.email||''}`,true);
+
+    // v65부터 평소 시작 때는 큰 problems 전체를 절대 받지 않는다.
+    // 꼬인 데이터 합집합 복구가 필요할 때만 사용자가 '동기화 복구'를 누른다.
+    await fastSyncV65();
+    await emergencyProblemRestoreV66();
+    try{
+      const nowCount=Number(state.problems?.length||0);
+      const oldCount=Number(localStorage.getItem("psatLastKnownProblemCountV66")||0);
+      if(nowCount>oldCount)localStorage.setItem("psatLastKnownProblemCountV66",String(nowCount));
+    }catch{}
+  }
+
+  function bindUI(){
+    if(uiBound)return;uiBound=true;
+    const email=el('firebaseEmailV45');
+    if(email)email.value=localStorage.getItem(LAST_EMAIL_KEY)||email.value||'';
+
+    el('firebaseSignupBtnV45')?.addEventListener('click',async()=>{
+      try{
+        const e=el('firebaseEmailV45')?.value.trim()||'',p=el('firebasePasswordV45')?.value||'';
+        if(!e||p.length<6)throw new Error('이메일과 6자 이상 비밀번호 입력');
+        initFirebase();
+        const c=await auth.createUserWithEmailAndPassword(e,p);
+        await afterLogin(c.user);
+      }catch(err){const m=niceError(err);status(`계정 생성 실패 · ${m}`,false,true);showToast(m);}
+    });
+
+    el('firebaseLoginBtnV45')?.addEventListener('click',async()=>{
+      try{
+        const e=el('firebaseEmailV45')?.value.trim()||'',p=el('firebasePasswordV45')?.value||'';
+        if(!e||!p)throw new Error('이메일/비밀번호 입력');
+        initFirebase();status('로그인 중...');
+        const c=await auth.signInWithEmailAndPassword(e,p);
+        await afterLogin(c.user);
+      }catch(err){const m=niceError(err);status(`로그인 실패 · ${m}`,false,true);showToast(m);}
+    });
+
+    el('firebaseLogoutBtnV45')?.addEventListener('click',async()=>{
+      try{stopRemote();if(auth)await auth.signOut();user=null;status('로그아웃됨');}
+      catch(e){status(niceError(e),false,true);}
+    });
+
+    el('firebaseRepairBtnV60')?.addEventListener('click',async()=>{
+      try{
+        if(!confirm('폰/태블릿/클라우드 문제를 합치고 순서를 다시 정상화할까? 문제 자체는 자동 삭제하지 않아.'))return;
+        await repairAndNormalize(true);
+      }catch(err){const m=niceError(err);status(`복구 실패 · ${m}`,false,true);showToast(m);}
+    });
+
+    el('firebasePushBtnV45')?.addEventListener('click',async()=>{
+      try{await pushChangedOnlyV65();showToast('변경된 데이터만 안전 업로드 완료');}
+      catch(err){const m=niceError(err);status(`업로드 실패 · ${m}`,false,true);showToast(m);}
+    });
+
+    el('firebasePullBtnV45')?.addEventListener('click',async()=>{
+      try{await fastSyncV65();showToast('빠른 동기화 완료');}
+      catch(err){const m=niceError(err);status(`받기 실패 · ${m}`,false,true);showToast(m);}
+    });
+  }
+
+  function start(){
+    bindUI();
+    try{
+      initFirebase();
+      auth.onAuthStateChanged(u=>{
+        if(!u){user=null;status('Firebase 연결됨 · 로그인 필요');return;}
+        if(user?.uid===u.uid)return;
+        afterLogin(u).catch(e=>status(`자동 복구/동기화 실패 · ${niceError(e)}`,false,true));
+      });
+    }catch(e){status(`Firebase 초기화 실패 · ${niceError(e)}`,false,true);}
+  }
+
+  window.addEventListener('online',()=>{
+    if(user&&dirty.size)flushDirty();
+    else if(user)fastSyncV65().catch(console.warn);
+  });
+
+  setTimeout(start,400);
+})();
+
+
+
+
+/* === v52: 중단/나가기 단일 처리 + 왼쪽 풀이 진행 표시 === */
+(function psatExitStableV52(){
+  let opening=false;
+  let modalOpenedAt=0;
+  let elapsedAtOpen=0;
+  let timerWasRunning=false;
+
+  const byId=id=>document.getElementById(id);
+
+  function sessionTotal(){
+    return Math.max(
+      0,
+      Number(state.session?.total || state.queue?.length || 0)
+    );
+  }
+
+  function sessionSolved(){
+    return Math.max(
+      0,
+      Number(state.session?.answered || 0)
+    );
+  }
+
+  function updateProgress(){
+    const box=byId("leftProgressV52");
+    const solvedEl=byId("leftSolvedV52");
+    const remainingEl=byId("leftRemainingV52");
+
+    if(!box || !solvedEl || !remainingEl) return;
+
+    if(!state.session){
+      solvedEl.textContent="0";
+      remainingEl.textContent="0";
+      box.classList.add("hidden");
+      return;
+    }
+
+    const total=sessionTotal();
+    const solved=Math.min(total,sessionSolved());
+    const remaining=Math.max(0,total-solved);
+
+    solvedEl.textContent=String(solved);
+    remainingEl.textContent=String(remaining);
+    box.classList.remove("hidden");
+  }
+
+  window.updateLeftProgressV52=updateProgress;
+
+  function currentSolveElapsed(){
+    const solvedMs=Math.max(
+      0,
+      Number(state.session?.solveElapsedMsV49 || 0)
+    );
+
+    if(!state.current || state.checked || !state.questionStart){
+      return solvedMs;
+    }
+
+    return solvedMs + Math.max(0,Date.now()-state.questionStart);
+  }
+
+  function fillSummary(){
+    const answered=sessionSolved();
+    const wrong=Math.max(
+      0,
+      Array.isArray(state.session?.wrongIds)
+        ? state.session.wrongIds.length
+        : answered-Number(state.session?.correct||0)
+    );
+
+    if(byId("exitAnsweredV49")){
+      byId("exitAnsweredV49").textContent=`${answered}문제`;
+    }
+    if(byId("exitWrongV49")){
+      byId("exitWrongV49").textContent=`${wrong}문제`;
+    }
+    if(byId("exitElapsedV49")){
+      byId("exitElapsedV49").textContent=formatLongTime(elapsedAtOpen);
+    }
+  }
+
+  function overlay(){
+    const el=byId("exitSummaryOverlayV49");
+    if(el && el.parentElement!==document.body){
+      document.body.appendChild(el);
+    }
+    return el;
+  }
+
+  function hideSummary(){
+    const el=overlay();
+    if(el){
+      el.classList.add("hidden");
+      el.style.removeProperty("display");
+    }
+    document.body.classList.remove("exit-summary-open-v51");
+  }
+
+  async function leaveBrowserFullscreen(){
+    if(!document.fullscreenElement || !document.exitFullscreen) return;
+    try{
+      await document.exitFullscreen();
+    }catch{}
+    // Android Chrome fullscreen top-layer가 실제로 내려갈 시간만 짧게 확보
+    await new Promise(resolve=>setTimeout(resolve,120));
+  }
+
+  async function openSummary(){
+    if(opening) return;
+
+    if(!state.current || !state.session){
+      await pauseCurrentSession();
+      return;
+    }
+
+    opening=true;
+    try{
+      elapsedAtOpen=currentSolveElapsed();
+      modalOpenedAt=Date.now();
+      timerWasRunning=!!state.timerId;
+
+      // 결과창을 보는 시간은 풀이시간에 포함하지 않음
+      stopTimer();
+
+      await leaveBrowserFullscreen();
+
+      const el=overlay();
+      if(!el) return;
+
+      raiseExitButtonsV54();
+      fillSummary();
+      el.classList.remove("hidden");
+      el.style.display="flex";
+      el.style.setProperty("pointer-events","auto","important");
+      el.style.setProperty("z-index","2147483647","important");
+      document.body.classList.add("exit-summary-open-v51");
+    }finally{
+      opening=false;
+    }
+  }
+
+  async function continueSolve(){
+    const now=Date.now();
+    const pauseMs=modalOpenedAt
+      ? Math.max(0,now-modalOpenedAt)
+      : 0;
+
+    hideSummary();
+
+    if(state.current && !state.checked && state.questionStart){
+      state.questionStart+=pauseMs;
+    }
+
+    if(state.session?.endAt){
+      state.session.endAt+=pauseMs;
+    }
+
+    modalOpenedAt=0;
+
+    if(state.current && !state.checked && timerWasRunning){
+      updateTimers();
+      startTimer();
+    }
+
+    // 이 click 자체의 사용자 제스처 안에서 다시 전체화면 요청
+    try{
+      await enterSolveFullscreen();
+    }catch{}
+
+    updateProgress();
+  }
+
+  async function confirmExit(){
+    if(!state.session){
+      hideSummary();
+      await pauseCurrentSession();
+      return;
+    }
+
+    const now=Date.now();
+    const solvedMs=Math.max(
+      0,
+      Number(state.session.solveElapsedMsV49 || 0)
+    );
+    const currentPart=Math.max(0,elapsedAtOpen-solvedMs);
+
+    hideSummary();
+
+    // pause snapshot에 팝업 대기 시간이 들어가지 않도록 복원
+    if(state.current && !state.checked && state.questionStart){
+      state.questionStart=now-currentPart;
+    }else if(state.current && state.checked){
+      state.questionStart=now;
+    }
+
+    if(state.session){
+      state.session.startedAt=now-elapsedAtOpen;
+      if(state.session.endAt && modalOpenedAt){
+        state.session.endAt+=Math.max(0,now-modalOpenedAt);
+      }
+    }
+
+    modalOpenedAt=0;
+    await pauseCurrentSession();
+    updateProgress();
+  }
+
+  /*
+    v49/v50/v51 중첩 handler를 파일에서 제거했고,
+    v52는 이 3개 click handler만 사용한다.
+  */
+  
+
+  
+
+  
+
+
+  /*
+    v54:
+    Android 전체화면/캔버스에서 click이 유실되는 경우가 있어
+    세 버튼을 같은 IIFE 안에서 pointerup capture로 직접 처리한다.
+    openSummary / continueSolve / confirmExit 함수와 같은 scope라서
+    v53처럼 함수 접근이 끊기지 않는다.
+  */
+
+  /* === v55: 나가기 버튼 전용 강제 종료 경로 === */
+  async function forceExitSolveV55(){
+    /*
+      기존 confirmExit() 내부에서 pauseCurrentSession()으로 넘어가는 경로가
+      Android 전체화면/팝업 상태와 충돌하는 경우가 있어
+      저장과 UI 종료를 한 함수에서 끝낸다.
+    */
+    try{ stopTimer(); }catch{}
+
+    // 현재 세션/문제 진행상태 저장
+    try{
+      if(state.session){
+        state.session.pausedAt=Date.now();
+      }
+    }catch{}
+
+    try{
+      if(typeof savePausedSession==="function"){
+        await savePausedSession();
+      }else if(typeof saveState==="function"){
+        await saveState();
+      }else if(typeof saveAll==="function"){
+        await saveAll();
+      }
+    }catch(err){
+      console.warn("v55 save before exit failed",err);
+    }
+
+    // Firebase 자동 동기화는 비동기 예약만 하고 UI 종료는 기다리지 않음
+    try{
+      if(typeof scheduleFirebaseSyncV48==="function")scheduleFirebaseSyncV48();
+    }catch{}
+    try{
+      if(typeof scheduleCloudSyncV48==="function")scheduleCloudSyncV48();
+    }catch{}
+
+    // 팝업 먼저 닫기
+    try{ hideSummary(); }catch{}
+    const modal=byId("exitSummaryOverlayV49");
+    if(modal){
+      modal.classList.add("hidden");
+      modal.style.setProperty("display","none","important");
+      modal.style.setProperty("pointer-events","none","important");
+    }
+
+    // 전체화면 강제 종료
+    try{
+      if(document.fullscreenElement && document.exitFullscreen){
+        await document.exitFullscreen();
+      }
+    }catch{}
+
+    // 풀이 화면 종료
+    const solvePanel=byId("solvePanel");
+    if(solvePanel){
+      solvePanel.classList.add("hidden");
+      solvePanel.classList.remove("fullscreen-solve");
+      solvePanel.style.removeProperty("display");
+    }
+
+    // 앱 상태 정리
+    try{ state.current=null; }catch{}
+    try{ state.checked=false; }catch{}
+    try{ state.timerId=null; }catch{}
+
+    // 홈/문제선택 화면 복구
+    const home=byId("homePanel") || byId("homeScreen") || byId("mainPanel");
+    if(home)home.classList.remove("hidden");
+
+    try{
+      if(typeof renderAll==="function")renderAll();
+    }catch{}
+    try{
+      if(typeof showView==="function")showView("home");
+    }catch{}
+    try{
+      if(typeof showHome==="function")showHome();
+    }catch{}
+
+    // 브라우저 뒤로가기 같은 상태가 남지 않도록 스크롤/바디 잠금 해제
+    document.body.classList.remove("exit-summary-open-v51");
+    document.body.style.removeProperty("overflow");
+
+    try{ updateLeftProgressV52?.(); }catch{}
+  }
+
+  let exitActionBusyV54=false;
+  let lastExitActionV54=0;
+
+  function exitButtonFromEventV54(event){
+    return event.target?.closest?.(
+      "#exitSolveBtn,#continueSolveV49,#confirmExitSolveV49"
+    );
+  }
+
+  function stopExitGestureV54(event){
+    const btn=exitButtonFromEventV54(event);
+    if(!btn)return false;
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+    return true;
+  }
+
+  window.addEventListener("pointerdown",event=>{
+    if(!exitButtonFromEventV54(event))return;
+    stopExitGestureV54(event);
+  },true);
+
+  window.addEventListener("pointerup",async event=>{
+    const btn=exitButtonFromEventV54(event);
+    if(!btn)return;
+
+    stopExitGestureV54(event);
+
+    const now=Date.now();
+    if(exitActionBusyV54 || now-lastExitActionV54<250)return;
+    exitActionBusyV54=true;
+    lastExitActionV54=now;
+
+    try{
+      if(btn.id==="exitSolveBtn"){
+        await openSummary();
+        return;
+      }
+
+      if(btn.id==="continueSolveV49"){
+        await continueSolve();
+        return;
+      }
+
+      if(btn.id==="confirmExitSolveV49"){
+        await forceExitSolveV55();
+      }
+    }catch(err){
+      console.error("v54 exit action failed",err);
+      try{toast("버튼 처리 중 오류가 발생했어");}catch{}
+    }finally{
+      setTimeout(()=>{exitActionBusyV54=false},180);
+    }
+  },true);
+
+  /*
+    PC 마우스/일부 브라우저에서 pointerup이 없는 예외를 위한 click fallback.
+    pointerup 직후 발생한 click은 시간 guard로 중복 실행되지 않는다.
+  */
+  window.addEventListener("click",async event=>{
+    const btn=exitButtonFromEventV54(event);
+    if(!btn)return;
+
+    stopExitGestureV54(event);
+
+    const now=Date.now();
+    if(exitActionBusyV54 || now-lastExitActionV54<250)return;
+    exitActionBusyV54=true;
+    lastExitActionV54=now;
+
+    try{
+      if(btn.id==="exitSolveBtn") await openSummary();
+      else if(btn.id==="continueSolveV49") await continueSolve();
+      else if(btn.id==="confirmExitSolveV49") await forceExitSolveV55();
+    }catch(err){
+      console.error("v54 exit click fallback failed",err);
+    }finally{
+      setTimeout(()=>{exitActionBusyV54=false},180);
+    }
+  },true);
+
+  function raiseExitButtonsV54(){
+    const overlay=byId("exitSummaryOverlayV49");
+    if(overlay){
+      overlay.style.setProperty("z-index","2147483647","important");
+      overlay.style.setProperty("pointer-events","auto","important");
+    }
+    ["exitSolveBtn","continueSolveV49","confirmExitSolveV49"].forEach(id=>{
+      const btn=byId(id);
+      if(!btn)return;
+      btn.style.setProperty("pointer-events","auto","important");
+      btn.style.setProperty("touch-action","manipulation","important");
+      btn.style.setProperty("position","relative","important");
+      btn.style.setProperty("z-index","2147483647","important");
+    });
+  }
+
+  raiseExitButtonsV54();
+
+  // 상태 변화 후 즉시 표시 갱신
+  const oldLoadCurrentProblem=loadCurrentProblem;
+  loadCurrentProblem=function(problem){
+    const result=oldLoadCurrentProblem.apply(this,arguments);
+    updateProgress();
+    return result;
+  };
+
+  const oldCheckAnswer=checkAnswer;
+  checkAnswer=async function(){
+    const result=await oldCheckAnswer.apply(this,arguments);
+    updateProgress();
+    return result;
+  };
+
+  const oldNextProblem=nextProblem;
+  nextProblem=async function(){
+    const result=await oldNextProblem.apply(this,arguments);
+    updateProgress();
+    return result;
+  };
+
+  const oldFinishSession=finishSession;
+  finishSession=function(){
+    const result=oldFinishSession.apply(this,arguments);
+    updateProgress();
+    return result;
+  };
+
+  const oldResumePausedSession=resumePausedSession;
+  resumePausedSession=function(){
+    const result=oldResumePausedSession.apply(this,arguments);
+    updateProgress();
+    return result;
+  };
+
+  updateProgress();
+})();
+
+/* === v62: 목록 한칸 이동 + 중간분류 직접수정 보호 === */
+(function psatListAndCategoryFixV62(){
+  const input=()=>document.getElementById("categoryInput");
+  const editing=()=>!!document.getElementById("editingId")?.value;
+  let manualValue="";
+  let manualActive=false;
+
+  document.addEventListener("focusin",event=>{
+    if(event.target?.id!=="categoryInput")return;
+    manualActive=true;
+    manualValue=String(event.target.value||"");
+    event.target.dataset.manualEditV62="1";
+  },true);
+
+  document.addEventListener("input",event=>{
+    if(event.target?.id!=="categoryInput")return;
+    manualActive=true;
+    manualValue=String(event.target.value||"");
+
+    /*
+      빈값도 '사용자가 직접 지운 값'으로 인정한다.
+      기존 v29~v32 자동복구가 수정 중 다시 채우지 못하게 표시.
+    */
+    event.target.dataset.manualEditV62="1";
+  },true);
+
+  document.addEventListener("focusout",event=>{
+    if(event.target?.id!=="categoryInput")return;
+    manualValue=String(event.target.value||"");
+    setTimeout(()=>{ manualActive=false; },60);
+  },true);
+
+  // 기존 refresh/비동기 UI가 수정 도중 값을 되돌리면 즉시 사용자가 친 값으로 복원.
+  setInterval(()=>{
+    const el=input();
+    const add=document.getElementById("addView");
+    if(!el||!add?.classList.contains("active"))return;
+    if(!(manualActive||editing()))return;
+    if(el.dataset.manualEditV62==="1" && el.value!==manualValue){
+      el.value=manualValue;
+    }
+  },120);
+
+  // 수정 저장 직전 마지막 입력값을 확정.
+  document.addEventListener("submit",event=>{
+    if(event.target?.id!=="problemForm")return;
+    const el=input();
+    if(!el)return;
+    if(el.dataset.manualEditV62==="1"){
+      manualValue=String(el.value||"");
+    }
+  },true);
+})();
+
+
+
+
+
+/* === v67: 문제목록에는 있는데 문제풀이에 '등록된 문제 없음' 표시되는 버그 수정 === */
+(function psatSolveAvailabilityV67(){
+  let healing=false;
+
+  function hideFalseEmptyV67(){
+    const empty=document.getElementById("emptySolve");
+    if(!empty)return;
+    const hasProblem=!!(
+      state.current ||
+      (Array.isArray(state.problems) && state.problems.length>0) ||
+      (Array.isArray(state.queue) && state.queue.length>0)
+    );
+    empty.classList.toggle("hidden",hasProblem);
+  }
+
+  async function healLocalStateV67(){
+    if(healing)return false;
+
+    // 메모리에 문제가 이미 있으면 DB 전체 1만개를 다시 읽지 않는다.
+    if(Array.isArray(state.problems) && state.problems.length){
+      if(!state.problemMapV63 || state.problemMapV63.size!==state.problems.length){
+        try{ rebuildProblemIndexV63(); }catch{}
+      }
+      hideFalseEmptyV67();
+      return true;
+    }
+
+    healing=true;
+    try{
+      // 우선 count만 확인해서 대용량 전체조회는 정말 필요할 때만 한다.
+      let count=0;
+      try{
+        if(typeof countStoreV63==="function") count=await countStoreV63(STORES.problems);
+      }catch{}
+
+      if(!count){
+        hideFalseEmptyV67();
+        return false;
+      }
+
+      const rows=await getAll(STORES.problems);
+      if(!rows.length){
+        hideFalseEmptyV67();
+        return false;
+      }
+
+      state.problems=sortProblemsForDisplay(rows);
+      rebuildProblemIndexV63();
+      updateFilterOptionsV63();
+      hideFalseEmptyV67();
+
+      try{
+        localStorage.setItem("psatLastKnownProblemCountV67",String(rows.length));
+      }catch{}
+      return true;
+    }finally{
+      healing=false;
+    }
+  }
+
+  // 문제풀이 탭으로 들어갈 때마다 빈화면 표시를 현재 메모리 상태와 즉시 맞춘다.
+  const switchViewV67Base=switchView;
+  switchView=function(viewId){
+    const result=switchViewV67Base.apply(this,arguments);
+    if(viewId==="solveView"){
+      hideFalseEmptyV67();
+      if(!state.problems?.length){
+        healLocalStateV67().then(hideFalseEmptyV67).catch(console.warn);
+      }
+    }
+    return result;
+  };
+
+  // 실제 문제를 여는 순간에는 '등록된 문제 없음' 카드를 무조건 숨긴다.
+  const loadCurrentProblemV67Base=loadCurrentProblem;
+  loadCurrentProblem=function(problem){
+    if(problem){
+      const empty=document.getElementById("emptySolve");
+      empty?.classList.add("hidden");
+    }
+    const result=loadCurrentProblemV67Base.apply(this,arguments);
+    hideFalseEmptyV67();
+    return result;
+  };
+
+  // 목록에서 직접 푸는 경우에도 Map/메모리 상태를 다시 맞춘다.
+  const startDirectProblemV67Base=startDirectProblem;
+  startDirectProblem=function(problem){
+    if(problem?.id){
+      const live=problemByIdV63(problem.id) || problem;
+      hideFalseEmptyV67();
+      return startDirectProblemV67Base.call(this,live);
+    }
+    return startDirectProblemV67Base.apply(this,arguments);
+  };
+
+  const startReviewProblemV67Base=startReviewProblem;
+  startReviewProblem=function(problem,label){
+    if(problem?.id){
+      const live=problemByIdV63(problem.id) || problem;
+      hideFalseEmptyV67();
+      return startReviewProblemV67Base.call(this,live,label);
+    }
+    return startReviewProblemV67Base.apply(this,arguments);
+  };
+
+  /*
+    랜덤/필터 풀이 시작 시 메모리 자체가 비어버린 경우만 IndexedDB에서 1회 복구 후 재시도.
+    메모리에 문제가 있는데 필터 결과가 0개인 정상 상황은 억지로 전체문제로 바꾸지 않는다.
+  */
+  const startSessionV67Base=startSession;
+  startSession=function(problems,options={}){
+    if(Array.isArray(problems) && problems.length){
+      hideFalseEmptyV67();
+      return startSessionV67Base.call(this,problems,options);
+    }
+
+    if(state.problems?.length){
+      hideFalseEmptyV67();
+      return startSessionV67Base.call(this,problems||[],options);
+    }
+
+    healLocalStateV67().then(ok=>{
+      if(!ok){
+        startSessionV67Base.call(this,[],options);
+        return;
+      }
+
+      let retry=[];
+      try{
+        const label=String(options?.label||"");
+        if(label.includes("오답랜덤복습")){
+          retry=reviewListForMode("wrong");
+        }else if(label.includes("정답복습")){
+          retry=reviewListForMode("correct");
+        }else if(label.includes("안 푼")){
+          retry=reviewListForMode("unseen");
+        }else{
+          let subject=els.subjectFilter?.value||"";
+          if(label.includes("언어"))subject="언어";
+          else if(label.includes("자료"))subject="자료";
+          else if(label.includes("상황"))subject="상황";
+          retry=filterProblems(
+            els.modeSelect?.value||"all",
+            subject,
+            els.yearFilter?.value||""
+          );
+        }
+      }catch{}
+
+      hideFalseEmptyV67();
+      startSessionV67Base.call(this,retry,options);
+    }).catch(err=>{
+      console.warn("v67 solve restore failed",err);
+      startSessionV67Base.call(this,[],options);
+    });
+  };
+
+  // 문제 등록 직후에도 문제풀이 빈화면 문구가 남지 않게 즉시 갱신.
+  document.addEventListener("submit",event=>{
+    if(event.target?.id!=="problemForm")return;
+    setTimeout(hideFalseEmptyV67,0);
+    setTimeout(hideFalseEmptyV67,150);
   },false);
 
-  window.addEventListener("resize",()=>{
-    const score=byId("scoreOverlay");
-    if(score&&!score.classList.contains("hidden")){
-      setTimeout(rebuildScoreAnswerV68,180);
-    }
+  // 앱 복귀/탭 이동 후 stale DOM도 교정.
+  document.addEventListener("visibilitychange",()=>{
+    if(document.visibilityState==="visible")hideFalseEmptyV67();
   });
 
-  window.essayAnswerFixV68={
-    blankAnswerForProblemV68,
-    rebuildScoreAnswerV68
-  };
+  window.psatHealProblemsV67=healLocalStateV67;
+  window.psatHideFalseEmptyV67=hideFalseEmptyV67;
+
+  hideFalseEmptyV67();
 })();
 
-/* === v69: 제출 후 내답안 수정펜 - wrapper/document capture 방식 ===
-   canvas 자체가 이미지/레이아웃에 가려져도 S펜 좌표를 wrapper에서 직접 받는다.
+
+/* === v63: 10,000+ 문제 성능/백업 ===
+   - 채점/등록 시 전체 refresh 제거
+   - 문제/복습 목록 60개 단위 렌더
+   - id->problem Map 인덱스
+   - 대용량 백업 NDJSON 스트리밍 + gzip
+   - 기존 JSON 백업 복원 호환
 */
-(function essayScorePenV69(){
-  if(window.__essayScorePenV69)return;
-  window.__essayScorePenV69=true;
+window.psatLargeBankV63 = true;
 
-  const $v=id=>document.getElementById(id);
-  const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
-  let active=null;
-
-  function key(){
-    try{
-      if(typeof scoreAnswerKeyV28==="function")return scoreAnswerKeyV28();
-    }catch{}
-    const p=typeof currentProblem==="function"?currentProblem():null;
-    return `${p?.id||"unknown"}:answer:${state.scoreAnswerPageIndex||0}`;
+/* === v71: 문제목록은 보이는데 문제풀이만 0개가 되는 경로 완전 우회 ===
+   확인된 상태: 목록은 state.problems로 정상 렌더되므로 문제은행 로딩 문제가 아니다.
+   해결: 랜덤 시작 버튼에서 기존 filter/startSession 패치 체인을 거치지 않고,
+   현재 state.problems를 직접 후보로 계산해 세션을 만든다.
+*/
+(function psatDirectSolveV71(){
+  function cleanV71(value){
+    const s=String(value ?? '').trim();
+    return s === '전체' ? '' : s;
   }
 
-  function store(){
-    if(!state.scoreAnswerEdits||typeof state.scoreAnswerEdits!=="object"){
-      try{
-        state.scoreAnswerEdits=JSON.parse(localStorage.getItem("essayScoreAnswerEditsV11")||"{}");
-      }catch{state.scoreAnswerEdits={};}
-    }
-    return state.scoreAnswerEdits;
+  function bankV71(){
+    return Array.isArray(state.problems)
+      ? state.problems.filter((p)=>p && p.id != null)
+      : [];
   }
 
-  function save(){
-    try{localStorage.setItem("essayScoreAnswerEditsV11",JSON.stringify(store()));}catch{}
-    try{scheduleFirebaseSyncV36?.("local")}catch{}
-    try{scheduleCloudSyncV46?.()}catch{}
+  function categoryV71(problem){
+    try {
+      if (typeof problemCategoryV28 === 'function') return cleanV71(problemCategoryV28(problem));
+    } catch {}
+    return cleanV71(problem?.category || '');
   }
 
-  function visible(){
-    const overlay=$v("scoreOverlay");
-    const wrap=$v("scoreAnswerEditWrap");
-    return !!(overlay&&wrap&&!overlay.classList.contains("hidden"));
+  function subjectOkV71(problem, subject){
+    if (!subject) return true;
+    try { return subjectMatches(problem, subject); }
+    catch { return cleanV71(problem?.subject) === subject; }
   }
 
-  function prepare(){
-    const wrap=$v("scoreAnswerEditWrap");
-    const canvas=$v("scoreAnswerCanvas");
-    if(!wrap||!canvas)return null;
+  function mainCandidatesV71(){
+    const mode = cleanV71(els.modeSelect?.value) || 'all';
+    const subject = cleanV71(els.subjectFilter?.value);
+    const category = cleanV71(document.getElementById('categoryFilter')?.value);
+    const year = cleanV71(els.yearFilter?.value);
 
-    const wr=wrap.getBoundingClientRect();
-    const pre=$v("ownAnswerView");
-    const img=$v("ownAnswerInkView");
-
-    const width=Math.max(1,Math.round(wrap.scrollWidth||wr.width||1));
-    let height=Math.max(180,wrap.scrollHeight||wr.height||180);
-    if(pre)height=Math.max(height,(pre.offsetTop||0)+(pre.scrollHeight||pre.offsetHeight||0));
-    if(img&&!img.classList.contains("hidden"))
-      height=Math.max(height,(img.offsetTop||0)+(img.offsetHeight||0));
-
-    const dpr=Math.min(window.devicePixelRatio||1,1.5);
-    const bw=Math.max(1,Math.round(width*dpr));
-    const bh=Math.max(1,Math.round(height*dpr));
-
-    if(canvas.width!==bw||canvas.height!==bh){
-      canvas.width=bw; canvas.height=bh;
-    }
-    canvas.dataset.v69Dpr=String(dpr);
-    canvas.style.setProperty("position","absolute","important");
-    canvas.style.setProperty("left","0","important");
-    canvas.style.setProperty("top","0","important");
-    canvas.style.setProperty("width",width+"px","important");
-    canvas.style.setProperty("height",height+"px","important");
-    canvas.style.setProperty("pointer-events","none","important");
-    canvas.style.setProperty("z-index","90","important");
-    return {wrap,canvas,width,height,dpr};
-  }
-
-  function draw(){
-    const x=prepare(); if(!x)return;
-    const {canvas,width,height,dpr}=x;
-    const ctx=canvas.getContext("2d");
-    ctx.setTransform(dpr,0,0,dpr,0,0);
-    ctx.clearRect(0,0,width,height);
-    for(const s of (store()[key()]||[])){
-      if(!s?.points?.length)continue;
-      ctx.save();
-      ctx.globalCompositeOperation=s.tool==="eraser"?"destination-out":"source-over";
-      ctx.strokeStyle=s.tool==="eraser"?"#000":"#ef4444";
-      ctx.lineWidth=Math.max(1,Number(s.size||4));
-      ctx.lineCap="round"; ctx.lineJoin="round"; ctx.beginPath();
-      s.points.forEach((p,i)=>{
-        const px=p.x*width, py=p.y*height;
-        i?ctx.lineTo(px,py):ctx.moveTo(px,py);
-      });
-      if(s.points.length===1){
-        const p=s.points[0]; ctx.lineTo(p.x*width+.1,p.y*height+.1);
+    let list = bankV71().filter((p)=>{
+      if (!subjectOkV71(p, subject)) return false;
+      if (category && categoryV71(p) !== category) return false;
+      if (year && cleanV71(p?.year) !== year) return false;
+      if (mode === 'wrong') return !!p?.wrongActive;
+      if (mode === 'slow') {
+        try { return averageTime(p) >= SLOW_MS || Number(p?.lastTimeMs || 0) >= SLOW_MS; }
+        catch { return Number(p?.lastTimeMs || 0) >= 120000; }
       }
-      ctx.stroke(); ctx.restore();
+      if (mode === 'unseen') return Number(p?.attempts || 0) <= 0;
+      if (mode === 'flagged') return !!p?.flagged;
+      return true;
+    });
+
+    // 전체/전체/전체는 목록에 문제가 있으면 반드시 그 문제들을 사용한다.
+    if (mode === 'all' && !subject && !category && !year && list.length === 0) {
+      list = bankV71();
+    }
+    return list;
+  }
+
+  function reviewCandidatesV71(mode){
+    const subject = cleanV71(els.reviewSubjectFilter?.value);
+    const category = cleanV71(document.getElementById('reviewCategoryFilter')?.value);
+    const year = cleanV71(els.reviewYearFilter?.value);
+    const yearText = String(els.reviewYearTextFilter?.value || '').trim().toLowerCase();
+
+    return bankV71().filter((p)=>{
+      if (!subjectOkV71(p, subject)) return false;
+      if (category && categoryV71(p) !== category) return false;
+      const py = cleanV71(p?.year);
+      if (year && py !== year) return false;
+      if (yearText && !py.toLowerCase().includes(yearText)) return false;
+      if (mode === 'wrong') return !!p?.wrongActive;
+      if (mode === 'correct') return Number(p?.correct || 0) > 0 && !p?.wrongActive;
+      if (mode === 'unseen') return Number(p?.attempts || 0) <= 0;
+      return true;
+    });
+  }
+
+  function coreStartV71(problems, options={}){
+    const list = Array.isArray(problems) ? problems.filter(Boolean) : [];
+    try { clearPausedSession(); } catch {}
+    if (!list.length) {
+      const total = bankV71().length;
+      const mode = cleanV71(els.modeSelect?.value) || 'all';
+      if (total > 0 && mode === 'all' && !cleanV71(els.subjectFilter?.value) && !cleanV71(document.getElementById('categoryFilter')?.value) && !cleanV71(els.yearFilter?.value)) {
+        showToast(`목록 ${total}개는 정상인데 풀이 시작 경로에 오류가 있어`);
+      } else {
+        showToast('해당 조건의 문제가 없어');
+      }
+      return false;
+    }
+
+    try { clearTimeout(state.autoNextTimer); } catch {}
+    state.autoNextTimer = null;
+    if (els.sessionSummary) els.sessionSummary.classList.add('hidden');
+
+    const count = Math.max(0, Number(options.count || 0));
+    const source = options.preserveOrder ? [...list] : shuffle([...list]);
+    state.queue = source.slice(0, count > 0 ? Math.min(count, source.length) : source.length);
+    if (!state.queue.length) {
+      showToast('풀이목록 생성에 실패했어');
+      return false;
+    }
+
+    try {
+      if (typeof isReviewSessionLabel === 'function' && isReviewSessionLabel(options.label)) {
+        state.queue.forEach((p)=>{ try { clearReviewAnnotations(p); } catch {} });
+      }
+    } catch {}
+
+    state.queueIndex = 0;
+    const minutes = Math.max(0, Number(options.minutes || 0));
+    state.reviewBaseline = null;
+    state.session = {
+      label: options.label || '랜덤 풀이',
+      startedAt: Date.now(),
+      endAt: minutes > 0 ? Date.now() + minutes * 60 * 1000 : 0,
+      total: state.queue.length,
+      answered: 0,
+      correct: 0,
+      elapsedOnFinish: 0,
+      solveElapsedMsV49: 0,
+      problemIds: state.queue.map((p)=>p.id),
+      answeredIds: [],
+      wrongIds: []
+    };
+
+    const first = state.queue[0];
+    document.getElementById('emptySolve')?.classList.add('hidden');
+    els.solvePanel?.classList.remove('hidden');
+    try {
+      loadCurrentProblem(first);
+      switchView('solveView');
+      document.getElementById('emptySolve')?.classList.add('hidden');
+      els.solvePanel?.classList.remove('hidden');
+      return true;
+    } catch (err) {
+      console.error('v71 direct solve start failed', err);
+      // 화면 표시 자체는 유지해서 실제 오류가 빈 화면으로 숨지 않게 한다.
+      document.body.classList.add('solve-active');
+      els.solvePanel?.classList.remove('hidden');
+      showToast('문제는 찾았지만 풀이화면을 여는 중 오류가 났어');
+      return false;
     }
   }
 
-  function inside(e,wrap){
-    const r=wrap.getBoundingClientRect();
-    return e.clientX>=r.left&&e.clientX<=r.right&&e.clientY>=r.top&&e.clientY<=r.bottom;
-  }
+  // 기존 랜덤 시작 리스너보다 먼저 실행해 구버전 필터/복구 체인을 완전히 우회한다.
+  const startBtn = document.getElementById('startBtn');
+  startBtn?.addEventListener('click', (event)=>{
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const list = mainCandidatesV71();
+    const mode = cleanV71(els.modeSelect?.value) || 'all';
+    const subject = cleanV71(els.subjectFilter?.value);
+    const year = cleanV71(els.yearFilter?.value);
+    const label = `${subject || '전체'}${year ? ' · ' + year : ''} ${mode === 'all' ? '랜덤' : mode}`;
+    coreStartV71(list, {
+      count: Number(els.sessionCount?.value || 0),
+      minutes: Number(els.sessionMinutes?.value || 0),
+      label
+    });
+  }, true);
 
-  function point(e,x){
-    const r=x.wrap.getBoundingClientRect();
-    const px=e.clientX-r.left+x.wrap.scrollLeft;
-    const py=e.clientY-r.top+x.wrap.scrollTop;
-    return {x:clamp(px/x.width,0,1),y:clamp(py/x.height,0,1)};
-  }
+  // 복습의 랜덤 시작도 같은 직접 경로 사용.
+  document.getElementById('reviewWrongRandomBtn')?.addEventListener('click', (event)=>{
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    coreStartV71(reviewCandidatesV71('wrong'), { count: 0, minutes: 0, label: '오답랜덤복습' });
+  }, true);
 
-  document.addEventListener("pointerdown",e=>{
-    if(e.pointerType!=="pen"||!visible())return;
-    const x=prepare(); if(!x||!inside(e,x.wrap))return;
-
-    e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
-
-    const tool=state.scoreAnswerEditTool==="eraser"?"eraser":"pen";
-    const size=Math.max(1,Number(state.scoreAnswerSize||$v("scoreAnswerSizeInput")?.value||4))*
-      (tool==="eraser"?5:1);
-    const stroke={tool,size,points:[point(e,x)]};
-    const k=key();
-    if(!Array.isArray(store()[k]))store()[k]=[];
-    store()[k].push(stroke);
-    active={id:e.pointerId,stroke};
-    draw();
-  },true);
-
-  document.addEventListener("pointermove",e=>{
-    if(!active||e.pointerId!==active.id||e.pointerType!=="pen")return;
-    const x=prepare(); if(!x)return;
-    e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
-    let events=[e];
-    try{const c=e.getCoalescedEvents?.();if(c?.length)events=c;}catch{}
-    for(const item of events)active.stroke.points.push(point(item,x));
-    draw();
-  },true);
-
-  function end(e){
-    if(!active||e.pointerId!==active.id||e.pointerType!=="pen")return;
-    e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
-    active=null; save(); draw();
-  }
-  document.addEventListener("pointerup",end,true);
-  document.addEventListener("pointercancel",end,true);
-
-  document.addEventListener("click",e=>{
-    if(e.target?.closest?.("#scoreAnswerPenBtn")){
-      state.scoreAnswerEditTool="pen";
-      setTimeout(draw,0);
+  // 전역 함수도 마지막에 교체해 다른 진입점이 기존 중첩 패치에 걸리지 않게 한다.
+  filterProblems = function(mode, subject, year=''){
+    const prevMode = els.modeSelect?.value;
+    const prevSubject = els.subjectFilter?.value;
+    const prevYear = els.yearFilter?.value;
+    try {
+      if (els.modeSelect) els.modeSelect.value = cleanV71(mode) || 'all';
+      if (els.subjectFilter) els.subjectFilter.value = cleanV71(subject);
+      if (els.yearFilter) els.yearFilter.value = cleanV71(year);
+      return mainCandidatesV71();
+    } finally {
+      if (els.modeSelect && prevMode != null) els.modeSelect.value = prevMode;
+      if (els.subjectFilter && prevSubject != null) els.subjectFilter.value = prevSubject;
+      if (els.yearFilter && prevYear != null) els.yearFilter.value = prevYear;
     }
-    if(e.target?.closest?.("#scoreAnswerEraserBtn")){
-      state.scoreAnswerEditTool="eraser";
-      setTimeout(draw,0);
-    }
-  },true);
+  };
 
-  const observer=new MutationObserver(()=>{
-    if(visible())requestAnimationFrame(draw);
-  });
-  observer.observe(document.documentElement,{subtree:true,attributes:true,attributeFilter:["class"]});
+  startSession = function(problems, options={}){
+    return coreStartV71(problems, options);
+  };
 
-  window.essayScorePenV69={draw,prepare};
+  window.psatDirectSolveV71 = true;
+  window.psatMainCandidatesV71 = mainCandidatesV71;
 })();
 
+
+/* === v73: 설치형 PWA 목록 '풀기' 무반응 수정 ===
+   원인: data-id는 항상 문자열이지만 일부 동기화/복구 데이터의 problem.id는 숫자로 남을 수 있다.
+   기존 목록 클릭 코드는 item.id === data-id로 비교하여 문제를 못 찾으면 아무 메시지 없이 return했다.
+   v73은 ID를 문자열로 통일해 찾고, '풀기' 클릭을 캡처 단계에서 직접 연다.
+*/
+(function psatInstalledSolveClickV73(){
+  function sameIdV73(a,b){ return String(a) === String(b); }
+  function findProblemV73(id){
+    try {
+      const viaMap = typeof problemByIdV63 === 'function' ? problemByIdV63(id) : null;
+      if (viaMap) return viaMap;
+    } catch {}
+    return (Array.isArray(state.problems) ? state.problems : []).find((p)=>p && sameIdV73(p.id,id)) || null;
+  }
+
+  function openProblemV73(problem, review){
+    if (!problem) {
+      showToast('문제를 찾지 못했어. 목록을 새로고침해줘.');
+      return false;
+    }
+    try {
+      state.reviewBaseline = review ? reviewBaselineFor(problem, review) : null;
+      if (review) { try { clearReviewAnnotations(problem); } catch {} }
+      try { clearPausedSession(); } catch {}
+      try { clearTimeout(state.autoNextTimer); } catch {}
+      state.autoNextTimer = null;
+      els.sessionSummary?.classList.add('hidden');
+      state.queue = [problem];
+      state.queueIndex = 0;
+      state.session = {
+        label: review || '단일 문제',
+        startedAt: Date.now(), endAt: 0, total: 1, answered: 0, correct: 0,
+        elapsedOnFinish: 0, solveElapsedMsV49: 0,
+        problemIds: [problem.id], answeredIds: [], wrongIds: []
+      };
+      document.getElementById('emptySolve')?.classList.add('hidden');
+      loadCurrentProblem(problem);
+      switchView('solveView');
+      document.getElementById('emptySolve')?.classList.add('hidden');
+      els.solvePanel?.classList.remove('hidden');
+      return true;
+    } catch (err) {
+      console.error('v73 list solve failed', err);
+      showToast('풀이화면 열기 오류가 났어');
+      return false;
+    }
+  }
+
+  document.addEventListener('click', (event)=>{
+    const btn = event.target?.closest?.('button[data-action="solve"]');
+    if (!btn) return;
+    const problem = findProblemV73(btn.dataset.id);
+    if (!problem) return; // 기존 핸들러가 오류 메시지를 처리할 수 있게 둔다.
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+    let review = '';
+    if (btn.dataset.context === 'wrong') {
+      review = state.reviewMode === 'correct' ? '정답복습'
+        : state.reviewMode === 'unseen' ? '안 푼 문제 복습'
+        : '오답복습';
+    }
+    openProblemV73(problem, review);
+  }, true);
+
+  // 이어풀기도 문자열/숫자 ID 차이 때문에 실패하지 않게 한다.
+  const continueBtnV73 = els.continueBtn;
+  continueBtnV73?.addEventListener('click', (event)=>{
+    if (readPausedSession?.()) return; // 기존 이어풀기 리스너 사용
+    const id = localStorage.getItem('psat-last-problem-id');
+    if (!id) return;
+    const p = findProblemV73(id);
+    if (!p) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    openProblemV73(p, '');
+  }, true);
+
+  window.psatInstalledSolveClickV73 = true;
+})();

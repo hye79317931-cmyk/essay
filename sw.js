@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE_NAME = 'essay-pwa-v73-installfix';
+const CACHE_NAME = 'psat-random-note-v73';
 const ASSETS = [
   './',
   './index.html',
