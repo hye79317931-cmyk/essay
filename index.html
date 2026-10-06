@@ -2,391 +2,250 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <meta name="theme-color" content="#121826" />
-  <title>PSAT 랜덤 오답노트</title>
-  <link rel="manifest" href="manifest.webmanifest?v=73" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#111827" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <title>2차 서술형 답안연습</title>
+  <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icon-192.png" />
-  <link rel="stylesheet" href="styles.css?v=73" />
+  <link rel="stylesheet" href="styles.css?v=72" />
 </head>
 <body>
   <header class="app-header">
     <div>
-      <h1>PSAT 랜덤 오답노트</h1>
-      <p>PSAT 언어·자료·상황 · 연도/회차 분류 · 랜덤 세트 · 복습 · 풀이시간 확인</p>
+      <h1>2차 서술형 답안연습</h1>
+      <p>PSAT 앱 기반 v34 · 형법 · 형사소송법 · 행정법 · 교정학 · 페이지 추가 · 페이지 넘김</p>
     </div>
-    <button id="installBtn" class="ghost hidden" type="button">홈화면 설치</button>
+    <button id="installBtn" class="install-btn hidden" type="button">앱 설치</button>
   </header>
 
-  <nav class="tabs" aria-label="주요 메뉴">
+  <nav class="tabs">
     <button class="tab active" data-view="solveView" type="button">문제풀기</button>
     <button class="tab" data-view="addView" type="button">문제등록</button>
-    <button class="tab" data-view="wrongView" type="button">복습</button>
+    <button class="tab" data-view="reviewView" type="button">복습</button>
     <button class="tab" data-view="listView" type="button">목록</button>
-    <button class="tab" data-view="statsView" type="button">통계/백업</button>
+    <button class="tab" data-view="backupView" type="button">백업</button>
   </nav>
 
   <main>
     <section id="solveView" class="view active">
       <section class="card">
-        <h2>랜덤 출제 설정</h2>
-        <div class="grid two">
+        <h2>문제풀기</h2>
+        <div class="grid four">
           <label>출제 범위
-            <select id="modeSelect">
+            <select id="solveScope">
               <option value="all">전체 랜덤</option>
-              <option value="wrong">틀린 문제만</option>
+              <option value="review">복습필요 문제만</option>
               <option value="slow">오래 걸린 문제만</option>
               <option value="unseen">안 푼 문제만</option>
-              <option value="flagged">다시보기 지정</option>
+              <option value="solved">푼 문제만</option>
             </select>
           </label>
           <label>대분류
-            <select id="subjectFilter"><option value="">전체</option></select>
+            <select id="solveSubject">
+              <option value="">전체</option><option value="형법">형법</option><option value="형사소송법">형사소송법</option><option value="행정법">행정법</option><option value="교정학">교정학</option>
+            </select>
           </label>
-          <label>중간분류
-            <select id="categoryFilter"><option value="">전체</option></select>
-          </label>
-          <label>연도/회차
-            <select id="yearFilter"><option value="">전체</option></select>
-          </label>
-          <label>세션 문제 수
-            <input id="sessionCount" type="number" min="1" step="1" placeholder="비우면 전체" />
-          </label>
-          <label>제한시간(분)
-            <input id="sessionMinutes" type="number" min="0" step="1" value="0" />
-          </label>
+          <label>연도/회차<input id="solveSession" type="text" placeholder="예: 2025, 2024 1문" /></label>
+          <label>풀이방식<select id="solveMode"><option value="outline">목차연습</option><option value="full">실전답안</option></select></label>
+          <label>랜덤 문제 수<select id="randomCount"><option value="1">1문제</option><option value="3">3문제</option><option value="5">5문제</option><option value="10">10문제</option></select></label>
         </div>
         <div class="row wrap">
-          <button id="startBtn" type="button">랜덤 시작</button>
-          <button id="continueBtn" class="secondary" type="button">마지막 문제 계속</button>
+          <button id="randomStartBtn" type="button">랜덤 시작</button>
+          <button id="reviewRandomStartBtn" class="secondary" type="button">복습필요 랜덤</button>
+          <button id="continueBtn" class="secondary hidden" type="button">이어풀기</button>
         </div>
-        <p class="hint">오답은 2번 연속 맞히면 자동으로 오답노트에서 해제됩니다.</p>
       </section>
-
-      <section id="emptySolve" class="card muted-card">
-        <h2>아직 등록된 문제가 없어</h2>
-        <p>문제등록에서 PSAT 문제 사진을 올리고 정답·해설을 입력하면 바로 랜덤으로 풀 수 있어.</p>
-      </section>
-
-      <section id="sessionSummary" class="card session-summary hidden" aria-live="polite"></section>
-
-      <section id="solvePanel" class="card hidden">
-        <div class="solve-top">
-          <div>
-            <h2 id="problemTitle">문제</h2>
-            <p id="problemMeta" class="meta"></p>
-          </div>
-          <div class="timer-box">
-            <span>현재 문제</span>
-            <strong id="questionTimer">00:00</strong>
-            <span id="sessionTimer" class="session-timer hidden">세션 00:00</span>
-          </div>
-        </div>
-
-        <div class="toolbar note-toolbar">
-          <div class="left-timer-box" aria-label="풀이 시간">
-            <span class="left-timer-label">현재</span>
-            <strong id="leftQuestionTimer">00:00</strong>
-            <span id="leftSessionTimer" class="left-session-timer hidden">세션 00:00</span>
-          </div>
-          <button id="exitSolveBtn" class="secondary mini-exit" type="button">중단/나가기</button>
-          <button id="penBtn" class="secondary active-tool" type="button">펜</button>
-          <button id="eraserBtn" class="secondary" type="button">지우개</button>
-          <label class="compact range-control">펜 크기
-            <input id="penSize" type="range" min="1" max="24" value="4" />
-            <span id="penSizeLabel" class="badge small-badge">4</span>
-          </label>
-          <label class="compact range-control">지우개 크기
-            <input id="eraserSize" type="range" min="6" max="80" value="26" />
-            <span id="eraserSizeLabel" class="badge small-badge">26</span>
-          </label>
-          <button id="clearInkBtn" class="danger-lite" type="button">필기 지우기</button>
-          <button id="zoomOutBtn" class="secondary" type="button">−</button>
-          <span id="zoomLabel" class="badge">100%</span>
-          <button id="zoomInBtn" class="secondary" type="button">＋</button>
-          <button id="fitZoomBtn" class="secondary" type="button">맞춤</button>
-          <div id="leftProgressV52" class="left-progress-v52" aria-label="풀이 진행">
-            <span>푼 <strong id="leftSolvedV52">0</strong></span>
-            <span>남음 <strong id="leftRemainingV52">0</strong></span>
-          </div>
-          <span class="tool-help">손가락: 이동/확대 · 스타일러스/마우스: 필기</span>
-        </div>
-
-        <div id="imageScroller" class="image-scroller">
-          <div id="imageWrap" class="image-wrap">
-            <img id="problemImage" alt="문제 이미지" />
-            <canvas id="inkCanvas" aria-label="필기 캔버스"></canvas>
-          </div>
-        </div>
-
-        <div class="answer-box" role="group" aria-label="정답 선택">
-          <button class="choice" data-answer="1" type="button">①</button>
-          <button class="choice" data-answer="2" type="button">②</button>
-          <button class="choice" data-answer="3" type="button">③</button>
-          <button class="choice" data-answer="4" type="button">④</button>
-          <button class="choice" data-answer="5" type="button">⑤</button>
-        </div>
-
-        <div class="row wrap">
-          <button id="checkBtn" type="button">정답 체크</button>
-          <button id="showExpBtn" class="secondary" type="button">해설 보기</button>
-          <button id="flagBtn" class="secondary" type="button">다시보기 지정</button>
-          <button id="nextBtn" class="secondary hidden manual-next-left-v44" type="button">다음 문제</button>
-        </div>
-
-        <div id="resultBox" class="result hidden"></div>
-        <div id="explanationBox" class="explanation hidden"></div>
-      </section>
+      <section class="card"><h2>직접 선택</h2><div id="solveList" class="list"></div></section>
     </section>
 
     <section id="addView" class="view">
       <section class="card">
         <h2 id="formTitle">문제 등록</h2>
         <form id="problemForm">
-          <input id="editingId" type="hidden" />
+          <input id="editId" type="hidden" />
+          <div class="grid four">
+            <label>대분류<select id="subjectInput"><option value="형법">형법</option><option value="형사소송법">형사소송법</option><option value="행정법">행정법</option><option value="교정학">교정학</option></select></label>
+            <label>연도/회차<input id="sessionInput" type="text" placeholder="예: 2025, 2024 1문" /></label>
+            <label>배점<input id="scoreInput" type="number" min="0" step="1" value="20" /></label>
+            <label>제한시간(분)<input id="timeInput" type="number" min="0" step="1" value="30" /></label>
+          </div>
           <div class="grid two">
-            <label>대분류
-              <select id="subjectInput" required>
-                <option value="언어">언어</option>
-                <option value="자료">자료</option>
-                <option value="상황">상황</option>
-              </select>
-            </label>
-            <label>연도/회차
-              <input id="yearInput" type="text" inputmode="text" placeholder="예: 2025, 2025 민경채, 입법고시" />
-            </label>
+            <label>문제 제목<input id="titleInput" type="text" placeholder="예: 공범과 중지미수" /></label>
+            <label>이미지 저장 방식<select id="qualityInput"><option value="sharp">선명 압축 / 권장</option><option value="bulk">대량 저장용 / 용량 작게</option><option value="original">원본 그대로 / 용량 큼</option></select></label>
           </div>
-          <div class="grid two mid-category-row">
-            <label>중간분류
-              <input id="categoryInput" type="text" inputmode="text" placeholder="예: 독해, 논리, 계산, 상황판단 유형" list="categoryDatalistV32" autocomplete="off">
-            </label>
-          </div>
-          <input id="difficultyInput" type="hidden" value="중" />
 
-          <div class="paste-card active-paste" id="problemPasteZone" data-paste-target="problem" tabindex="0" role="button" aria-label="문제 스크린샷 붙여넣기 영역">
-            <strong>문제 스크린샷</strong>
-            <span>여기를 클릭하고 Ctrl+V 하면 문제 이미지로 들어갑니다.</span>
-          </div>
-          <label>문제 이미지 파일로 선택
-            <input id="imageInput" type="file" accept="image/*" />
-          </label>
-          <div class="row wrap small-gap">
-            <button id="pasteProblemBtn" class="secondary" type="button">문제 스샷 붙여넣기</button>
-            <button id="clearProblemImageBtn" class="secondary" type="button">문제 이미지 비우기</button>
-          </div>
-          <p class="hint">PC에서는 캡처 후 Ctrl+V가 제일 빠릅니다. 모바일은 브라우저 제한 때문에 파일 선택 방식이 더 안정적입니다.</p>
-          <label>이미지 저장 방식
-            <select id="imageQualityInput">
-              <option value="sharp" selected>선명 압축 / 권장</option>
-              <option value="bulk">3000문제용 압축 / 용량 작게</option>
-              <option value="original">원본 그대로 / 용량 큼</option>
-            </select>
-          </label>
-          <p class="hint">문제가 3000개 이상이면 저장공간 때문에 “3000문제용 압축”이 가장 안정적입니다. 글자가 흐리면 “선명 압축”을 쓰면 됩니다.</p>
-          <img id="previewImage" class="preview hidden" alt="문제 이미지 미리보기" />
-
-          <div class="paste-card" id="explanationPasteZone" data-paste-target="explanation" tabindex="0" role="button" aria-label="해설 스크린샷 붙여넣기 영역">
-            <strong>해설 스크린샷</strong>
-            <span>여기를 클릭하고 Ctrl+V 하면 해설 이미지로 들어갑니다.</span>
-          </div>
-          <label>해설 이미지 파일로 선택
-            <input id="explanationImageInput" type="file" accept="image/*" />
-          </label>
-          <div class="row wrap small-gap">
-            <button id="pasteExplanationBtn" class="secondary" type="button">해설 스샷 붙여넣기</button>
-            <button id="addExplanationPageBtnV61" class="secondary" type="button">+ 해설 페이지 추가</button>
-            <button id="clearExplanationImageBtn" class="secondary" type="button">해설 전체 비우기</button>
-          </div>
-          <div id="explanationPageControlsV61" class="row wrap small-gap explanation-page-controls-v61">
-            <button id="prevExplanationPageBtnV61" class="secondary" type="button">이전</button>
-            <span id="explanationPageBadgeV61" class="badge">해설 1/1쪽</span>
-            <button id="nextExplanationPageBtnV61" class="secondary" type="button">다음</button>
-            <button id="deleteExplanationPageBtnV61" class="secondary" type="button">현재 쪽 삭제</button>
-          </div>
-          <img id="previewExplanationImage" class="preview hidden" alt="해설 이미지 미리보기" />
-
-          <div class="answer-assign-card" aria-label="정답 지정">
-            <div class="answer-assign-title">정답 지정</div>
-            <div class="quick-answer-row" aria-label="정답 직접 지정">
-              <span>번호 선택:</span>
-              <button class="manual-answer" data-answer="1" type="button">①</button>
-              <button class="manual-answer" data-answer="2" type="button">②</button>
-              <button class="manual-answer" data-answer="3" type="button">③</button>
-              <button class="manual-answer" data-answer="4" type="button">④</button>
-              <button class="manual-answer" data-answer="5" type="button">⑤</button>
+          <section class="paste-section">
+            <h3>문제 스크린샷</h3>
+            <div id="questionPasteZone" class="paste-card active-paste" data-paste-target="question" tabindex="0" role="button">
+              <strong>문제 스크린샷</strong><span>PSAT 앱처럼 스크린샷 후 여기를 누르고 “문제 스샷 붙여넣기”를 누르면 문제 페이지로 추가됩니다.</span>
             </div>
-            <label>현재 정답 확인
-              <select id="answerInput" required>
-                <option value="1">①</option>
-                <option value="2">②</option>
-                <option value="3">③</option>
-                <option value="4">④</option>
-                <option value="5">⑤</option>
-              </select>
-            </label>
-          </div>
+            <label class="file-label">문제 이미지 파일로 선택<input id="questionFileInput" type="file" accept="image/*" multiple /></label>
+            <div class="row wrap small-gap"><button id="pasteQuestionBtn" class="secondary" type="button">문제 스샷 붙여넣기</button><button id="addQuestionFileBtn" class="secondary" type="button">문제 빈 페이지 추가</button><button id="clearQuestionBtn" class="secondary" type="button">문제 이미지 비우기</button></div>
+            <p class="hint">문제 빈 페이지 추가 → 해당 페이지 선택 → 스샷 붙여넣기. 선택한 페이지에 그대로 들어가고 선택도 유지됩니다.</p>
+            <div id="questionPageList" class="page-list"></div>
+          </section>
 
-          <button id="toggleExplanationTextBtn" class="secondary text-toggle-btn" type="button">해설 텍스트 입력 열기</button>
-          <label id="explanationTextWrap" class="hidden">해설 텍스트
-            <textarea id="explanationInput" rows="5" placeholder="필요할 때만 눌러서 해설 메모를 입력합니다."></textarea>
-          </label>
-          <input id="tagsInput" type="hidden" value="" />
-          <div class="row wrap form-action-row">
-            <button id="saveProblemBtn" type="submit">저장</button>
-            <button id="saveOnlyBtn" class="secondary hidden" type="submit" data-save-mode="stay">저장만</button>
-            <button id="newProblemModeBtn" class="secondary hidden" type="button">새 문제 등록 모드</button>
-            <button id="resetFormBtn" class="secondary" type="button">새 문제로 초기화</button>
-          </div>
-                  <datalist id="categoryDatalistV30"></datalist>
-                  <datalist id="categoryDatalistV31"></datalist>
-                  <datalist id="categoryDatalistV32"></datalist>
+          <section class="paste-section">
+            <h3>해설 / 모범답안 스크린샷</h3>
+            <div id="explanationPasteZone" class="paste-card" data-paste-target="explanation" tabindex="0" role="button">
+              <strong>해설 스크린샷</strong><span>PSAT 앱처럼 스크린샷 후 여기를 누르고 “해설 스샷 붙여넣기”를 누르면 해설 페이지로 추가됩니다.</span>
+            </div>
+            <label class="file-label">해설 이미지 파일로 선택<input id="explanationFileInput" type="file" accept="image/*" multiple /></label>
+            <div class="row wrap small-gap"><button id="pasteExplanationBtn" class="secondary" type="button">해설 스샷 붙여넣기</button><button id="addExplanationFileBtn" class="secondary" type="button">해설 빈 페이지 추가</button><button id="clearExplanationBtn" class="secondary" type="button">해설 이미지 비우기</button></div>
+            <p class="hint">해설 빈 페이지 추가 → 해당 페이지 선택 → 스샷 붙여넣기 순서로 넣어. 채점 화면에서 페이지 넘김 가능.</p>
+            <div id="explanationPageList" class="page-list"></div>
+          </section>
+
+          <label>채점포인트<textarea id="pointsInput" rows="6" placeholder="한 줄에 하나씩 입력&#10;예: 쟁점 제시&#10;예: 관련 조문&#10;예: 학설/판례&#10;예: 사안포섭&#10;예: 결론"></textarea></label>
+          <label>모범답안 텍스트<textarea id="modelTextInput" rows="6" placeholder="선택사항. 이미지 해설이 있으면 비워도 됩니다."></textarea></label>
+          <div class="row wrap"><button id="saveBtn" type="submit">저장</button><button id="resetBtn" class="secondary" type="button">새 문제 등록</button></div>
         </form>
       </section>
     </section>
 
-    <section id="wrongView" class="view">
-      <section class="card">
-        <h2>복습</h2>
-        <div class="review-mode-buttons" role="group" aria-label="복습 방식 선택">
-          <button id="reviewWrongBtn" type="button">오답복습</button>
-          <button id="reviewWrongRandomBtn" class="secondary" type="button">오답랜덤복습</button>
-          <button id="reviewCorrectBtn" class="secondary" type="button">정답복습</button>
-          <button id="reviewUnseenBtn" class="secondary" type="button">안 푼 문제</button>
-        </div>
-        <p class="hint">문제 카드를 누르면 이전 풀이시간을 확인하고 바로 복습으로 다시 풀 수 있어. 복습으로 다시 풀 때는 이전 필기가 자동으로 지워져.</p>
-        <div class="grid two review-filter-grid">
-          <label>대분류
-            <select id="reviewSubjectFilter"><option value="">전체</option></select>
-          </label>
-          <label>중간분류
-            <select id="reviewCategoryFilter"><option value="">전체</option></select>
-          </label>
-          <label>연도/회차
-            <select id="reviewYearFilter"><option value="">전체</option></select>
-          </label>
-          <label>연도/회차 직접 검색
-            <input id="reviewYearTextFilter" type="search" placeholder="예: 2025, 민경채, 입법" />
-          </label>
-        </div>
-        <div class="row wrap">
-          <button id="clearSolvedWrongBtn" class="secondary" type="button">2연속 정답 해제 반영</button>
-        </div>
-        <div id="reviewListTitle" class="review-list-title">오답복습</div>
-        <div id="wrongList" class="list"></div>
-      </section>
-    </section>
+    <section id="reviewView" class="view"><section class="card"><h2>복습</h2><div class="grid three"><label>대분류<select id="reviewSubject"><option value="">전체</option><option value="형법">형법</option><option value="형사소송법">형사소송법</option><option value="행정법">행정법</option><option value="교정학">교정학</option></select></label><label>연도/회차<input id="reviewSession" type="text" placeholder="연도/회차 검색" /></label><label>구분<select id="reviewType"><option value="needed">복습필요</option><option value="all">전체기록</option></select></label></div><div id="reviewList" class="list"></div></section></section>
+    <section id="listView" class="view"><section class="card"><h2>목록</h2><div class="grid three"><label>대분류<select id="listSubject"><option value="">전체</option><option value="형법">형법</option><option value="형사소송법">형사소송법</option><option value="행정법">행정법</option><option value="교정학">교정학</option></select></label><label>연도/회차<input id="listSession" type="text" placeholder="연도/회차 검색" /></label><label>검색<input id="listSearch" type="search" placeholder="제목, 포인트 검색" /></label></div><div id="problemList" class="list"></div></section></section>
+    <section id="backupView" class="view"><section class="card"><h2>통계</h2><div id="statsGrid" class="stats-grid"></div></section><section class="card"><h2>백업 / 복원</h2><div class="row wrap"><button id="exportBtn" type="button">백업 파일 내보내기</button><label class="file-button">백업 파일 불러오기<input id="importInput" type="file" accept="application/json" /></label></div><p class="hint">문제·해설 이미지는 폰 브라우저 저장소에 저장됩니다. 자주 백업해두세요.</p></section>
+<section class="card" id="essayFirebaseSyncCardV36">
+  <h2>폰 · 태블릿 실시간 동기화</h2>
+  <p id="essayFirebaseStatusV36" class="hint">Firebase 연결 확인 중...</p>
 
-    <section id="listView" class="view">
-      <section class="card">
-        <h2>문제 목록</h2>
-        <div class="grid two">
-          <label>검색
-            <input id="searchInput" type="search" placeholder="대분류, 중간분류, 연도, 해설 검색" />
-          </label>
-          <label>대분류 필터
-            <select id="listSubjectFilter"><option value="">전체</option></select>
-          </label>
-          <label>중간분류 필터
-            <select id="listCategoryFilter"><option value="">전체</option></select>
-          </label>
-          <label>연도/회차 필터
-            <select id="listYearFilter"><option value="">전체</option></select>
-          </label>
-          <label>연도/회차 직접 검색
-            <input id="listYearTextFilter" type="search" placeholder="예: 2025, 민경채, 입법" />
-          </label>
-        </div>
-        <section class="bulk-year-panel" aria-label="연도/회차 일괄 수정">
-          <h3>연도/회차 일괄 수정</h3>
-          <div class="grid two">
-            <label>바꿀 기존 연도/회차
-              <select id="bulkYearSource"><option value="">현재 목록 전체</option></select>
-            </label>
-            <label>새 연도/회차
-              <input id="bulkYearTarget" type="text" inputmode="text" placeholder="예: 2025 5급, 민경채, 입법 2024" />
-            </label>
-          </div>
-          <button id="bulkYearApplyBtn" class="secondary" type="button">연도/회차 일괄 변경</button>
-          <p class="hint">목록 번호는 아래쪽부터 1번으로 표시돼. 순서 변경은 위/아래 버튼으로 할 수 있어.</p>
-        </section>
-        <div id="problemList" class="list"></div>
-      </section>
-    </section>
+  <details class="essay-sync-details-v36">
+    <summary>Firebase 설정 완료</summary>
+    <p class="hint">PSAT에서 만든 psat-sync Firebase 프로젝트를 같이 사용해. Essay 데이터는 essayData 경로에 따로 저장돼.</p>
+  </details>
 
-    <section id="statsView" class="view">
-      <section class="card">
-        <h2>통계</h2>
-        <div id="statsCards" class="stats-grid"></div>
-      </section>
-      <section class="card">
-        <h2>백업 / 복원</h2>
-        <div class="row wrap">
-          <button id="exportBtn" type="button">백업 파일 내보내기</button>
-          <label class="file-button">백업 파일 불러오기
-            <input id="importInput" type="file" multiple accept=".json,.jsonl,.psatbackup,.psatpart,.gz,application/json,application/gzip,text/plain" />
-          </label>
-        </div>
-        <div id="backupPartsV65" class="backup-parts-v65 hidden"></div>
-        <p class="hint">v65 백업은 대용량에서 멈추지 않게 여러 파일로 나눌 수 있어. 여러 파일이면 전부 내려받고, 복원할 때 전부 한꺼번에 선택해.</p>
-      </section>
-      
-      <section class="card" id="firebaseSyncCardV45">
-        <h2>폰 · 태블릿 실시간 동기화</h2>
-        <p id="firebaseSyncStatusV45" class="hint">Firebase 설정 전</p>
+  <div class="grid two">
+    <label>이메일
+      <input id="essayFirebaseEmailV36" type="email" autocomplete="username" placeholder="PSAT에서 사용한 이메일">
+    </label>
+    <label>비밀번호
+      <input id="essayFirebasePasswordV36" type="password" autocomplete="current-password" placeholder="6자 이상">
+    </label>
+  </div>
 
-        <details class="sync-details-v45">
-          <summary>Firebase 설정 완료</summary>
-          <p class="hint">v65: 평소 동기화는 작은 인덱스만 확인하고 변경된 문제만 1개씩 주고받아. 백업은 압축하지 않고 직접저장/분할해서 속도와 안정성을 우선해.</p>
-        </details>
+  <div class="row wrap">
+    <button id="essayFirebaseLoginBtnV36" type="button">로그인 · 동기화 시작</button>
+    <button id="essayFirebaseLogoutBtnV36" class="secondary hidden" type="button">로그아웃</button>
+    <button id="essayFirebasePushBtnV36" class="secondary" type="button">이 기기 데이터 올리기</button>
+    <button id="essayFirebasePullBtnV36" class="secondary" type="button">클라우드 데이터 받기</button> <button id="essayFirebaseRepairBtnV70" type="button" class="secondary">문제·기록 복구</button>
+  </div>
 
-        <div class="grid two sync-auth-grid-v45">
-          <label>이메일
-            <input id="firebaseEmailV45" type="email" autocomplete="username" placeholder="동기화 계정 이메일">
-          </label>
-          <label>비밀번호
-            <input id="firebasePasswordV45" type="password" autocomplete="current-password" placeholder="6자 이상">
-          </label>
-        </div>
-
-        <div class="row wrap">
-          <button id="firebaseSignupBtnV45" class="secondary" type="button">처음 계정 만들기</button>
-          <button id="firebaseLoginBtnV45" type="button">로그인 · 동기화 시작</button>
-          <button id="firebaseLogoutBtnV45" class="secondary hidden" type="button">로그아웃</button>
-          <button id="firebaseRepairBtnV60" type="button">동기화 복구 · 정상화</button>
-          <button id="firebasePushBtnV45" class="secondary" type="button">이 폰 데이터 올리기</button>
-          <button id="firebasePullBtnV45" class="secondary" type="button">클라우드 데이터 받기</button>
-        </div>
-        <p class="hint">같은 Firebase 설정 + 같은 이메일 계정으로 로그인한 폰과 태블릿만 같은 데이터를 사용해.</p>
-      </section>
-
-      <section class="card danger-zone">
-        <h2>초기화</h2>
-        <button id="wipeBtn" class="danger" type="button">전체 데이터 삭제</button>
-      </section>
-    </section>
+  <p class="hint">PSAT과 같은 이메일 계정을 사용하면 돼. 앱을 껐다 켜도 로그인 상태가 유지되고 이후 변경사항은 자동 동기화돼.</p>
+</section>
+<section class="card danger-card"><h2>전체 삭제</h2><button id="wipeBtn" class="danger" type="button">전체 데이터 삭제</button></section></section>
   </main>
 
-  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+  <section id="solveOverlay" class="overlay hidden">
+    <div class="solve-shell v11-shell" id="solveShell">
+      <div class="solve-hidden-meta">
+        <h2 id="solveTitle">문제</h2>
+        <p id="solveMeta" class="meta"></p>
+      </div>
 
+      <div class="problem-zone" id="problemZone">
+        <div class="floating-controls">
+          <div class="timer-box compact-timer">
+            <span>시간</span>
+            <strong id="timerText">00:00</strong>
+            <small id="limitText"></small>
+          </div>
+          <button id="exitSolveBtn" class="float-btn" type="button">중단</button>
+          <button id="submitAnswerBtn" class="float-btn primary" type="button">제출</button>
+          <button id="prevQuestionPageBtn" class="float-btn" type="button">이전쪽</button>
+          <button id="nextQuestionPageBtn" class="float-btn" type="button">다음쪽</button>
+          <button id="fitBtn" class="float-btn" type="button">맞춤</button>
+          <button id="zoomInBtn" class="float-btn" type="button">확대</button>
+          <button id="zoomOutBtn" class="float-btn" type="button">축소</button>
+          <span id="setBadge" class="badge control-badge"></span>
+          <span id="questionPageBadge" class="badge control-badge"></span>
+        </div>
+
+        <div class="image-pane v11-image-pane">
+          <div id="questionImageScroller" class="image-scroller v11-scroller">
+            <div id="imageCanvasWrap" class="image-canvas-wrap">
+              <img id="questionImageView" alt="문제 이미지" />
+              <canvas id="inkCanvas" aria-label="문제 필기 레이어"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <div class="problem-bottom-tools">
+          <button id="penToolBtn" class="secondary small ink-active" type="button">문제펜</button>
+          <button id="eraserToolBtn" class="secondary small" type="button">문제지우개</button>
+          <button id="clearInkBtn" class="secondary small" type="button">문제필기삭제</button>
+          <label class="mini-size-label">문제굵기<input id="inkSizeInput" type="range" min="1" max="12" value="3" /></label>
+        </div>
+      </div>
+<div class="answer-pane answer-dual-pane v11-answer-pane" id="answerZone">
+        <div class="answer-topbar">
+          <label id="answerLabel">내 답안</label>
+          <div class="answer-page-mini">
+            <button id="prevAnswerPageBtn" class="secondary small" type="button">이전</button>
+            <span id="answerPageBadge" class="badge">답안 1/1쪽</span>
+            <button id="nextAnswerPageBtn" class="secondary small" type="button">다음</button>
+            <button id="addAnswerPageBtn" class="secondary small" type="button">추가</button>
+            <button id="keyboardToggleBtn" class="secondary small" type="button">키보드</button>
+          </div>
+        </div>
+
+        <div id="handwritingWrap" class="handwriting-wrap">
+          <canvas id="answerInkCanvas" aria-label="답안 손글씨 입력"></canvas>
+          <div class="answer-pad-hint">스타일러스로만 필기 · 손가락은 이동만</div>
+        </div>
+        <textarea id="answerText" class="hidden" placeholder="여기에 키보드로 답안을 작성하세요."></textarea>
+
+        <div class="answer-bottom-tools v11-bottom-tools">
+          <button id="answerPenBtn" class="secondary small ink-active" type="button">펜</button>
+          <button id="answerEraserBtn" class="secondary small" type="button">지우개</button>
+          <button id="clearAnswerInkBtn" class="secondary small" type="button">필기삭제</button>
+          <label class="mini-size-label">굵기<input id="answerInkSizeInput" type="range" min="1" max="14" value="3" /></label>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="scoreOverlay" class="overlay hidden">
+    <div class="score-shell"><div class="score-head"><div><h2>자가채점</h2><p id="scoreMeta" class="meta"></p></div></div>
+      <div class="score-grid"><section class="score-box">
+          <div class="score-title-row v67-answer-title-row">
+            <h3>내 답안</h3>
+            <div class="v67-answer-title-actions">
+              <span id="scoreAnswerPageBadge" class="badge">답안 1/1쪽</span>
+              <button id="backToAnswerBtn" class="secondary small v67-back-answer-btn" type="button">내 답안으로 돌아가기</button>
+            </div>
+          </div>
+          <div class="row wrap small-gap">
+            <button id="prevScoreAnswerPageBtn" class="secondary small" type="button">이전 답안</button>
+            <button id="nextScoreAnswerPageBtn" class="secondary small" type="button">다음 답안</button>
+            <button id="scoreAnswerPenBtn" class="secondary small ink-active" type="button">답안수정펜</button>
+            <button id="scoreAnswerEraserBtn" class="secondary small" type="button">답안수정지우개</button>
+            <button id="clearScoreAnswerInkBtn" class="secondary small" type="button">답안수정삭제</button><label class="mini-size-label">수정굵기<input id="scoreAnswerSizeInput" type="range" min="1" max="20" value="4" /></label>
+          </div>
+          <div id="scoreAnswerEditWrap" class="review-ink-wrap">
+            <pre id="ownAnswerView"></pre>
+            <img id="ownAnswerInkView" class="answer-ink-preview hidden" alt="손글씨 답안" />
+            <canvas id="scoreAnswerCanvas" aria-label="채점 화면 내 답안 필기 수정"></canvas>
+          </div>
+        </section><section class="score-box"><div class="score-title-row"><h3>해설 / 모범답안</h3><span id="explanationPageBadge" class="badge"></span></div><div id="scoreExplanationOneLine" class="score-one-line-tools"><button id="prevExplanationPageBtn" class="secondary small" type="button">이전</button><button id="nextExplanationPageBtn" class="secondary small" type="button">다음</button><button id="scoreExpPenBtn" class="secondary small ink-active" type="button">펜</button><button id="scoreExpEraserBtn" class="secondary small" type="button">지우개</button><button id="clearScoreExpInkBtn" class="secondary small" type="button">필기삭제</button><label class="mini-size-label">굵기<input id="scoreExpSizeInput" type="range" min="1" max="20" value="4" /></label></div>
+          <div id="scoreExplanationEditWrap" class="review-ink-wrap">
+            <img id="explanationImageView" class="explanation-image hidden" alt="해설 이미지" />
+            <canvas id="scoreExplanationCanvas" aria-label="해설 필기 수정"></canvas>
+          </div><div id="scoreModelTextEditWrap" class="review-ink-wrap score-model-text-wrap">
+            <pre id="modelTextView"></pre>
+            <canvas id="scoreModelTextCanvas" aria-label="텍스트 해설 필기"></canvas>
+          </div></section></div>
+      <section class="card score-card"><h3>채점포인트</h3><div id="pointChecklist" class="checklist"></div><div class="grid four"><label>점수<input id="attemptScoreInput" type="number" min="0" step="0.5" /></label><label>난이도<select id="difficultyResultInput"><option value="중">중</option><option value="상">상</option><option value="하">하</option></select></label><label>복습필요<select id="needReviewInput"><option value="true">예</option><option value="false">아니오</option></select></label><label>완성도<select id="completionInput"><option value="목차만">목차만</option><option value="불완전">불완전</option><option value="완성">완성</option></select></label></div><label>채점 메모<textarea id="memoInput" rows="3" placeholder="누락 쟁점, 다음 복습 포인트"></textarea></label><div class="row wrap"><button id="saveAttemptBtn" type="button">기록 저장</button><button id="saveAndNextBtn" class="secondary" type="button">저장 후 다음</button><button id="finishBtn" class="secondary" type="button">저장 후 끝내기</button></div></section>
+    </div>
+  </section>
+  <div id="toast" class="toast hidden"></div>
+  
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-database-compat.js"></script>
-  <script src="app.js?v=73"></script>
-
-  <div id="exitSummaryOverlayV49" class="exit-summary-overlay-v49 hidden" role="dialog" aria-modal="true" aria-labelledby="exitSummaryTitleV49">
-    <div class="exit-summary-card-v49">
-      <h2 id="exitSummaryTitleV49">현재 풀이 현황</h2>
-      <div class="exit-summary-grid-v49">
-        <div><span>푼 문제</span><strong id="exitAnsweredV49">0문제</strong></div>
-        <div><span>틀린 문제</span><strong id="exitWrongV49">0문제</strong></div>
-        <div><span>푸는데 걸린 시간</span><strong id="exitElapsedV49">0초</strong></div>
-      </div>
-      <div class="exit-summary-actions-v49">
-        <button id="continueSolveV49" class="secondary" type="button">계속 풀기</button>
-        <button id="confirmExitSolveV49" type="button">중단하고 나가기</button>
-      </div>
-    </div>
-  </div>
-
+  <script src="app.js?v=72"></script>
 </body>
 </html>

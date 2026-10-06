@@ -1,15 +1,14 @@
 {
   "id": "./",
-  "name": "PSAT 랜덤 오답노트",
-  "short_name": "PSAT노트",
-  "description": "PSAT 문제풀이 PWA v73",
-  "start_url": "./?v=73",
+  "name": "2차 서술형 답안연습",
+  "short_name": "2차답안",
+  "description": "형법·형사소송법·행정법·교정학 2차 서술형 답안연습",
+  "start_url": "./?v=71",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#0b1020",
-  "theme_color": "#121826",
-  "prefer_related_applications": false,
+  "background_color": "#f5f7fb",
+  "theme_color": "#111827",
   "icons": [
     {
       "src": "icon-192.png",
