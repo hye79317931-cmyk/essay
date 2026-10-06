@@ -1,12 +1,12 @@
 'use strict';
 
-const CACHE_NAME = 'essay-pwa-v72';
+const CACHE_NAME = 'essay-pwa-v73-installfix';
 const ASSETS = [
   './',
   './index.html',
-  './styles.css?v=72',
-  './app.js?v=72',
-  './manifest.webmanifest',
+  './styles.css?v=73',
+  './app.js?v=73',
+  './manifest.webmanifest?v=73',
   './icon-192.png',
   './icon-512.png'
 ];

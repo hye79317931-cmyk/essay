@@ -1,14 +1,15 @@
 {
-  "id": "./",
+  "id": "./essay-answer-practice-app",
   "name": "2차 서술형 답안연습",
   "short_name": "2차답안",
   "description": "형법·형사소송법·행정법·교정학 2차 서술형 답안연습",
-  "start_url": "./?v=71",
+  "start_url": "./?v=73&source=pwa",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#f5f7fb",
   "theme_color": "#111827",
+  "prefer_related_applications": false,
   "icons": [
     {
       "src": "icon-192.png",

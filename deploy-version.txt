@@ -1,1 +1,1 @@
-Essay v72 solve-open storage guard (based on e71)
+Essay v73 PWA install fix - stable e71 base; data stores unchanged
