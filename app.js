@@ -1,4 +1,4 @@
-const APP_VERSION="essay-psat-base-v77";const DB_NAME="essayPsatBaseDB_v1";const DB_VERSION=1;const STORE_PROBLEMS="problems";const STORE_ATTEMPTS="attempts";const $=id=>document.getElementById(id);const $$=sel=>Array.from(document.querySelectorAll(sel));let db;const state={problems:[],attempts:[],questionPages:[],explanationPages:[],selectedQuestionPage:-1,selectedExplanationPage:-1,activePasteTarget:"question",solve:null,timer:null,qPage:0,expPage:0,zoom:1,installPrompt:null};
+const APP_VERSION="essay-psat-base-v78";const DB_NAME="essayPsatBaseDB_v1";const DB_VERSION=1;const STORE_PROBLEMS="problems";const STORE_ATTEMPTS="attempts";const $=id=>document.getElementById(id);const $$=sel=>Array.from(document.querySelectorAll(sel));let db;const state={problems:[],attempts:[],questionPages:[],explanationPages:[],selectedQuestionPage:-1,selectedExplanationPage:-1,activePasteTarget:"question",solve:null,timer:null,qPage:0,expPage:0,zoom:1,installPrompt:null};
 
 /* === v76: 설치 이벤트를 DB 로딩 전에 확보 === */
 window.addEventListener("beforeinstallprompt",event=>{
@@ -8315,4 +8315,221 @@ startSolve = function(ids, mode) {
       try{renderPageLists();}catch(err){console.warn("v77 page render",err);}
     }
   };
+})();
+
+/* === v78: 목록 최근등록 1번 + 복습 번호/전체선택/안 푼 문제 보내기 ===
+   - 목록탭에만 최근 등록 문제가 1번부터 보이도록 정렬
+   - 복습탭 카드 번호 표시
+   - 복습탭 현재 필터 전체선택/선택 문제를 안 푼 문제로 이동
+   - 기존 풀이기록은 보존하고 manualUnseenV78 상태만 추가
+   - 다시 풀이기록 저장 시 manualUnseenV78 자동 해제
+*/
+(function essayListReviewV78(){
+  if (window.__essayListReviewV78) return;
+  window.__essayListReviewV78 = true;
+
+  const selectedV78 = new Set();
+
+  function registrationKeyV78(problem){
+    const order = Number(problem?.order || 0);
+    if (Number.isFinite(order) && order > 0) return order;
+    const created = Date.parse(problem?.createdAt || "");
+    return Number.isFinite(created) ? created : 0;
+  }
+
+  function newestFirstV78(list){
+    return [...(list || [])].sort((a,b) => {
+      const diff = registrationKeyV78(b) - registrationKeyV78(a);
+      if (diff) return diff;
+      return String(b?.createdAt || "").localeCompare(String(a?.createdAt || ""));
+    });
+  }
+
+  // 목록탭만 최근 등록 순으로 표시하고, 보이는 목록의 첫 카드부터 1번.
+  renderList = function(){
+    const list = $("problemList");
+    if (!list) return;
+    const arr = newestFirstV78(filterProblems({
+      subject: $("listSubject")?.value || "",
+      session: $("listSession")?.value || "",
+      search: $("listSearch")?.value || ""
+    }));
+    list.innerHTML = "";
+    if (!arr.length) {
+      list.innerHTML = '<p class="hint">등록된 문제가 없어.</p>';
+      return;
+    }
+    arr.forEach((p,i) => {
+      const card = problemCard(p,{list:true});
+      const title = card.querySelector("h3");
+      if (title) title.textContent = `${i+1}. ${titleOf(p)}`;
+      list.append(card);
+    });
+  };
+
+  function reviewProblemsV78(){
+    let arr = filterProblems({
+      subject: $("reviewSubject")?.value || "",
+      session: $("reviewSession")?.value || ""
+    });
+    // 수동으로 안 푼 문제로 보낸 항목은 복습 목록에서는 빠진다.
+    arr = arr.filter(p => p?.manualUnseenV78 !== true);
+    if ($("reviewType")?.value === "needed") {
+      arr = arr.filter(p => String(lastAttempt(p.id)?.needReview) === "true");
+    } else {
+      arr = arr.filter(p => attemptsOf(p.id).length > 0);
+    }
+    return arr;
+  }
+
+  function ensureToolbarV78(){
+    const list = $("reviewList");
+    const card = list?.closest("section.card");
+    if (!list || !card) return null;
+    let bar = $("reviewBulkBarV78");
+    if (!bar) {
+      bar = document.createElement("div");
+      bar.id = "reviewBulkBarV78";
+      bar.className = "review-bulk-v78";
+      bar.innerHTML = `
+        <button id="reviewSelectAllV78" type="button" class="secondary">전체선택</button>
+        <span id="reviewSelectedCountV78" class="review-selected-count-v78">선택 0개</span>
+        <button id="reviewMoveUnseenV78" type="button">선택한 문제 → 안 푼 문제</button>
+      `;
+      card.insertBefore(bar, list);
+
+      $("reviewSelectAllV78")?.addEventListener("click", () => {
+        const arr = reviewProblemsV78();
+        const all = arr.length > 0 && arr.every(p => selectedV78.has(String(p.id)));
+        for (const p of arr) {
+          const id = String(p.id);
+          if (all) selectedV78.delete(id);
+          else selectedV78.add(id);
+        }
+        renderReview();
+      });
+
+      $("reviewMoveUnseenV78")?.addEventListener("click", async () => {
+        const ids = [...selectedV78];
+        if (!ids.length) {
+          toast("안 푼 문제로 보낼 문제를 선택해줘");
+          return;
+        }
+        let moved = 0;
+        for (const id of ids) {
+          const p = state.problems.find(x => String(x.id) === id);
+          if (!p) continue;
+          p.manualUnseenV78 = true;
+          await put(STORE_PROBLEMS, p);
+          moved += 1;
+        }
+        selectedV78.clear();
+        renderReview();
+        try { renderSolveList(); } catch {}
+        try { renderStats(); } catch {}
+        toast(`${moved}문제를 안 푼 문제로 보냈어`);
+      });
+    }
+    return bar;
+  }
+
+  function updateToolbarV78(arr){
+    ensureToolbarV78();
+    // 현재 필터 밖의 선택은 제거해 숨은 선택이 남지 않게 한다.
+    const allowed = new Set((arr || []).map(p => String(p.id)));
+    for (const id of [...selectedV78]) if (!allowed.has(id)) selectedV78.delete(id);
+    const count = $("reviewSelectedCountV78");
+    if (count) count.textContent = `선택 ${selectedV78.size}개`;
+    const allBtn = $("reviewSelectAllV78");
+    if (allBtn) {
+      const all = arr?.length > 0 && arr.every(p => selectedV78.has(String(p.id)));
+      allBtn.textContent = all ? "전체해제" : "전체선택";
+      allBtn.disabled = !arr?.length;
+    }
+    const moveBtn = $("reviewMoveUnseenV78");
+    if (moveBtn) moveBtn.disabled = selectedV78.size === 0;
+  }
+
+  renderReview = function(){
+    const list = $("reviewList");
+    if (!list) return;
+    const arr = reviewProblemsV78();
+    list.innerHTML = "";
+    updateToolbarV78(arr);
+    if (!arr.length) {
+      list.innerHTML = '<p class="hint">복습 대상이 없어.</p>';
+      return;
+    }
+    arr.forEach((p,i) => {
+      const card = problemCard(p,{review:true});
+      card.classList.add("review-select-card-v78");
+      const title = card.querySelector("h3");
+      if (title) title.textContent = `${i+1}. ${titleOf(p)}`;
+
+      const picker = document.createElement("label");
+      picker.className = "review-pick-v78";
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = selectedV78.has(String(p.id));
+      box.addEventListener("change", () => {
+        const id = String(p.id);
+        if (box.checked) selectedV78.add(id);
+        else selectedV78.delete(id);
+        updateToolbarV78(arr);
+      });
+      const text = document.createElement("span");
+      text.textContent = "선택";
+      picker.append(box,text);
+      card.insertBefore(picker, card.firstChild);
+      list.append(card);
+    });
+  };
+
+  // 안 푼 문제 범위에서 수동 안 푼 상태도 포함하고, 다른 풀이상태 범위에서는 제외.
+  if (typeof scopeMatchesV25 === "function") {
+    const scopeMatchesV78Original = scopeMatchesV25;
+    scopeMatchesV25 = function(problem, scope = solveScopeV25()){
+      if (problem?.manualUnseenV78 === true) {
+        if (scope === "unseen") return true;
+        if (scope === "review" || scope === "slow" || scope === "solved") return false;
+      }
+      return scopeMatchesV78Original(problem, scope);
+    };
+  }
+
+  // 다시 풀어서 기록을 저장하면 '수동 안 푼 상태' 자동 해제.
+  if (typeof saveAttempt === "function") {
+    const saveAttemptV78Original = saveAttempt;
+    saveAttempt = async function(){
+      const problemId = state.solve?.ids?.[state.solve.index];
+      const attempt = await saveAttemptV78Original();
+      if (attempt && problemId != null) {
+        const p = state.problems.find(x => String(x.id) === String(problemId));
+        if (p?.manualUnseenV78 === true) {
+          p.manualUnseenV78 = false;
+          await put(STORE_PROBLEMS, p);
+        }
+      }
+      return attempt;
+    };
+  }
+
+  // 필터 전환 시 선택상태를 비우고 현재 화면만 다시 그림.
+  for (const id of ["reviewSubject","reviewSession","reviewType"]) {
+    const el = $(id);
+    if (!el || el.dataset.v78SelectReady) continue;
+    el.dataset.v78SelectReady = "1";
+    const evt = id === "reviewSession" ? "input" : "change";
+    el.addEventListener(evt, () => {
+      selectedV78.clear();
+      if (document.querySelector("#reviewView.view.active")) renderReview();
+    });
+  }
+
+  setTimeout(() => {
+    ensureToolbarV78();
+    if (document.querySelector("#reviewView.view.active")) renderReview();
+  }, 300);
+
+  window.essayReviewBulkV78 = { selected: selectedV78 };
 })();

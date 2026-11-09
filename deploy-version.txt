@@ -1,1 +1,1 @@
-Essay v77 handwriting-preserving performance fix (based on e76; e72 data schema)
+Essay v78 list newest-first + review numbering/bulk move-to-unseen (based on v77; handwriting/Firebase preserved)

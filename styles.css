@@ -1639,3 +1639,25 @@
   pointer-events:none!important;
   z-index:90!important;
 }
+
+/* === v78 목록/복습 선택 UI === */
+.review-bulk-v78{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+  margin:10px 0 12px;
+}
+.review-bulk-v78 button{min-height:36px;}
+.review-selected-count-v78{font-size:.9rem;font-weight:700;white-space:nowrap;}
+.review-pick-v78{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  margin-bottom:6px;
+  font-size:.88rem;
+  font-weight:700;
+  cursor:pointer;
+}
+.review-pick-v78 input{width:18px;height:18px;margin:0;}
+.review-select-card-v78{position:relative;}

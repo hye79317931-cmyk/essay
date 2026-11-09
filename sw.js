@@ -1,6 +1,6 @@
 'use strict';
-const CACHE_NAME='essay-pwa-v77';
-const APP_SHELL=['./','./index.html','./styles.css?v=77','./app.js?v=77','./manifest.webmanifest?v=77','./icon-192.png','./icon-512.png'];
+const CACHE_NAME='essay-pwa-v78';
+const APP_SHELL=['./','./index.html','./styles.css?v=78','./app.js?v=78','./manifest.webmanifest?v=78','./icon-192.png','./icon-512.png'];
 self.addEventListener('install',event=>{event.waitUntil(caches.open(CACHE_NAME).then(c=>c.addAll(APP_SHELL)));self.skipWaiting();});
 self.addEventListener('activate',event=>{event.waitUntil((async()=>{const ks=await caches.keys();await Promise.all(ks.filter(k=>k.startsWith('essay-pwa-')&&k!==CACHE_NAME).map(k=>caches.delete(k)));await self.clients.claim();})());});
 self.addEventListener('fetch',event=>{if(event.request.method!=='GET')return;const u=new URL(event.request.url);if(u.origin!==self.location.origin)return;const code=event.request.mode==='navigate'||/\.(?:js|css|webmanifest)$/.test(u.pathname);if(code){event.respondWith((async()=>{try{const r=await fetch(event.request,{cache:'no-store'});const c=await caches.open(CACHE_NAME);c.put(event.request,r.clone()).catch(()=>{});return r;}catch{return (await caches.match(event.request))||(await caches.match('./index.html'))||Response.error();}})());return;}event.respondWith((async()=>{const hit=await caches.match(event.request);if(hit)return hit;try{const r=await fetch(event.request);const c=await caches.open(CACHE_NAME);c.put(event.request,r.clone()).catch(()=>{});return r;}catch{return Response.error();}})());});
