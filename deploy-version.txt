@@ -1,1 +1,1 @@
-Essay v78 list newest-first + review numbering/bulk move-to-unseen (based on v77; handwriting/Firebase preserved)
+Essay v79 storage+ink+PWA update: large problem ink/draft moved from localStorage to IndexedDB with safe migration; S Pen bridge hardened; Firebase sync preserved; installed PWA auto-refreshes after updates when not studying
