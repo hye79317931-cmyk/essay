@@ -1,1 +1,1 @@
-Essay v79 storage+ink+PWA update: large problem ink/draft moved from localStorage to IndexedDB with safe migration; S Pen bridge hardened; Firebase sync preserved; installed PWA auto-refreshes after updates when not studying
+Essay v80 save-and-finish fix: score-screen finish now writes the current attempt directly to IndexedDB, waits for the v79 draft clear to complete, then exits; prevents duplicate handlers while preserving v79 storage/pen/PWA update behavior

@@ -1,4 +1,4 @@
-const APP_VERSION="essay-psat-base-v79";const DB_NAME="essayPsatBaseDB_v1";const DB_VERSION=1;const STORE_PROBLEMS="problems";const STORE_ATTEMPTS="attempts";const $=id=>document.getElementById(id);const $$=sel=>Array.from(document.querySelectorAll(sel));let db;const state={problems:[],attempts:[],questionPages:[],explanationPages:[],selectedQuestionPage:-1,selectedExplanationPage:-1,activePasteTarget:"question",solve:null,timer:null,qPage:0,expPage:0,zoom:1,installPrompt:null};
+const APP_VERSION="essay-psat-base-v80";const DB_NAME="essayPsatBaseDB_v1";const DB_VERSION=1;const STORE_PROBLEMS="problems";const STORE_ATTEMPTS="attempts";const $=id=>document.getElementById(id);const $$=sel=>Array.from(document.querySelectorAll(sel));let db;const state={problems:[],attempts:[],questionPages:[],explanationPages:[],selectedQuestionPage:-1,selectedExplanationPage:-1,activePasteTarget:"question",solve:null,timer:null,qPage:0,expPage:0,zoom:1,installPrompt:null};
 
 /* === v76: 설치 이벤트를 DB 로딩 전에 확보 === */
 window.addEventListener("beforeinstallprompt",event=>{
@@ -680,7 +680,7 @@ async function resetEssayPwaOnceV49(){
 async function registerEssayServiceWorkerV49(){
   if(!("serviceWorker" in navigator))return;
   try{
-    const reg=await navigator.serviceWorker.register("./sw.js?v=79",{scope:"./",updateViaCache:"none"});
+    const reg=await navigator.serviceWorker.register("./sw.js?v=80",{scope:"./",updateViaCache:"none"});
     await reg.update().catch(()=>{});
   }catch(err){
     console.warn("Service worker registration failed",err);
@@ -8578,6 +8578,7 @@ startSolve = function(ids, mode) {
   let draftCacheV79="";
   let inkRevisionV79="";
   let draftRevisionV79="";
+  let draftWriteChainV79=Promise.resolve();
 
   function openV79(){
     if(dbPromiseV79)return dbPromiseV79;
@@ -8707,34 +8708,43 @@ startSolve = function(ids, mode) {
     await replaceAllInkV79(obj,revisionToken||nextRevisionV79());
     try{drawProblemInkV13?.();}catch{}
   }
-  async function saveDraftTextV79(text,revisionToken=""){
-    draftCacheV79=String(text||"");
+  function queueDraftWriteV80(task){
+    draftWriteChainV79=draftWriteChainV79.catch(()=>{}).then(task);
+    return draftWriteChainV79;
+  }
+  function saveDraftTextV79(text,revisionToken=""){
+    const nextText=String(text||"");
     const revision=revisionToken||nextRevisionV79();
+    draftCacheV79=nextText;
     draftRevisionV79=revision;
     window.__essayDraftRevisionV79=revision;
-    const d=await openV79();
-    await new Promise((resolve,reject)=>{
-      const tx=d.transaction(META_STORE_V79,"readwrite");
-      tx.oncomplete=()=>resolve();
-      tx.onerror=()=>reject(tx.error);
-      const st=tx.objectStore(META_STORE_V79);
-      st.put({key:"draftText",value:draftCacheV79});
-      st.put({key:"draftRevision",value:revision});
+    return queueDraftWriteV80(async()=>{
+      const d=await openV79();
+      await new Promise((resolve,reject)=>{
+        const tx=d.transaction(META_STORE_V79,"readwrite");
+        tx.oncomplete=()=>resolve();
+        tx.onerror=()=>reject(tx.error);
+        const st=tx.objectStore(META_STORE_V79);
+        st.put({key:"draftText",value:nextText});
+        st.put({key:"draftRevision",value:revision});
+      });
     });
   }
-  async function clearDraftV79(){
-    draftCacheV79="";
+  function clearDraftV79(){
     const revision=nextRevisionV79();
+    draftCacheV79="";
     draftRevisionV79=revision;
     window.__essayDraftRevisionV79=revision;
-    const d=await openV79();
-    await new Promise((resolve,reject)=>{
-      const tx=d.transaction(META_STORE_V79,"readwrite");
-      tx.oncomplete=()=>resolve();
-      tx.onerror=()=>reject(tx.error);
-      const st=tx.objectStore(META_STORE_V79);
-      st.put({key:"draftText",value:""});
-      st.put({key:"draftRevision",value:revision});
+    return queueDraftWriteV80(async()=>{
+      const d=await openV79();
+      await new Promise((resolve,reject)=>{
+        const tx=d.transaction(META_STORE_V79,"readwrite");
+        tx.oncomplete=()=>resolve();
+        tx.onerror=()=>reject(tx.error);
+        const st=tx.objectStore(META_STORE_V79);
+        st.put({key:"draftText",value:""});
+        st.put({key:"draftRevision",value:revision});
+      });
     });
   }
   async function clearAllV79(){
@@ -8836,4 +8846,131 @@ startSolve = function(ids, mode) {
     window.addEventListener("focus",checkUpdateV79);
     document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")checkUpdateV79();});
   }
+})();
+
+
+/* === v80: 저장 후 끝내기 확정 저장/종료 ===
+   - 기존 saveAttempt 래퍼 체인과 분리해 끝내기 버튼에서 현재 답안을 직접 확정 저장
+   - 기록 저장 성공 후 IndexedDB 이어풀기 draft 삭제를 완료한 다음 화면 종료
+   - 저장 중 중복 클릭 차단, 오류 시 화면을 닫지 않고 안내
+   - 기존 저장 후 다음/일반 저장/Firebase 경로는 유지
+*/
+(function essayFinishAfterSaveV80(){
+  if(window.__essayFinishAfterSaveV80)return;
+  window.__essayFinishAfterSaveV80=true;
+  let busyV80=false;
+
+  function cloneV80(value){
+    try{return structuredClone(value);}catch{}
+    try{return JSON.parse(JSON.stringify(value));}catch{return value;}
+  }
+
+  function numV80(id){
+    const el=document.getElementById(id);
+    return el?.value===""?null:Number(el?.value||0);
+  }
+
+  async function saveAttemptDirectV80(){
+    const p=typeof currentProblem==="function"?currentProblem():null;
+    if(!p||!state.solve)throw new Error("현재 풀이 정보를 찾을 수 없어");
+
+    // 현재 답안 페이지/필기를 state.solve에 먼저 확정.
+    try{if(typeof saveCurrentAnswerPageV10==="function")saveCurrentAnswerPageV10();}catch(err){console.warn("v80 answer page save",err);}
+    try{
+      if(typeof answerHasInk==="function"&&typeof dataUrlFromAnswerCanvas==="function"){
+        state.solve.answerInkData=answerHasInk()?dataUrlFromAnswerCanvas():(state.solve.answerInkData||"");
+      }
+    }catch(err){console.warn("v80 answer image snapshot",err);}
+    state.solve.answerInkStrokes=Array.isArray(state.answerInkStrokes)?state.answerInkStrokes:[];
+    state.solve.answerInputMode=state.answerInputMode||state.solve.answerInputMode||"handwriting";
+
+    const attempt={
+      id:uuid(),
+      problemId:p.id,
+      subject:p.subject,
+      session:p.session,
+      mode:state.solve.mode,
+      answer:state.solve.answer||"",
+      elapsedMs:Number(state.solve.elapsedBase||0),
+      score:numV80("attemptScoreInput"),
+      maxScore:p.maxScore||0,
+      difficulty:document.getElementById("difficultyResultInput")?.value||"중",
+      needReview:document.getElementById("needReviewInput")?.value||"true",
+      completion:document.getElementById("completionInput")?.value||(state.solve.mode==="outline"?"목차만":"완성"),
+      memo:(document.getElementById("memoInput")?.value||"").trim(),
+      checkedPoints:Array.from(document.querySelectorAll("#pointChecklist input")).map(x=>!!x.checked),
+      completedAt:nowIso(),
+      answerInkData:state.solve.answerInkData||"",
+      answerInkStrokes:cloneV80(state.solve.answerInkStrokes||[]),
+      answerInputMode:state.solve.answerInputMode||"handwriting",
+      answerPages:cloneV80(state.solve.answerPages||[])
+    };
+
+    // put은 IndexedDB 저장 완료까지만 기다리고 Firebase 업로드는 기존 래퍼가 비동기로 예약한다.
+    await put(STORE_ATTEMPTS,attempt);
+
+    // loadData 전체 재조회 없이 메모리만 즉시 반영해 끝내기 지연을 없앤다.
+    const idx=(state.attempts||[]).findIndex(a=>String(a?.id)===String(attempt.id));
+    if(idx>=0)state.attempts[idx]=attempt;
+    else state.attempts.unshift(attempt);
+    state.attempts.sort((a,b)=>String(b.completedAt||"").localeCompare(String(a.completedAt||"")));
+
+    // v78 수동 안 푼 상태는 재풀이 기록 저장 시 해제. 이 부가 저장은 종료를 막지 않는다.
+    if(p.manualUnseenV78===true){
+      p.manualUnseenV78=false;
+      put(STORE_PROBLEMS,p).catch(err=>console.warn("v80 unseen reset",err));
+    }
+    return attempt;
+  }
+
+  async function clearDraftBeforeFinishV80(){
+    try{
+      if(window.essayLargeStorageV79?.clearDraft){
+        await window.essayLargeStorageV79.clearDraft();
+      }else if(typeof safeRemoveDraftV72==="function"){
+        safeRemoveDraftV72();
+      }
+    }catch(err){
+      console.warn("v80 draft clear",err);
+      try{localStorage.removeItem("essayPsatBaseDraft");}catch{}
+    }
+  }
+
+  async function finishAfterSaveV80(button){
+    if(busyV80)return;
+    busyV80=true;
+    const oldText=button?.textContent||"저장 후 끝내기";
+    if(button){button.disabled=true;button.textContent="저장 중...";}
+    try{
+      await saveAttemptDirectV80();
+      await clearDraftBeforeFinishV80();
+      // draft는 이미 지웠으므로 기존 finishSolve의 재삭제를 피한다.
+      if(typeof finishSolve==="function")finishSolve(false);
+      else{
+        clearInterval(state.timer);state.timer=null;state.solve=null;
+        document.getElementById("solveOverlay")?.classList.add("hidden");
+        document.getElementById("scoreOverlay")?.classList.add("hidden");
+        try{renderAll();}catch{}
+      }
+      try{toast("풀이 기록 저장 후 종료 완료");}catch{}
+    }catch(err){
+      console.error("v80 save and finish failed",err);
+      try{toast("기록 저장 실패 · 끝내지 않았어");}catch{}
+    }finally{
+      busyV80=false;
+      if(button&&document.body.contains(button)){button.disabled=false;button.textContent=oldText;}
+    }
+  }
+
+  // 기존 bubble 핸들러보다 먼저 처리해 중복 저장/이중 종료를 막는다.
+  document.addEventListener("click",event=>{
+    const button=event.target?.closest?.("#finishBtn");
+    if(!button)return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+    finishAfterSaveV80(button);
+  },true);
+
+  window.essayFinishAfterSaveV80=finishAfterSaveV80;
 })();
