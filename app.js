@@ -1,4 +1,4 @@
-const APP_VERSION="essay-psat-base-v84";const DB_NAME="essayPsatBaseDB_v1";const DB_VERSION=1;const STORE_PROBLEMS="problems";const STORE_ATTEMPTS="attempts";const $=id=>document.getElementById(id);const $$=sel=>Array.from(document.querySelectorAll(sel));let db;const state={problems:[],attempts:[],questionPages:[],explanationPages:[],selectedQuestionPage:-1,selectedExplanationPage:-1,activePasteTarget:"question",solve:null,timer:null,qPage:0,expPage:0,zoom:1,installPrompt:null};
+const APP_VERSION="essay-psat-base-v85";const DB_NAME="essayPsatBaseDB_v1";const DB_VERSION=1;const STORE_PROBLEMS="problems";const STORE_ATTEMPTS="attempts";const $=id=>document.getElementById(id);const $$=sel=>Array.from(document.querySelectorAll(sel));let db;const state={problems:[],attempts:[],questionPages:[],explanationPages:[],selectedQuestionPage:-1,selectedExplanationPage:-1,activePasteTarget:"question",solve:null,timer:null,qPage:0,expPage:0,zoom:1,installPrompt:null};
 
 /* === v76: 설치 이벤트를 DB 로딩 전에 확보 === */
 window.addEventListener("beforeinstallprompt",event=>{
@@ -30,7 +30,7 @@ function safeRemoveDraftV72(){
   try{localStorage.removeItem("essayPsatBaseDraft");return true}catch(err){console.warn("v72 draft remove failed",err);return false}
 }
 
-function uuid(){return crypto.randomUUID&&crypto.randomUUID()||`id_${Date.now()}_${Math.random().toString(16).slice(2)}`}function nowIso(){return new Date().toISOString()}function toast(msg){const t=$("toast");t.textContent=msg;t.classList.remove("hidden");clearTimeout(toast._t);toast._t=setTimeout(()=>t.classList.add("hidden"),2300)}function esc(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]))}function fmtTime(ms){ms=Math.max(0,Math.floor(ms||0));const sec=Math.floor(ms/1000),h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s=sec%60;return h?`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`:`${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`}function pointsFromText(text){return String(text||"").split(/\n+/).map(x=>x.trim()).filter(Boolean)}function openDB(){return new Promise((resolve,reject)=>{const req=indexedDB.open(DB_NAME,DB_VERSION);req.onupgradeneeded=()=>{const d=req.result;if(!d.objectStoreNames.contains(STORE_PROBLEMS))d.createObjectStore(STORE_PROBLEMS,{keyPath:"id"});if(!d.objectStoreNames.contains(STORE_ATTEMPTS))d.createObjectStore(STORE_ATTEMPTS,{keyPath:"id"})};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error)})}function store(name,mode="readonly"){return db.transaction(name,mode).objectStore(name)}function getAll(name){return new Promise((resolve,reject)=>{const req=store(name).getAll();req.onsuccess=()=>resolve(req.result||[]);req.onerror=()=>reject(req.error)})}function put(name,value){return new Promise((resolve,reject)=>{const req=store(name,"readwrite").put(value);req.onsuccess=()=>resolve(value);req.onerror=()=>reject(req.error)})}function del(name,key){return new Promise((resolve,reject)=>{const req=store(name,"readwrite").delete(key);req.onsuccess=()=>resolve();req.onerror=()=>reject(req.error)})}function clearStore(name){return new Promise((resolve,reject)=>{const req=store(name,"readwrite").clear();req.onsuccess=()=>resolve();req.onerror=()=>reject(req.error)})}async function loadData(){state.problems=(await getAll(STORE_PROBLEMS)).sort((a,b)=>(a.order||0)-(b.order||0));state.attempts=(await getAll(STORE_ATTEMPTS)).sort((a,b)=>String(b.completedAt).localeCompare(String(a.completedAt)))}function setPasteTarget(target){state.activePasteTarget=target;$("questionPasteZone")?.classList.toggle("active-paste",target==="question");$("explanationPasteZone")?.classList.toggle("active-paste",target==="explanation")}function dataUrlBytes(dataUrl){const comma=dataUrl.indexOf(",");const base64=comma>=0?dataUrl.slice(comma+1):dataUrl;return Math.round(base64.length*.75)}function formatBytes(bytes){if(!bytes)return"0B";const u=["B","KB","MB"];let v=bytes,i=0;while(v>=1024&&i<u.length-1){v/=1024;i++}return`${v.toFixed(i?1:0)}${u[i]}`}function imageBlobToDataUrl(blob){return new Promise((resolve,reject)=>{const mode=$("qualityInput").value||"sharp";if(mode==="original"){const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=()=>reject(r.error);r.readAsDataURL(blob);return}const reader=new FileReader();reader.onload=()=>{const img=new Image();img.onload=()=>{const maxDim=mode==="bulk"?1500:2400,scale=Math.min(1,maxDim/Math.max(img.width,img.height)),w=Math.max(1,Math.round(img.width*scale)),h=Math.max(1,Math.round(img.height*scale)),canvas=document.createElement("canvas");canvas.width=w;canvas.height=h;const ctx=canvas.getContext("2d");ctx.fillStyle="white";ctx.fillRect(0,0,w,h);ctx.drawImage(img,0,0,w,h);resolve(canvas.toDataURL("image/jpeg",mode==="bulk"?.72:.88))};img.onerror=reject;img.src=reader.result};reader.onerror=()=>reject(reader.error);reader.readAsDataURL(blob)})}async function addImageFiles(files,target){const arr=Array.from(files||[]).filter(file=>file&&file.type&&file.type.startsWith("image/"));if(!arr.length){toast("이미지 파일이 없어");return}let added=0,size=0;for(const file of arr){const data=await imageBlobToDataUrl(file);if(target==="explanation")state.explanationPages.push(data);else state.questionPages.push(data);size+=dataUrlBytes(data);added++}renderPageLists();setPasteTarget(target);toast(`${target==="explanation"?"해설":"문제"} 이미지 ${added}장 추가 · ${formatBytes(size)}`)}async function pasteImageFromClipboardEvent(event,explicitTarget=""){const items=event.clipboardData?.items?Array.from(event.clipboardData.items):[];const files=items.filter(entry=>entry.type&&entry.type.startsWith("image/")).map(entry=>entry.getAsFile()).filter(Boolean);if(!files.length)return false;event.preventDefault();const target=explicitTarget||event.target.closest?.("[data-paste-target]")?.dataset?.pasteTarget||state.activePasteTarget||"question";toast("스크린샷 처리 중...");await addImageFiles(files,target);return true}async function pasteImageWithClipboardApi(target){setPasteTarget(target);if(!navigator.clipboard||!navigator.clipboard.read){toast("이 브라우저는 버튼 붙여넣기를 지원하지 않아. 영역 클릭 후 Ctrl+V를 눌러줘.");return}try{const items=await navigator.clipboard.read();const files=[];for(const item of items){const type=item.types.find(t=>t.startsWith("image/"));if(!type)continue;const blob=await item.getType(type);files.push(new File([blob],`${target}_${Date.now()}_${files.length}.png`,{type}))}if(!files.length){toast("클립보드에 이미지가 없어");return}toast("스크린샷 처리 중...");await addImageFiles(files,target)}catch(err){console.warn(err);toast("붙여넣기 권한이 막혔어. 영역 클릭 후 Ctrl+V를 눌러줘.")}}function setupPasteZone(zoneId,inputId,target){const zone=$(zoneId),input=$(inputId);zone.addEventListener("click",()=>{setPasteTarget(target);zone.focus()});zone.addEventListener("focus",()=>setPasteTarget(target));zone.addEventListener("paste",event=>pasteImageFromClipboardEvent(event,target));input.addEventListener("change",async()=>{await addImageFiles(input.files,target);input.value=""})}function makeButton(text,fn,cls=""){const b=document.createElement("button");b.type="button";b.textContent=text;if(cls)b.className=cls;b.addEventListener("click",fn);return b}function movePage(target,index,dir){const arr=target==="explanation"?state.explanationPages:state.questionPages,next=index+dir;if(next<0||next>=arr.length)return;[arr[index],arr[next]]=[arr[next],arr[index]];renderPageLists()}function deletePage(target,index){const arr=target==="explanation"?state.explanationPages:state.questionPages;arr.splice(index,1);renderPageLists()}function renderPageList(id,arr,target){const box=$(id);box.innerHTML="";if(!arr.length){box.innerHTML='<p class="hint">아직 이미지가 없어.</p>';return}arr.forEach((src,index)=>{const div=document.createElement("div");div.className="page-item";div.innerHTML=`<img src="${src}" alt="${index+1}쪽" /><div><strong>${index+1}쪽</strong><p class="hint">${target==="explanation"?"해설":"문제"} 페이지</p><div class="page-actions"></div></div>`;const actions=div.querySelector(".page-actions");actions.append(makeButton("위",()=>movePage(target,index,-1),"secondary small"));actions.append(makeButton("아래",()=>movePage(target,index,1),"secondary small"));actions.append(makeButton("삭제",()=>deletePage(target,index),"danger small"));box.append(div)})}function renderPageLists(){renderPageList("questionPageList",state.questionPages,"question");renderPageList("explanationPageList",state.explanationPages,"explanation")}function titleOf(p){return p.title||`${p.session?p.session+" ":""}${p.subject||""} 문제`}function attemptsOf(id){return state.attempts.filter(a=>a.problemId===id)}function lastAttempt(id){return attemptsOf(id).sort((a,b)=>String(b.completedAt).localeCompare(String(a.completedAt)))[0]}function metaOf(p){const last=lastAttempt(p.id);return`${p.subject||"-"} · ${p.session||"회차 없음"} · 문제 ${realPages(p.questionPages||[]).length}쪽 · 해설 ${realPages(p.explanationPages||[]).length}쪽 · ${p.maxScore||0}점 · 제한 ${p.timeLimit||0}분 · 기록 ${attemptsOf(p.id).length}회${last?" · 최근 "+fmtTime(last.elapsedMs):""}`}function filterProblems({subject="",session="",search=""}={}){const s=session.trim().toLowerCase(),q=search.trim().toLowerCase();return state.problems.filter(p=>{if(subject&&p.subject!==subject)return false;if(s&&!String(p.session||"").toLowerCase().includes(s))return false;if(q){const blob=[p.title,p.session,p.subject,p.pointsText,p.modelText].join(" ").toLowerCase();if(!blob.includes(q))return false}return true})}function showView(id){$$(".tab").forEach(b=>b.classList.toggle("active",b.dataset.view===id));$$(".view").forEach(v=>v.classList.toggle("active",v.id===id));renderAll()}function problemCard(p,opts={}){const last=lastAttempt(p.id),div=document.createElement("div");div.className="problem-card";div.innerHTML=`<h3>${esc(titleOf(p))}</h3><p class="meta">${esc(metaOf(p))}</p><div class="badges"><span class="badge">${esc(p.subject||"-")}</span><span class="badge">${esc(p.session||"회차 없음")}</span><span class="badge">문제 ${realPages(p.questionPages||[]).length}쪽</span><span class="badge">해설 ${realPages(p.explanationPages||[]).length}쪽</span>${last?`<span class="badge">최근점수 ${last.score??"-"}</span>`:""}</div><div class="card-actions"></div>`;const actions=div.querySelector(".card-actions");if(opts.solve)actions.append(makeButton("풀기",()=>startSolve([p.id],$("solveMode").value||"outline")));if(opts.review)actions.append(makeButton("다시 풀기",()=>startSolve([p.id],"outline")));if(opts.list){actions.append(makeButton("수정",()=>fillForm(p),"secondary"));actions.append(makeButton("복제",async()=>{const copy={...p,id:uuid(),title:`${titleOf(p)} 복사본`,createdAt:nowIso(),updatedAt:nowIso(),order:Date.now()};await put(STORE_PROBLEMS,copy);await loadData();renderAll();toast("복제 완료")},"secondary"));actions.append(makeButton("삭제",async()=>{if(!confirm("이 문제와 풀이기록을 삭제할까?"))return;await del(STORE_PROBLEMS,p.id);for(const a of attemptsOf(p.id))await del(STORE_ATTEMPTS,a.id);await loadData();renderAll();toast("삭제 완료")},"danger small"))}return div}function renderSolveList(){const list=$("solveList"),arr=filterProblems({subject:$("solveSubject").value,session:$("solveSession").value});list.innerHTML="";if(!arr.length){list.innerHTML='<p class="hint">조건에 맞는 문제가 없어.</p>';return}arr.forEach(p=>list.append(problemCard(p,{solve:true})))}function renderList(){const list=$("problemList"),arr=filterProblems({subject:$("listSubject").value,session:$("listSession").value,search:$("listSearch").value});list.innerHTML="";if(!arr.length){list.innerHTML='<p class="hint">등록된 문제가 없어.</p>';return}arr.forEach((p,i)=>{const card=problemCard(p,{list:true});card.querySelector("h3").textContent=`${i+1}. ${titleOf(p)}`;list.append(card)})}function renderReview(){const list=$("reviewList");let arr=filterProblems({subject:$("reviewSubject").value,session:$("reviewSession").value});if($("reviewType").value==="needed")arr=arr.filter(p=>String(lastAttempt(p.id)?.needReview)==="true");else arr=arr.filter(p=>attemptsOf(p.id).length);list.innerHTML="";if(!arr.length){list.innerHTML='<p class="hint">복습 대상이 없어.</p>';return}arr.forEach(p=>list.append(problemCard(p,{review:true})))}function renderStats(){const done=new Set(state.attempts.map(a=>a.problemId)).size,review=state.problems.filter(p=>String(lastAttempt(p.id)?.needReview)==="true").length;$("statsGrid").innerHTML=`<div class="stat-card">등록 문제<strong>${state.problems.length}</strong></div><div class="stat-card">풀이 완료<strong>${done}</strong></div><div class="stat-card">풀이 기록<strong>${state.attempts.length}</strong></div><div class="stat-card">복습 필요<strong>${review}</strong></div>`}function renderContinue(){$("continueBtn").classList.toggle("hidden",!safeGetDraftV72())}function renderAll(){renderSolveList();renderList();renderReview();renderStats();renderContinue();renderPageLists()}async function saveProblem(event){event.preventDefault();const id=$("editId").value||uuid(),existing=state.problems.find(p=>p.id===id);if(!realPages(state.questionPages).length){toast("문제 이미지를 최소 1쪽 넣어줘");return}const problem={id,subject:$("subjectInput").value,session:$("sessionInput").value.trim(),title:$("titleInput").value.trim(),maxScore:Number($("scoreInput").value||0),timeLimit:Number($("timeInput").value||0),questionPages:realPages(state.questionPages),explanationPages:realPages(state.explanationPages),pointsText:$("pointsInput").value.trim(),points:pointsFromText($("pointsInput").value),modelText:$("modelTextInput").value.trim(),order:existing?.order??Date.now(),createdAt:existing?.createdAt||nowIso(),updatedAt:nowIso()};await put(STORE_PROBLEMS,problem);await loadData();toast($("editId").value?"수정 저장 완료":"저장 완료");resetForm();renderAll()}function fillForm(p){$("formTitle").textContent="문제 수정";$("editId").value=p.id;$("subjectInput").value=p.subject||"형법";$("sessionInput").value=p.session||"";$("titleInput").value=p.title||"";$("scoreInput").value=p.maxScore||20;$("timeInput").value=p.timeLimit||30;$("pointsInput").value=p.pointsText||(p.points||[]).join("\n");$("modelTextInput").value=p.modelText||"";state.questionPages=[...(p.questionPages||[])];state.explanationPages=[...(p.explanationPages||[])];renderPageLists();showView("addView");window.scrollTo(0,0)}function resetForm(){$("formTitle").textContent="문제 등록";$("problemForm").reset();$("editId").value="";$("scoreInput").value=20;$("timeInput").value=30;$("qualityInput").value="sharp";state.questionPages=[];state.explanationPages=[];setPasteTarget("question");renderPageLists()}function chooseRandom(arr,n){return[...arr].sort(()=>Math.random()-.5).slice(0,Math.min(n,arr.length))}function startRandom(reviewOnly=false){let arr=filterProblems({subject:$("solveSubject").value,session:$("solveSession").value});if(reviewOnly)arr=arr.filter(p=>String(lastAttempt(p.id)?.needReview)==="true");if(!arr.length){toast(reviewOnly?"복습필요 문제가 없어":"조건에 맞는 문제가 없어");return}const picks=chooseRandom(arr,Number($("randomCount").value||1));startSolve(picks.map(p=>p.id),$("solveMode").value||"outline")}function currentProblem(){return state.problems.find(p=>p.id===state.solve?.ids[state.solve.index])}function startSolve(ids,mode){state.solve={ids,index:0,mode,startedAt:Date.now(),startedProblemAt:Date.now(),elapsedBase:0,answer:""};state.qPage=0;safeSetDraftV72(state.solve);openCurrentProblem()}function openCurrentProblem(){const p=currentProblem();if(!p){finishSolve(false);return}state.qPage=0;$("solveOverlay").classList.remove("hidden");$("solveTitle").textContent=titleOf(p);$("solveMeta").textContent=metaOf(p);$("setBadge").textContent=`${state.solve.index+1}/${state.solve.ids.length} · ${state.solve.mode==="outline"?"목차연습":"실전답안"}`;$("answerLabel").textContent=state.solve.mode==="outline"?"내 목차/쟁점":"내 답안";$("answerText").value=state.solve.answer||"";showQuestionPage(0);clearInterval(state.timer);state.timer=setInterval(updateTimer,500);updateTimer()}function showQuestionPage(index){const p=currentProblem(),pages=realPages(p?.questionPages||[]);state.qPage=Math.max(0,Math.min(index,pages.length-1));$("questionImageView").src=pages[state.qPage]||"";$("questionPageBadge").textContent=pages.length?`문제 ${state.qPage+1}/${pages.length}쪽`:"문제 없음";fitImage();saveDraft()}function elapsedNow(){return state.solve?(state.solve.elapsedBase||0)+Date.now()-state.solve.startedProblemAt:0}function updateTimer(){const p=currentProblem(),elapsed=elapsedNow();$("timerText").textContent=fmtTime(elapsed);const limit=Number(p?.timeLimit||0)*6e4;$("limitText").textContent=limit?elapsed<=limit?`남은 ${fmtTime(limit-elapsed)}`:`초과 ${fmtTime(elapsed-limit)}`:""}function saveDraft(){if(!state.solve)return;state.solve.answer=$("answerText")?.value??state.solve.answer;safeSetDraftV72(state.solve);renderContinue()}function pauseSolve(){if(!state.solve)return;state.solve.elapsedBase=elapsedNow();state.solve.answer=$("answerText").value;clearInterval(state.timer);state.timer=null;saveDraft();$("solveOverlay").classList.add("hidden");toast("이어풀기 저장 완료")}function continueSolve(){try{const saved=JSON.parse(safeGetDraftV72()||"null");if(!saved||!saved.ids?.length){toast("이어풀 문제가 없어");return}state.solve=saved;state.solve.startedProblemAt=Date.now();openCurrentProblem()}catch{toast("이어풀 문제가 없어")}}function submitAnswer(){if(!state.solve)return;state.solve.elapsedBase=elapsedNow();state.solve.answer=$("answerText").value;clearInterval(state.timer);state.timer=null;openScore()}function openScore(){const p=currentProblem();if(!p)return;state.expPage=0;$("scoreOverlay").classList.remove("hidden");$("scoreMeta").textContent=`${titleOf(p)} · 풀이시간 ${fmtTime(state.solve.elapsedBase)}`;{const own=$("ownAnswerView");const txt=String(state.solve.answer||"");own.textContent=txt;own.classList.toggle("keyboard-answer-empty-v50",!txt.trim())};$("modelTextView").textContent=p.modelText||"";$("attemptScoreInput").value="";$("attemptScoreInput").max=p.maxScore||"";$("completionInput").value=state.solve.mode==="outline"?"목차만":"완성";$("needReviewInput").value="true";renderChecklist(p);showExplanationPage(0)}function showExplanationPage(index){const p=currentProblem(),pages=realPages(p?.explanationPages||[]);state.expPage=Math.max(0,Math.min(index,pages.length-1));if(pages.length){$("explanationImageView").src=pages[state.expPage];$("explanationImageView").classList.remove("hidden");$("explanationPageBadge").textContent=`해설 ${state.expPage+1}/${pages.length}쪽`}else{$("explanationImageView").classList.add("hidden");$("explanationPageBadge").textContent="해설 이미지 없음"}}function renderChecklist(p){const box=$("pointChecklist"),points=p.points?.length?p.points:pointsFromText(p.pointsText);box.innerHTML="";if(!points.length){box.innerHTML='<p class="hint">채점포인트 없음</p>';return}points.forEach((point,i)=>{const row=document.createElement("label");row.className="check-item";row.innerHTML=`<input type="checkbox" data-point="${i}" /> <span>${esc(point)}</span>`;box.append(row)})}async function saveAttempt(){const p=currentProblem();if(!p||!state.solve)return null;const attempt={id:uuid(),problemId:p.id,subject:p.subject,session:p.session,mode:state.solve.mode,answer:state.solve.answer||"",elapsedMs:state.solve.elapsedBase,score:$("attemptScoreInput").value===""?null:Number($("attemptScoreInput").value),maxScore:p.maxScore||0,difficulty:$("difficultyResultInput").value,needReview:$("needReviewInput").value,completion:$("completionInput").value,memo:$("memoInput").value.trim(),checkedPoints:$$("#pointChecklist input").map(x=>x.checked),completedAt:nowIso()};await put(STORE_ATTEMPTS,attempt);await loadData();toast("풀이 기록 저장 완료");return attempt}async function saveAndNext(){await saveAttempt();if(!state.solve)return;if(state.solve.index>=state.solve.ids.length-1){finishSolve(true);return}state.solve.index++;state.solve.answer="";state.solve.elapsedBase=0;state.solve.startedProblemAt=Date.now();$("scoreOverlay").classList.add("hidden");openCurrentProblem()}function finishSolve(clearDraft=true){clearInterval(state.timer);state.timer=null;state.solve=null;$("solveOverlay").classList.add("hidden");$("scoreOverlay").classList.add("hidden");if(clearDraft)safeRemoveDraftV72();renderAll()}function fitImage(){state.zoom=1;applyZoom();setTimeout(()=>{const img=$("questionImageView"),scroller=$("questionImageScroller");if(!img.naturalWidth||!scroller.clientWidth)return;state.zoom=Math.max(.2,Math.min(1,(scroller.clientWidth-20)/img.naturalWidth));applyZoom()},30)}function applyZoom(){$("questionImageView").style.width=`${Math.round(state.zoom*100)}%`}async function exportBackup(){const payload={app:APP_VERSION,exportedAt:nowIso(),problems:state.problems,attempts:state.attempts};const blob=new Blob([JSON.stringify(payload)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`essay_psat_base_backup_${new Date().toISOString().slice(0,10)}.json`;a.click();URL.revokeObjectURL(a.href)}async function importBackup(file){if(!file)return;const data=JSON.parse(await file.text());if(!Array.isArray(data.problems)){toast("백업 파일이 아니야");return}if(!confirm("백업 데이터를 현재 앱에 합쳐서 불러올까? 같은 ID는 덮어쓰기 돼."))return;for(const p of data.problems)await put(STORE_PROBLEMS,p);for(const a of data.attempts||[])await put(STORE_ATTEMPTS,a);await loadData();renderAll();toast("복원 완료")}async function wipeAll(){if(!confirm("모든 문제와 기록을 삭제할까? 백업 없으면 복구 불가."))return;await clearStore(STORE_PROBLEMS);await clearStore(STORE_ATTEMPTS);localStorage.removeItem("essayPsatBaseDraft");try{await window.essayLargeStorageV79?.clearAll?.()}catch{};await loadData();resetForm();renderAll();toast("전체 삭제 완료")}function setupInstall(){
+function uuid(){return crypto.randomUUID&&crypto.randomUUID()||`id_${Date.now()}_${Math.random().toString(16).slice(2)}`}function nowIso(){return new Date().toISOString()}function toast(msg){const t=$("toast");t.textContent=msg;t.classList.remove("hidden");clearTimeout(toast._t);toast._t=setTimeout(()=>t.classList.add("hidden"),2300)}function esc(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]))}function fmtTime(ms){ms=Math.max(0,Math.floor(ms||0));const sec=Math.floor(ms/1000),h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s=sec%60;return h?`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`:`${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`}function pointsFromText(text){return String(text||"").split(/\n+/).map(x=>x.trim()).filter(Boolean)}function openDB(){return new Promise((resolve,reject)=>{const req=indexedDB.open(DB_NAME,DB_VERSION);req.onupgradeneeded=()=>{const d=req.result;if(!d.objectStoreNames.contains(STORE_PROBLEMS))d.createObjectStore(STORE_PROBLEMS,{keyPath:"id"});if(!d.objectStoreNames.contains(STORE_ATTEMPTS))d.createObjectStore(STORE_ATTEMPTS,{keyPath:"id"})};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error)})}function store(name,mode="readonly"){return db.transaction(name,mode).objectStore(name)}function getAll(name){return new Promise((resolve,reject)=>{const req=store(name).getAll();req.onsuccess=()=>resolve(req.result||[]);req.onerror=()=>reject(req.error)})}function put(name,value){return new Promise((resolve,reject)=>{const req=store(name,"readwrite").put(value);req.onsuccess=()=>resolve(value);req.onerror=()=>reject(req.error)})}function del(name,key){return new Promise((resolve,reject)=>{const req=store(name,"readwrite").delete(key);req.onsuccess=()=>resolve();req.onerror=()=>reject(req.error)})}function clearStore(name){return new Promise((resolve,reject)=>{const req=store(name,"readwrite").clear();req.onsuccess=()=>resolve();req.onerror=()=>reject(req.error)})}async function loadData(){state.problems=(await getAll(STORE_PROBLEMS)).sort((a,b)=>(a.order||0)-(b.order||0));state.attempts=(await getAll(STORE_ATTEMPTS)).sort((a,b)=>String(b.completedAt).localeCompare(String(a.completedAt)))}function setPasteTarget(target){state.activePasteTarget=target;$("questionPasteZone")?.classList.toggle("active-paste",target==="question");$("explanationPasteZone")?.classList.toggle("active-paste",target==="explanation")}function dataUrlBytes(dataUrl){const comma=dataUrl.indexOf(",");const base64=comma>=0?dataUrl.slice(comma+1):dataUrl;return Math.round(base64.length*.75)}function formatBytes(bytes){if(!bytes)return"0B";const u=["B","KB","MB"];let v=bytes,i=0;while(v>=1024&&i<u.length-1){v/=1024;i++}return`${v.toFixed(i?1:0)}${u[i]}`}function imageBlobToDataUrl(blob){return new Promise((resolve,reject)=>{const mode=$("qualityInput").value||"sharp";if(mode==="original"){const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=()=>reject(r.error);r.readAsDataURL(blob);return}const reader=new FileReader();reader.onload=()=>{const img=new Image();img.onload=()=>{const maxDim=mode==="bulk"?1500:2400,scale=Math.min(1,maxDim/Math.max(img.width,img.height)),w=Math.max(1,Math.round(img.width*scale)),h=Math.max(1,Math.round(img.height*scale)),canvas=document.createElement("canvas");canvas.width=w;canvas.height=h;const ctx=canvas.getContext("2d");ctx.fillStyle="white";ctx.fillRect(0,0,w,h);ctx.drawImage(img,0,0,w,h);resolve(canvas.toDataURL("image/jpeg",mode==="bulk"?.72:.88))};img.onerror=reject;img.src=reader.result};reader.onerror=()=>reject(reader.error);reader.readAsDataURL(blob)})}async function addImageFiles(files,target){const arr=Array.from(files||[]).filter(file=>file&&file.type&&file.type.startsWith("image/"));if(!arr.length){toast("이미지 파일이 없어");return}let added=0,size=0;for(const file of arr){const data=await imageBlobToDataUrl(file);if(target==="explanation")state.explanationPages.push(data);else state.questionPages.push(data);size+=dataUrlBytes(data);added++}renderPageLists();setPasteTarget(target);toast(`${target==="explanation"?"해설":"문제"} 이미지 ${added}장 추가 · ${formatBytes(size)}`)}async function pasteImageFromClipboardEvent(event,explicitTarget=""){const items=event.clipboardData?.items?Array.from(event.clipboardData.items):[];const files=items.filter(entry=>entry.type&&entry.type.startsWith("image/")).map(entry=>entry.getAsFile()).filter(Boolean);if(!files.length)return false;event.preventDefault();const target=explicitTarget||event.target.closest?.("[data-paste-target]")?.dataset?.pasteTarget||state.activePasteTarget||"question";toast("스크린샷 처리 중...");await addImageFiles(files,target);return true}async function pasteImageWithClipboardApi(target){setPasteTarget(target);if(!navigator.clipboard||!navigator.clipboard.read){toast("이 브라우저는 버튼 붙여넣기를 지원하지 않아. 영역 클릭 후 Ctrl+V를 눌러줘.");return}try{const items=await navigator.clipboard.read();const files=[];for(const item of items){const type=item.types.find(t=>t.startsWith("image/"));if(!type)continue;const blob=await item.getType(type);files.push(new File([blob],`${target}_${Date.now()}_${files.length}.png`,{type}))}if(!files.length){toast("클립보드에 이미지가 없어");return}toast("스크린샷 처리 중...");await addImageFiles(files,target)}catch(err){console.warn(err);toast("붙여넣기 권한이 막혔어. 영역 클릭 후 Ctrl+V를 눌러줘.")}}function setupPasteZone(zoneId,inputId,target){const zone=$(zoneId),input=$(inputId);zone.addEventListener("click",()=>{setPasteTarget(target);zone.focus()});zone.addEventListener("focus",()=>setPasteTarget(target));zone.addEventListener("paste",event=>pasteImageFromClipboardEvent(event,target));input.addEventListener("change",async()=>{await addImageFiles(input.files,target);input.value=""})}function makeButton(text,fn,cls=""){const b=document.createElement("button");b.type="button";b.textContent=text;if(cls)b.className=cls;b.addEventListener("click",fn);return b}function movePage(target,index,dir){const arr=target==="explanation"?state.explanationPages:state.questionPages,next=index+dir;if(next<0||next>=arr.length)return;[arr[index],arr[next]]=[arr[next],arr[index]];renderPageLists()}function deletePage(target,index){const arr=target==="explanation"?state.explanationPages:state.questionPages;arr.splice(index,1);renderPageLists()}function renderPageList(id,arr,target){const box=$(id);box.innerHTML="";if(!arr.length){box.innerHTML='<p class="hint">아직 이미지가 없어.</p>';return}arr.forEach((src,index)=>{const div=document.createElement("div");div.className="page-item";div.innerHTML=`<img src="${src}" alt="${index+1}쪽" /><div><strong>${index+1}쪽</strong><p class="hint">${target==="explanation"?"해설":"문제"} 페이지</p><div class="page-actions"></div></div>`;const actions=div.querySelector(".page-actions");actions.append(makeButton("위",()=>movePage(target,index,-1),"secondary small"));actions.append(makeButton("아래",()=>movePage(target,index,1),"secondary small"));actions.append(makeButton("삭제",()=>deletePage(target,index),"danger small"));box.append(div)})}function renderPageLists(){renderPageList("questionPageList",state.questionPages,"question");renderPageList("explanationPageList",state.explanationPages,"explanation")}function titleOf(p){return p.title||`${p.session?p.session+" ":""}${p.subject||""} 문제`}function attemptsOf(id){return state.attempts.filter(a=>a.problemId===id)}function lastAttempt(id){return attemptsOf(id).sort((a,b)=>String(b.completedAt).localeCompare(String(a.completedAt)))[0]}function metaOf(p){const last=lastAttempt(p.id);return`${p.subject||"-"} · ${p.session||"회차 없음"} · 문제 ${realPages(p.questionPages||[]).length}쪽 · 해설 ${realPages(p.explanationPages||[]).length}쪽 · ${p.maxScore||0}점 · 제한 ${p.timeLimit||0}분 · 기록 ${attemptsOf(p.id).length}회${last?" · 최근 "+fmtTime(last.elapsedMs):""}`}function filterProblems({subject="",session="",search=""}={}){const s=session.trim().toLowerCase(),q=search.trim().toLowerCase();return state.problems.filter(p=>{if(subject&&p.subject!==subject)return false;if(s&&!String(p.session||"").toLowerCase().includes(s))return false;if(q){const blob=[p.title,p.session,p.subject,p.pointsText,p.modelText].join(" ").toLowerCase();if(!blob.includes(q))return false}return true})}function showView(id){$$(".tab").forEach(b=>b.classList.toggle("active",b.dataset.view===id));$$(".view").forEach(v=>v.classList.toggle("active",v.id===id));renderAll()}function problemCard(p,opts={}){const last=lastAttempt(p.id),div=document.createElement("div");div.className="problem-card";div.innerHTML=`<h3>${esc(titleOf(p))}</h3><p class="meta">${esc(metaOf(p))}</p><div class="badges"><span class="badge">${esc(p.subject||"-")}</span><span class="badge">${esc(p.session||"회차 없음")}</span><span class="badge">문제 ${realPages(p.questionPages||[]).length}쪽</span><span class="badge">해설 ${realPages(p.explanationPages||[]).length}쪽</span>${last?`<span class="badge">최근점수 ${last.score??"-"}</span>`:""}</div><div class="card-actions"></div>`;const actions=div.querySelector(".card-actions");if(opts.solve)actions.append(makeButton("풀기",()=>startSolve([p.id],$("solveMode").value||"outline")));if(opts.review)actions.append(makeButton("다시 풀기",()=>startSolve([p.id],"outline")));if(opts.list){actions.append(makeButton("수정",()=>fillForm(p),"secondary"));actions.append(makeButton("복제",async()=>{const copy={...p,id:uuid(),title:`${titleOf(p)} 복사본`,createdAt:nowIso(),updatedAt:nowIso(),order:Date.now()};await put(STORE_PROBLEMS,copy);await loadData();renderAll();toast("복제 완료")},"secondary"));actions.append(makeButton("삭제",async()=>{if(!confirm("이 문제와 풀이기록을 삭제할까?"))return;await del(STORE_PROBLEMS,p.id);for(const a of attemptsOf(p.id))await del(STORE_ATTEMPTS,a.id);await loadData();renderAll();toast("삭제 완료")},"danger small"))}return div}function renderSolveList(){const list=$("solveList"),arr=filterProblems({subject:$("solveSubject").value,session:$("solveSession").value});list.innerHTML="";if(!arr.length){list.innerHTML='<p class="hint">조건에 맞는 문제가 없어.</p>';return}arr.forEach(p=>list.append(problemCard(p,{solve:true})))}function renderList(){const list=$("problemList"),arr=filterProblems({subject:$("listSubject").value,session:$("listSession").value,search:$("listSearch").value});list.innerHTML="";if(!arr.length){list.innerHTML='<p class="hint">등록된 문제가 없어.</p>';return}arr.forEach((p,i)=>{const card=problemCard(p,{list:true});card.querySelector("h3").textContent=`${i+1}. ${titleOf(p)}`;list.append(card)})}function renderReview(){const list=$("reviewList");let arr=filterProblems({subject:$("reviewSubject").value,session:$("reviewSession").value});if($("reviewType").value==="needed")arr=arr.filter(p=>String(lastAttempt(p.id)?.needReview)==="true");else arr=arr.filter(p=>attemptsOf(p.id).length);list.innerHTML="";if(!arr.length){list.innerHTML='<p class="hint">복습 대상이 없어.</p>';return}arr.forEach(p=>list.append(problemCard(p,{review:true})))}function renderStats(){const done=new Set(state.attempts.map(a=>a.problemId)).size,review=state.problems.filter(p=>String(lastAttempt(p.id)?.needReview)==="true").length;$("statsGrid").innerHTML=`<div class="stat-card">등록 문제<strong>${state.problems.length}</strong></div><div class="stat-card">풀이 완료<strong>${done}</strong></div><div class="stat-card">풀이 기록<strong>${state.attempts.length}</strong></div><div class="stat-card">복습 필요<strong>${review}</strong></div>`}function renderContinue(){$("continueBtn").classList.toggle("hidden",!safeGetDraftV72())}function renderAll(){renderSolveList();renderList();renderReview();renderStats();renderContinue();renderPageLists()}async function saveProblem(event){event.preventDefault();const id=$("editId").value||uuid(),existing=state.problems.find(p=>p.id===id);if(!realPages(state.questionPages).length){toast("문제 이미지를 최소 1쪽 넣어줘");return}const problem={id,subject:$("subjectInput").value,session:$("sessionInput").value.trim(),title:$("titleInput").value.trim(),maxScore:Number($("scoreInput").value||0),timeLimit:Number($("timeInput").value||0),questionPages:realPages(state.questionPages),explanationPages:realPages(state.explanationPages),pointsText:$("pointsInput").value.trim(),points:pointsFromText($("pointsInput").value),modelText:$("modelTextInput").value.trim(),order:existing?.order??Date.now(),createdAt:existing?.createdAt||nowIso(),updatedAt:nowIso()};await put(STORE_PROBLEMS,problem);await loadData();toast($("editId").value?"수정 저장 완료":"저장 완료");resetForm();renderAll()}function fillForm(p){$("formTitle").textContent="문제 수정";$("editId").value=p.id;$("subjectInput").value=p.subject||"형법";$("sessionInput").value=p.session||"";$("titleInput").value=p.title||"";$("scoreInput").value=p.maxScore||20;$("timeInput").value=p.timeLimit||30;$("pointsInput").value=p.pointsText||(p.points||[]).join("\n");$("modelTextInput").value=p.modelText||"";state.questionPages=[...(p.questionPages||[])];state.explanationPages=[...(p.explanationPages||[])];renderPageLists();showView("addView");window.scrollTo(0,0)}function resetForm(){$("formTitle").textContent="문제 등록";$("problemForm").reset();$("editId").value="";$("scoreInput").value=20;$("timeInput").value=30;$("qualityInput").value="sharp";state.questionPages=[];state.explanationPages=[];setPasteTarget("question");renderPageLists()}function chooseRandom(arr,n){return[...arr].sort(()=>Math.random()-.5).slice(0,Math.min(n,arr.length))}function startRandom(reviewOnly=false){let arr=filterProblems({subject:$("solveSubject").value,session:$("solveSession").value});if(reviewOnly)arr=arr.filter(p=>String(lastAttempt(p.id)?.needReview)==="true");if(!arr.length){toast(reviewOnly?"복습필요 문제가 없어":"조건에 맞는 문제가 없어");return}const picks=chooseRandom(arr,Number($("randomCount").value||1));startSolve(picks.map(p=>p.id),$("solveMode").value||"outline")}function currentProblem(){return state.problems.find(p=>p.id===state.solve?.ids[state.solve.index])}function startSolve(ids,mode){state.solve={ids,index:0,mode,startedAt:Date.now(),startedProblemAt:Date.now(),elapsedBase:0,answer:""};state.qPage=0;safeSetDraftV72(state.solve);openCurrentProblem()}function openCurrentProblem(){const p=currentProblem();if(!p){finishSolve(false);return}state.qPage=0;$("solveOverlay").classList.remove("hidden");$("solveTitle").textContent=titleOf(p);$("solveMeta").textContent=metaOf(p);$("setBadge").textContent=`${state.solve.index+1}/${state.solve.ids.length} · ${state.solve.mode==="outline"?"목차연습":"실전답안"}`;$("answerLabel").textContent=state.solve.mode==="outline"?"내 목차/쟁점":"내 답안";$("answerText").value=state.solve.answer||"";showQuestionPage(0);clearInterval(state.timer);state.timer=setInterval(updateTimer,500);updateTimer()}function showQuestionPage(index){const p=currentProblem(),pages=realPages(p?.questionPages||[]);state.qPage=Math.max(0,Math.min(index,pages.length-1));$("questionImageView").src=pages[state.qPage]||"";$("questionPageBadge").textContent=pages.length?`문제 ${state.qPage+1}/${pages.length}쪽`:"문제 없음";fitImage();saveDraft()}function elapsedNow(){return state.solve?(state.solve.elapsedBase||0)+Date.now()-state.solve.startedProblemAt:0}function updateTimer(){const p=currentProblem(),elapsed=elapsedNow();$("timerText").textContent=fmtTime(elapsed);const limit=Number(p?.timeLimit||0)*6e4;$("limitText").textContent=limit?elapsed<=limit?`남은 ${fmtTime(limit-elapsed)}`:`초과 ${fmtTime(elapsed-limit)}`:""}function saveDraft(){if(!state.solve)return;state.solve.answer=$("answerText")?.value??state.solve.answer;safeSetDraftV72(state.solve);renderContinue()}function pauseSolve(){if(!state.solve)return;state.solve.elapsedBase=elapsedNow();state.solve.answer=$("answerText").value;clearInterval(state.timer);state.timer=null;saveDraft();$("solveOverlay").classList.add("hidden");toast("이어풀기 저장 완료")}function continueSolve(){try{const saved=JSON.parse(safeGetDraftV72()||"null");if(!saved||!saved.ids?.length){toast("이어풀 문제가 없어");return}state.solve=saved;state.solve.startedProblemAt=Date.now();openCurrentProblem()}catch{toast("이어풀 문제가 없어")}}function submitAnswer(){if(!state.solve)return;state.solve.elapsedBase=elapsedNow();state.solve.answer=$("answerText").value;clearInterval(state.timer);state.timer=null;openScore()}function openScore(){const p=currentProblem();if(!p)return;state.expPage=0;$("scoreOverlay").classList.remove("hidden");$("scoreMeta").textContent=`${titleOf(p)} · 풀이시간 ${fmtTime(state.solve.elapsedBase)}`;{const own=$("ownAnswerView");const txt=String(state.solve.answer||"");own.textContent=txt;own.classList.toggle("keyboard-answer-empty-v50",!txt.trim())};$("modelTextView").textContent=p.modelText||"";$("attemptScoreInput").value="";$("attemptScoreInput").max=p.maxScore||"";$("completionInput").value=state.solve.mode==="outline"?"목차만":"완성";$("needReviewInput").value="true";renderChecklist(p);showExplanationPage(0)}function showExplanationPage(index){const p=currentProblem(),pages=realPages(p?.explanationPages||[]);state.expPage=Math.max(0,Math.min(index,pages.length-1));if(pages.length){$("explanationImageView").src=pages[state.expPage];$("explanationImageView").classList.remove("hidden");$("explanationPageBadge").textContent=`해설 ${state.expPage+1}/${pages.length}쪽`}else{$("explanationImageView").classList.add("hidden");$("explanationPageBadge").textContent="해설 이미지 없음"}}function renderChecklist(p){const box=$("pointChecklist"),points=p.points?.length?p.points:pointsFromText(p.pointsText);box.innerHTML="";if(!points.length){box.innerHTML='<p class="hint">채점포인트 없음</p>';return}points.forEach((point,i)=>{const row=document.createElement("label");row.className="check-item";row.innerHTML=`<input type="checkbox" data-point="${i}" /> <span>${esc(point)}</span>`;box.append(row)})}async function saveAttempt(){const p=currentProblem();if(!p||!state.solve)return null;const attempt={id:uuid(),problemId:p.id,subject:p.subject,session:p.session,mode:state.solve.mode,answer:state.solve.answer||"",elapsedMs:state.solve.elapsedBase,score:$("attemptScoreInput").value===""?null:Number($("attemptScoreInput").value),maxScore:p.maxScore||0,difficulty:$("difficultyResultInput").value,needReview:$("needReviewInput").value,completion:$("completionInput").value,memo:$("memoInput").value.trim(),checkedPoints:$$("#pointChecklist input").map(x=>x.checked),completedAt:nowIso()};await put(STORE_ATTEMPTS,attempt);await loadData();toast("풀이 기록 저장 완료");return attempt}async function saveAndNext(){await saveAttempt();if(!state.solve)return;if(state.solve.index>=state.solve.ids.length-1){finishSolve(true);return}state.solve.index++;state.solve.answer="";state.solve.elapsedBase=0;state.solve.startedProblemAt=Date.now();$("scoreOverlay").classList.add("hidden");openCurrentProblem()}function finishSolve(clearDraft=true){clearInterval(state.timer);state.timer=null;state.solve=null;$("solveOverlay").classList.add("hidden");$("scoreOverlay").classList.add("hidden");if(clearDraft)safeRemoveDraftV72();renderAll()}function fitImage(){state.zoom=1;applyZoom();setTimeout(()=>{const img=$("questionImageView"),scroller=$("questionImageScroller");if(!img.naturalWidth||!scroller.clientWidth)return;state.zoom=Math.max(.2,Math.min(1,(scroller.clientWidth-20)/img.naturalWidth));applyZoom()},30)}function applyZoom(){$("questionImageView").style.width=`${Math.round(state.zoom*100)}%`}async function exportBackup(){const payload={app:APP_VERSION,exportedAt:nowIso(),problems:state.problems,attempts:state.attempts};const blob=new Blob([JSON.stringify(payload)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`essay_psat_base_backup_${new Date().toISOString().slice(0,10)}.json`;a.click();URL.revokeObjectURL(a.href)}async function importBackup(file){if(!file)return;const data=JSON.parse(await file.text());if(!Array.isArray(data.problems)){toast("백업 파일이 아니야");return}if(!confirm("백업 데이터를 현재 앱에 합쳐서 불러올까? 같은 ID는 덮어쓰기 돼."))return;for(const p of data.problems)await put(STORE_PROBLEMS,p);for(const a of data.attempts||[])await put(STORE_ATTEMPTS,a);await loadData();renderAll();toast("복원 완료")}async function wipeAll(){if(!confirm("모든 문제와 기록을 삭제할까? 백업 없으면 복구 불가."))return;await clearStore(STORE_PROBLEMS);await clearStore(STORE_ATTEMPTS);localStorage.removeItem("essayPsatBaseDraft");await loadData();resetForm();renderAll();toast("전체 삭제 완료")}function setupInstall(){
   const btn=$("installBtn");
   if(!btn)return;
 
@@ -680,17 +680,85 @@ async function resetEssayPwaOnceV49(){
 async function registerEssayServiceWorkerV49(){
   if(!("serviceWorker" in navigator))return;
   try{
-    const reg=await navigator.serviceWorker.register("./sw.js?v=83",{scope:"./",updateViaCache:"none"});
-    await reg.update().catch(()=>{});
+    const reg=await navigator.serviceWorker.register("./sw.js?v=85",{scope:"./",updateViaCache:"none"});
+    reg.update().catch(()=>{});
   }catch(err){
     console.warn("Service worker registration failed",err);
   }
 }
 
+/* === v85: clean storage layer (reuses e79 DB, no interaction patches) === */
+(function essayPerfStoreV85(){
+  if(window.essayPerfStoreV85)return;
+  const DB_NAME="essayLargeLocalV79", DB_VERSION=1, INK="ink", META="meta";
+  let dbp=null, draftCache="", draftPending=null, draftTimer=0, prepared=false;
+  function rev(){return Date.now().toString(36)+":"+Math.random().toString(36).slice(2,7)}
+  function open(){
+    if(dbp)return dbp;
+    dbp=new Promise((resolve,reject)=>{
+      const req=indexedDB.open(DB_NAME,DB_VERSION);
+      req.onupgradeneeded=()=>{
+        const d=req.result;
+        if(!d.objectStoreNames.contains(INK))d.createObjectStore(INK,{keyPath:"key"});
+        if(!d.objectStoreNames.contains(META))d.createObjectStore(META,{keyPath:"key"});
+      };
+      req.onsuccess=()=>resolve(req.result); req.onerror=()=>reject(req.error);
+    });
+    return dbp;
+  }
+  async function metaGet(key){const d=await open();return new Promise((res,rej)=>{const q=d.transaction(META,"readonly").objectStore(META).get(key);q.onsuccess=()=>res(q.result?.value);q.onerror=()=>rej(q.error);});}
+  async function metaSet(key,value){const d=await open();return new Promise((res,rej)=>{const tx=d.transaction(META,"readwrite");tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error);tx.objectStore(META).put({key,value});});}
+  async function rows(){const d=await open();return new Promise((res,rej)=>{const q=d.transaction(INK,"readonly").objectStore(INK).getAll();q.onsuccess=()=>res(q.result||[]);q.onerror=()=>rej(q.error);});}
+  async function putKey(key,strokes,token=""){
+    if(!key)return;
+    const d=await open(), r=token||rev();
+    await new Promise((res,rej)=>{const tx=d.transaction([INK,META],"readwrite");tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error);tx.objectStore(INK).put({key,strokes:Array.isArray(strokes)?strokes:[]});tx.objectStore(META).put({key:"inkRevision",value:r});});
+    window.__essayInkRevisionV85=r;
+  }
+  async function replaceAll(obj,token=""){
+    const d=await open(), r=token||rev(), entries=Object.entries(obj&&typeof obj==="object"?obj:{});
+    await new Promise((res,rej)=>{const tx=d.transaction([INK,META],"readwrite");tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error);const st=tx.objectStore(INK);st.clear();for(const [key,v] of entries)st.put({key,strokes:Array.isArray(v)?v:[]});tx.objectStore(META).put({key:"inkRevision",value:r});tx.objectStore(META).put({key:"legacyInkMigrated",value:true});});
+    state.inkData=obj&&typeof obj==="object"?obj:{}; window.__essayInkRevisionV85=r;
+  }
+  async function flushDraft(){
+    clearTimeout(draftTimer);draftTimer=0;
+    if(draftPending===null)return;
+    const value=draftPending;draftPending=null;
+    const text=typeof value==="string"?value:JSON.stringify(value);
+    const r=rev(), d=await open();
+    await new Promise((res,rej)=>{const tx=d.transaction(META,"readwrite");tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error);const st=tx.objectStore(META);st.put({key:"draftText",value:text});st.put({key:"draftRevision",value:r});});
+    draftCache=text;window.__essayDraftRevisionV85=r;
+  }
+  function setDraft(value){draftPending=value;clearTimeout(draftTimer);draftTimer=setTimeout(()=>flushDraft().catch(e=>console.warn("v85 draft save",e)),500);return true;}
+  function getDraft(){if(draftPending!==null){try{return typeof draftPending==="string"?draftPending:JSON.stringify(draftPending)}catch{}}return draftCache||"";}
+  async function clearDraft(){clearTimeout(draftTimer);draftTimer=0;draftPending=null;draftCache="";const r=rev(),d=await open();await new Promise((res,rej)=>{const tx=d.transaction(META,"readwrite");tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error);const st=tx.objectStore(META);st.put({key:"draftText",value:""});st.put({key:"draftRevision",value:r});});window.__essayDraftRevisionV85=r;}
+  async function prepare(){
+    if(prepared)return; await open();
+    let map={}; for(const row of await rows())if(row?.key)map[row.key]=Array.isArray(row.strokes)?row.strokes:[];
+    let legacy="";try{legacy=localStorage.getItem("essayPsatBaseInk_v2")||""}catch{}
+    if(legacy){
+      try{const old=JSON.parse(legacy)||{};let changed=false;for(const [k,v] of Object.entries(old)){if(!(k in map)){map[k]=Array.isArray(v)?v:[];await putKey(k,map[k]);changed=true;}}if(changed||!(await metaGet("legacyInkMigrated")))await metaSet("legacyInkMigrated",true);try{localStorage.removeItem("essayPsatBaseInk_v2")}catch{}}catch(e){console.warn("v85 legacy ink migration kept original",e);}
+    }
+    state.inkData=map;
+    window.__essayInkRevisionV85=String((await metaGet("inkRevision"))||"");
+    let d=await metaGet("draftText");let oldDraft="";try{oldDraft=localStorage.getItem("essayPsatBaseDraft")||""}catch{}
+    if(typeof d!=="string"&&oldDraft){d=oldDraft;await metaSet("draftText",d);const r=rev();await metaSet("draftRevision",r);window.__essayDraftRevisionV85=r;}
+    draftCache=typeof d==="string"?d:"";window.__essayDraftRevisionV85=String((await metaGet("draftRevision"))||window.__essayDraftRevisionV85||"");
+    try{localStorage.removeItem("essayPsatBaseDraft")}catch{}
+    try{await navigator.storage?.persist?.()}catch{}
+    prepared=true;
+  }
+  async function importInkJSON(text,token=""){let obj={};try{obj=JSON.parse(text||"{}")||{}}catch(e){console.warn("v85 remote ink parse",e);return}await replaceAll(obj,token);try{drawProblemInkV13?.()}catch{}}
+  async function importDraftText(text,token=""){clearTimeout(draftTimer);draftTimer=0;draftPending=null;draftCache=String(text||"");const r=token||rev(),d=await open();await new Promise((res,rej)=>{const tx=d.transaction(META,"readwrite");tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error);const st=tx.objectStore(META);st.put({key:"draftText",value:draftCache});st.put({key:"draftRevision",value:r});});window.__essayDraftRevisionV85=r;}
+  function currentKey(){try{return typeof currentProblemInkKeyV13==="function"?currentProblemInkKeyV13():(typeof problemInkKeyV10==="function"?problemInkKeyV10():inkKey())}catch{return ""}}
+  function saveCurrent(){const key=currentKey();if(!key)return;putKey(key,state.inkData?.[key]||[]).catch(e=>console.warn("v85 ink save",e));}
+  window.essayPerfStoreV85={prepare,saveCurrent,putKey,replaceAll,exportInkJSON:async()=>JSON.stringify(state.inkData||{}),exportDraftJSON:async()=>{await flushDraft();return draftCache||""},importInkJSON,importDraftText,setDraft,getDraft,clearDraft,flushDraft};
+  safeSetDraftV72=setDraft; safeGetDraftV72=getDraft; safeRemoveDraftV72=function(){clearDraft().catch(e=>console.warn("v85 draft clear",e));return true;};
+})();
+
 async function bootEssayV49(){
   await resetEssayPwaOnceV49();
-  // v79: 대용량 필기/이어풀기를 IndexedDB로 먼저 복구한 뒤 화면을 연다.
-  try{await window.essayLargeStorageV79?.prepare?.();}catch(err){console.warn("v79 large storage prepare failed",err);}
+  try{await window.essayPerfStoreV85?.prepare?.();}catch(err){console.warn("v85 storage prepare failed",err);}
   // 서비스워커 ready를 기다리지 않고 로컬 DB/화면부터 연다.
   const swTask=registerEssayServiceWorkerV49();
   await init();
@@ -706,8 +774,7 @@ bootEssayV49().catch(err=>{
 state.inkTool = "pen";
 state.inkSize = 3;
 state.currentStroke = null;
-// v79: 문제 필기는 localStorage 전체 JSON 대신 IndexedDB에서 boot 시 복구한다.
-state.inkData = {};
+state.inkData = state.inkData || {};
 
 function inkKey() {
   const p = currentProblem?.();
@@ -716,7 +783,7 @@ function inkKey() {
 }
 function saveInkData() {
   try {
-    window.essayPersistCurrentInkV79?.();
+    window.essayPerfStoreV85?.saveCurrent?.();
   } catch (err) {
     console.warn(err);
     toast("필기 저장공간이 부족할 수 있어");
@@ -854,9 +921,8 @@ function setupInkLayer() {
 
 const originalApplyZoomForInk = applyZoom;
 applyZoom = function() {
-  // v81: 최종 applyZoom 자체가 캔버스 resize/redraw를 프레임당 1회 처리한다.
-  // 여기서 다시 resize를 예약하면 pinch 중 같은 작업이 중복되어 버벅였다.
-  return originalApplyZoomForInk();
+  originalApplyZoomForInk();
+  requestAnimationFrame(resizeInkCanvas);
 };
 
 const originalShowQuestionPageForInk = showQuestionPage;
@@ -1308,7 +1374,7 @@ saveDraft = function() {
   if (state.solve) {
     state.solve.answer = $("answerText")?.value ?? state.solve.answer;
     state.solve.answerInkStrokes = state.answerInkStrokes || [];
-    state.solve.answerInkData = answerHasInk() ? dataUrlFromAnswerCanvas() : "";
+    state.solve.answerInkData = ""; // v85: no PNG conversion during drafting
     state.solve.answerInputMode = state.answerInputMode || "handwriting";
   }
   saveDraft_v8();
@@ -1509,7 +1575,7 @@ function setInkTool(tool) {
 }
 function saveInkDataV9() {
   try {
-    window.essayPersistCurrentInkV79?.();
+    window.essayPerfStoreV85?.saveCurrent?.();
   } catch (err) {
     console.warn(err);
   }
@@ -1882,7 +1948,7 @@ function setInkTool(tool) {
   $("eraserToolBtn")?.classList.toggle("ink-active", state.inkTool === "eraser");
 }
 function saveProblemInkV10() {
-  try { window.essayPersistCurrentInkV79?.(); } catch {}
+  try { window.essayPerfStoreV85?.saveCurrent?.(); } catch {}
 }
 function clearCurrentInk() {
   const key = problemInkKeyV10();
@@ -1978,8 +2044,7 @@ function saveCurrentAnswerPageV10() {
 
   state.solve.answer = state.solve.answerPages.map((p, i) => `[${i+1}쪽]\n${p.text || ""}`).join("\n\n");
   state.solve.answerInkStrokes = state.answerInkStrokes || [];
-  // v81: 풀이 중에는 매 획/입력마다 canvas.toDataURL()을 만들지 않는다.
-  // 벡터 strokes만 초안에 저장하고 PNG snapshot은 제출/최종저장 시 기존 submit/save 경로에서 1회 생성.
+  state.solve.answerInkData = ""; // v85: draft stores vector strokes only; PNG is created only on submit if needed
   safeSetDraftV72(state.solve);
   renderAnswerPageBadgeV10();
 }
@@ -2216,29 +2281,27 @@ function setupSplitHandleV11() {
 
 /* v10 함수가 없을 수 있는 경우 대비: 문제 폭맞춤/이동 */
 function problemScrollerV11(){ return $("questionImageScroller"); }
-let solveZoomRafV81 = 0;
 function applyZoom() {
-  // v81: pinch/tap zoom 이벤트가 몰려도 한 화면 프레임에 실제 레이아웃/캔버스 변경은 1회만.
-  if (solveZoomRafV81) return;
-  solveZoomRafV81 = requestAnimationFrame(() => {
-    solveZoomRafV81 = 0;
-    const img = $("questionImageView"), wrap = $("imageCanvasWrap");
-    if (!img || !wrap || !img.naturalWidth) return;
-    const w = Math.max(1, Math.floor(img.naturalWidth * (state.zoom || 1)));
-    const h = Math.max(1, Math.floor(img.naturalHeight * (state.zoom || 1)));
-    img.style.width = w + "px"; img.style.height = h + "px";
-    wrap.style.width = w + "px"; wrap.style.height = h + "px";
-    wrap.style.minWidth = w + "px"; wrap.style.minHeight = h + "px";
-    try { resizeInkCanvasV10(); drawInkV10(); } catch {}
-  });
+  const img = $("questionImageView"), wrap = $("imageCanvasWrap");
+  if (!img || !wrap || !img.naturalWidth) return;
+  const w = Math.max(1, Math.floor(img.naturalWidth * (state.zoom || 1)));
+  const h = Math.max(1, Math.floor(img.naturalHeight * (state.zoom || 1)));
+  img.style.width = w + "px"; img.style.height = h + "px";
+  wrap.style.width = w + "px"; wrap.style.height = h + "px";
+  wrap.style.minWidth = w + "px"; wrap.style.minHeight = h + "px";
+  requestAnimationFrame(() => { try { resizeInkCanvasV10(); drawInkV10(); } catch {} });
 }
 function fitImage() {
   const img = $("questionImageView"), scroller = problemScrollerV11();
-  if (!img || !scroller || !img.naturalWidth || !scroller.clientWidth) return;
-  // image load 이벤트가 이미 setupEvents에 연결되어 있으므로 80/250ms 반복 재맞춤을 하지 않는다.
-  state.zoom = clampV11(scroller.clientWidth / img.naturalWidth, 0.05, 2);
-  applyZoom();
-  scroller.scrollLeft = 0; scroller.scrollTop = 0;
+  if (!img || !scroller) return;
+  const run = () => {
+    if (!img.naturalWidth || !scroller.clientWidth) return;
+    state.zoom = clampV11(scroller.clientWidth / img.naturalWidth, 0.05, 2);
+    applyZoom();
+    scroller.scrollLeft = 0; scroller.scrollTop = 0;
+  };
+  img.onload = run;
+  run(); setTimeout(run, 80); setTimeout(run, 250);
 }
 function zoomByV11(delta) {
   const scroller = problemScrollerV11();
@@ -2610,7 +2673,7 @@ function resetProblemInkLayerV12() {
     event.preventDefault();
     state.currentStroke = null;
     try { saveProblemInkV10?.(); } catch {
-      try { window.essayPersistCurrentInkV79?.(); } catch {}
+      try { window.essayPerfStoreV85?.saveCurrent?.(); } catch {}
     }
   };
   canvas.addEventListener("pointerup", end);
@@ -2625,7 +2688,7 @@ function resetProblemInkLayerV12() {
     if (!confirm("현재 문제의 현재 쪽 필기를 지울까?")) return;
     if (!state.inkData) state.inkData = {};
     state.inkData[key] = [];
-    try { window.essayPersistCurrentInkV79?.(); } catch {}
+    try { window.essayPerfStoreV85?.saveCurrent?.(); } catch {}
     try { drawInkV10?.(); } catch {}
     try { drawInkV9?.(); } catch {}
   });
@@ -2816,7 +2879,7 @@ function resizeProblemInkCanvasV13() {
 }
 function saveProblemInkV13() {
   try { if (typeof saveProblemInkV10 === "function") { saveProblemInkV10(); return; } } catch {}
-  try { window.essayPersistCurrentInkV79?.(); } catch {}
+  try { window.essayPerfStoreV85?.saveCurrent?.(); } catch {}
 }
 
 /* 문제 이미지: 손가락 드래그로 스크롤, S펜으로만 필기 */
@@ -5842,13 +5905,7 @@ setTimeout(() => {
     store[key].push(V.inkStroke);
 
     sizeInkBackingV47(true);
-    scheduleInkDrawV84();
-  }
-
-  let inkRafV84=0;
-  function scheduleInkDrawV84(){
-    if(inkRafV84)return;
-    inkRafV84=requestAnimationFrame(()=>{inkRafV84=0;drawInkV47();});
+    drawInkV47();
   }
 
   function bindPointerV47(){
@@ -5896,10 +5953,8 @@ setTimeout(() => {
         if(!V.inkStroke)return;
         event.preventDefault();
         event.stopPropagation();
-        let packets=[event];
-        try{const c=event.getCoalescedEvents?.();if(c?.length)packets=c;}catch{}
-        for(const item of packets)V.inkStroke.points.push(penPointV47(item));
-        scheduleInkDrawV84();
+        V.inkStroke.points.push(penPointV47(event));
+        drawInkV47();
         return;
       }
       if(event.pointerType!=="touch"||!V.pointers.has(event.pointerId))return;
@@ -5961,7 +6016,6 @@ setTimeout(() => {
           event.preventDefault();
           V.inkStroke=null;
           saveInkV47();
-          scheduleInkDrawV84();
         }
         return;
       }
@@ -6126,8 +6180,9 @@ setTimeout(() => {
         e.touches[0].clientY-e.touches[1].clientY
       )||1;
       state.zoom=clamp(startZoom*(d/startDist),.35,6);
-      // v81: applyZoom이 프레임당 1회 resize+redraw까지 담당. 중복 전체 redraw 금지.
       try{applyZoom()}catch{}
+      try{resizeInkCanvas()}catch{}
+      try{drawInk()}catch{}
     },{passive:false,capture:true});
 
     const end=()=>{startDist=0};
@@ -6688,9 +6743,8 @@ setTimeout(() => {
     for (const key of LOCAL_KEYS) {
       data[key] = localStorage.getItem(key) || "";
     }
-    // v79: 큰 필기/이어풀기 본문은 IndexedDB에 두고, 가벼운 revision만 감시한다.
-    data.__inkRevisionV79 = String(window.__essayInkRevisionV79 || "");
-    data.__draftRevisionV79 = String(window.__essayDraftRevisionV79 || "");
+    data.__essayInkRevisionV85 = String(window.__essayInkRevisionV85 || "");
+    data.__essayDraftRevisionV85 = String(window.__essayDraftRevisionV85 || "");
     return data;
   }
 
@@ -6706,15 +6760,14 @@ setTimeout(() => {
 
     if (!force && signature === lastLocalSignature) return;
 
-    // v79: Firebase 동기화 시에만 IndexedDB의 큰 데이터를 직렬화한다.
-    try{
-      const large=window.essayLargeStorageV79;
-      if(large){
-        data["essayPsatBaseInk_v2"]=await large.exportInkJSON();
-        data["essayPsatBaseDraft"]=large.getDraftTextSync();
+    try {
+      const large = window.essayPerfStoreV85;
+      if (large) {
+        data["essayPsatBaseInk_v2"] = await large.exportInkJSON();
+        data["essayPsatBaseDraft"] = await large.exportDraftJSON();
       }
-    }catch(err){
-      console.warn("v79 large local export failed",err);
+    } catch (err) {
+      console.warn("v85 large local export failed", err);
     }
 
     const row = {
@@ -6820,17 +6873,16 @@ setTimeout(() => {
     const row = rows.find(item => item.id === "sharedLocal");
     if (!row?.data) return;
 
-    // v79: 큰 필기/이어풀기는 localStorage를 거치지 않고 IndexedDB로 바로 반영.
-    try{
-      const large=window.essayLargeStorageV79;
-      if(large && typeof row.data["essayPsatBaseInk_v2"]==="string"){
-        await large.importInkJSON(row.data["essayPsatBaseInk_v2"], row.data.__inkRevisionV79 || "");
+    try {
+      const large = window.essayPerfStoreV85;
+      if (large && typeof row.data["essayPsatBaseInk_v2"] === "string") {
+        await large.importInkJSON(row.data["essayPsatBaseInk_v2"], row.data.__essayInkRevisionV85 || "");
       }
-      if(large && typeof row.data["essayPsatBaseDraft"]==="string"){
-        await large.importDraftText(row.data["essayPsatBaseDraft"], row.data.__draftRevisionV79 || "");
+      if (large && typeof row.data["essayPsatBaseDraft"] === "string") {
+        await large.importDraftText(row.data["essayPsatBaseDraft"], row.data.__essayDraftRevisionV85 || "");
       }
-    }catch(err){
-      console.warn("v79 large local import failed",err);
+    } catch (err) {
+      console.warn("v85 large local import failed", err);
     }
 
     for (const key of LOCAL_KEYS) {
@@ -6841,7 +6893,6 @@ setTimeout(() => {
       }
     }
 
-    // 현재 메모리 상태에도 바로 반영
     try {
       state.scoreAnswerEdits = JSON.parse(
         localStorage.getItem("essayScoreAnswerEditsV11") || "{}"
@@ -7408,7 +7459,6 @@ setTimeout(() => {
 
     clearInterval(localTimer);
     localTimer = setInterval(() => {
-      // v79: 실제 풀이/필기 중에는 큰 필기 JSON 직렬화/업로드를 하지 않아 렉을 막는다.
       if (!fbUser || applyingRemote || pushing || studyScreenActiveV46() || state.currentStroke || state.answerInkCurrentStroke) return;
 
       const signature = localSignatureV36();
@@ -7961,9 +8011,8 @@ setTimeout(() => {
    canvas 자체가 이미지/레이아웃에 가려져도 S펜 좌표를 wrapper에서 직접 받는다.
 */
 (function essayScorePenV69(){
-  if(window.__essayScorePenV69)return;
   window.__essayScorePenV69=true;
-  return; // v84: legacy score-answer document controller disabled
+  return; // v85: disabled; clean submitted-answer controller below owns this screen
 
   const $v=id=>document.getElementById(id);
   const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
@@ -8154,11 +8203,11 @@ startSolve = function(ids, mode) {
 };
 
 
-/* === v81: 설치앱 S펜 입력 브리지 경량화 (v76 대체) ===
-   - capture 브리지는 하나만 유지해 겹친 캔버스 이벤트 영향을 차단
-   - pointermove마다 기존 필기 전체를 재그리지 않고 새 선분만 즉시 그림
-   - stroke 종료 때만 IndexedDB 저장
-   - 손가락은 계속 이동/확대 전용
+/* === v76: 설치앱 S펜 입력 최종 브리지 ===
+   - 손가락(pointerType=touch)은 절대 필기하지 않음
+   - S펜 pen 이벤트를 document capture에서 직접 받아 canvas 겹침/포인터 레이어 영향 제거
+   - 일부 Android WebAPK에서 장치종류를 불명확하게 주는 경우 pressure가 있는 mouse/unknown도 펜으로 허용
+   - 문제 필기 + 제출 전 답안 필기만 담당. 채점 수정펜/해설펜은 기존 v47/v69 컨트롤러 유지.
 */
 (function essaySolvePenBridgeV76(){
   if(window.__essaySolvePenBridgeV76)return;
@@ -8182,8 +8231,8 @@ startSolve = function(ids, mode) {
   function isPenLike(e){
     if(!e||e.pointerType==="touch")return false;
     if(e.pointerType==="pen")return true;
-    return (e.pointerType==="mouse"||e.pointerType==="") &&
-      (e.buttons===1||e.type==="pointerup"||e.type==="pointercancel");
+    // WebAPK/기기에서 stylus가 mouse 또는 빈 값으로 보고되는 경우의 안전 fallback.
+    return (e.pointerType==="mouse"||e.pointerType==="") && (e.buttons===1||e.type==="pointerup"||e.type==="pointercancel");
   }
   function point(e,canvas){
     const r=canvas.getBoundingClientRect();
@@ -8202,24 +8251,7 @@ startSolve = function(ids, mode) {
     }
   }
   function drawSegment(kind,canvas,stroke,a,b){
-    if(!canvas||!a||!b)return;
-    const r=canvas.getBoundingClientRect();
-    if(r.width<2||r.height<2)return;
-    const ctx=canvas.getContext("2d");
-    if(!ctx)return;
-    const sx=Math.max(.25,canvas.width/Math.max(1,r.width));
-    const sy=Math.max(.25,canvas.height/Math.max(1,r.height));
-    ctx.save();
-    ctx.setTransform(sx,0,0,sy,0,0);
-    ctx.globalCompositeOperation=stroke.tool==="eraser"?"destination-out":"source-over";
-    ctx.lineCap="round";ctx.lineJoin="round";
-    ctx.lineWidth=Math.max(1,Number(stroke.size||3));
-    ctx.strokeStyle=kind==="answer"?"#111827":"#0ea5e9";
-    ctx.beginPath();
-    ctx.moveTo(a.x*r.width,a.y*r.height);
-    ctx.lineTo(b.x*r.width,b.y*r.height);
-    ctx.stroke();
-    ctx.restore();
+    if(!canvas||!a||!b)return;const r=canvas.getBoundingClientRect();if(r.width<2||r.height<2)return;const ctx=canvas.getContext("2d");if(!ctx)return;const sx=canvas.width/Math.max(1,r.width),sy=canvas.height/Math.max(1,r.height);ctx.save();ctx.setTransform(sx,0,0,sy,0,0);ctx.globalCompositeOperation=stroke.tool==="eraser"?"destination-out":"source-over";ctx.lineCap="round";ctx.lineJoin="round";ctx.lineWidth=Math.max(1,Number(stroke.size||3));ctx.strokeStyle=kind==="answer"?"#111827":"#0ea5e9";ctx.beginPath();ctx.moveTo(a.x*r.width,a.y*r.height);ctx.lineTo(b.x*r.width,b.y*r.height);ctx.stroke();ctx.restore();
   }
   function save(kind){
     if(kind==="answer"){
@@ -8227,7 +8259,7 @@ startSolve = function(ids, mode) {
       try{if(typeof saveCurrentAnswerPageV10==="function")saveCurrentAnswerPageV10();else if(typeof saveAnswerDraftInk==="function")saveAnswerDraftInk();}catch{}
     }else{
       state.currentStroke=null;
-      try{if(typeof saveProblemInkV13==="function")saveProblemInkV13();else window.essayPersistCurrentInkV79?.();}catch{}
+      try{if(typeof saveProblemInkV13==="function")saveProblemInkV13();else window.essayPerfStoreV85?.saveCurrent?.();}catch{}
     }
   }
 
@@ -8235,40 +8267,33 @@ startSolve = function(ids, mode) {
     if(!solveVisible()||!isPenLike(e))return;
     const answer=byId("answerInkCanvas");
     const problem=byId("inkCanvas");
-    const answerZone=byId("handwritingWrap")||answer;
-    const problemZone=byId("imageCanvasWrap")||problem;
     let kind=null,canvas=null;
-    if(state.answerInputMode!=="keyboard"&&answer&&inside(e,answerZone)){kind="answer";canvas=answer;}
-    else if(problem&&inside(e,problemZone)){kind="problem";canvas=problem;}
+    if(state.answerInputMode!=="keyboard"&&inside(e,answer)){kind="answer";canvas=answer;}
+    else if(inside(e,problem)){kind="problem";canvas=problem;}
     else return;
-    try{window.essayEnsureInkCanvasSizeV82?.(kind); }catch{}
 
     e.preventDefault();e.stopPropagation();e.stopImmediatePropagation?.();
     if(kind==="answer"){
       const tool=state.answerInkTool==="eraser"?"eraser":"pen";
-      const first=point(e,canvas);
-      const stroke={tool,size:Number(state.answerInkSize||3)*(tool==="eraser"?5:1),points:[first]};
+      const stroke={tool,size:Number(state.answerInkSize||3)*(tool==="eraser"?5:1),points:[point(e,canvas)]};
       if(!Array.isArray(state.answerInkStrokes))state.answerInkStrokes=[];
       state.answerInkStrokes.push(stroke);
       state.answerInkCurrentStroke=stroke;
-      active={id:e.pointerId,kind,canvas,stroke,last:first};
+      active={id:e.pointerId,kind,canvas,stroke};
     }else{
       let key="";
       try{key=typeof currentProblemInkKeyV13==="function"?currentProblemInkKeyV13():"";}catch{}
       if(!key){try{key=typeof inkKey==="function"?inkKey():"";}catch{}}
       if(!key)return;
       const tool=state.inkTool==="eraser"?"eraser":"pen";
-      const first=point(e,canvas);
-      const stroke={tool,size:Number(state.inkSize||3)*(tool==="eraser"?5:1),points:[first]};
+      const stroke={tool,size:Number(state.inkSize||3)*(tool==="eraser"?5:1),points:[point(e,canvas)]};
       if(!state.inkData||typeof state.inkData!=="object")state.inkData={};
       if(!Array.isArray(state.inkData[key]))state.inkData[key]=[];
       state.inkData[key].push(stroke);
       state.currentStroke=stroke;
-      active={id:e.pointerId,kind,canvas,stroke,last:first};
+      active={id:e.pointerId,kind,canvas,stroke};
     }
-    // 첫 점만 있는 stroke도 바로 보이도록 아주 짧은 선분으로 표시.
-    const p0=active.last;
-    drawSegment(kind,canvas,active.stroke,p0,{x:Math.min(1,p0.x+0.0001),y:p0.y});
+    fullDraw(kind);
   },true);
 
   document.addEventListener("pointermove",e=>{
@@ -8276,14 +8301,7 @@ startSolve = function(ids, mode) {
     e.preventDefault();e.stopPropagation();e.stopImmediatePropagation?.();
     let events=[e];
     try{const c=e.getCoalescedEvents?.();if(c?.length)events=c;}catch{}
-    for(const item of events){
-      const next=point(item,active.canvas);
-      const prev=active.last;
-      if(prev&&Math.hypot(next.x-prev.x,next.y-prev.y)<0.00015)continue;
-      active.stroke.points.push(next);
-      drawSegment(active.kind,active.canvas,active.stroke,prev,next);
-      active.last=next;
-    }
+    for(const item of events){const last=active.stroke.points[active.stroke.points.length-1],next=point(item,active.canvas);active.stroke.points.push(next);drawSegment(active.kind,active.canvas,active.stroke,last,next);}
   },true);
 
   function end(e){
@@ -8292,14 +8310,14 @@ startSolve = function(ids, mode) {
     e.preventDefault();e.stopPropagation();e.stopImmediatePropagation?.();
     const kind=active.kind;
     active=null;
-    save(kind);
-    // 저장 뒤 전체 redraw를 다시 하지 않는다. 페이지/줌 변경 때만 전체 redraw.
+    save(kind);fullDraw(kind);
   }
   document.addEventListener("pointerup",end,true);
   document.addEventListener("pointercancel",end,true);
 
-  window.essaySolvePenBridgeV76={isPenLike,fullDraw};
+  window.essaySolvePenBridgeV76={isPenLike};
 })();
+
 
 /* === v77: 필기 보존형 성능 패치 ===
    원칙: v76 S펜 브리지는 수정하지 않는다.
@@ -8599,994 +8617,179 @@ startSolve = function(ids, mode) {
 })();
 
 
-/* === v79: 대용량 필기/이어풀기 IndexedDB + 설치앱 자동업데이트 ===
-   - localStorage 5MB 한계를 피하도록 문제필기와 이어풀기 draft를 IndexedDB로 이전
-   - 기존 localStorage 데이터는 성공적으로 이전한 뒤에만 제거
-   - 문제필기는 현재 키 1건만 저장하여 stroke 종료 때 전체 JSON stringify 제거
-   - Firebase는 동기화 시에만 IndexedDB 데이터를 직렬화
-   - 설치 PWA는 새 서비스워커 활성화 시 공부 화면이 아닐 때 자동 새로고침
-*/
-(function essayLargeStorageAndAutoUpdateV79(){
-  if(window.essayLargeStorageV79)return;
+/* === v85: clean rebuild glue — e78 interactions preserved === */
+(function essayCleanRebuildV85(){
+  if(window.__essayCleanRebuildV85)return;window.__essayCleanRebuildV85=true;
+  const byId=id=>document.getElementById(id);
 
-  const DB_NAME_V79="essayLargeLocalV79";
-  const DB_VERSION_V79=1;
-  const INK_STORE_V79="ink";
-  const META_STORE_V79="meta";
-  let dbPromiseV79=null;
-  let preparedV79=false;
-  let draftCacheV79="";
-  let inkRevisionV79="";
-  let draftRevisionV79="";
-  let draftWriteChainV79=Promise.resolve();
+  // Per-page ink save only. These names are what e78/v76 call at stroke end.
+  function saveCurrentInkV85(){window.essayPerfStoreV85?.saveCurrent?.();}
+  try{saveInkData=saveCurrentInkV85}catch{}
+  try{saveInkDataV9=saveCurrentInkV85}catch{}
+  try{saveProblemInkV10=saveCurrentInkV85}catch{}
+  try{saveProblemInkV13=saveCurrentInkV85}catch{}
 
-  function openV79(){
-    if(dbPromiseV79)return dbPromiseV79;
-    dbPromiseV79=new Promise((resolve,reject)=>{
-      const req=indexedDB.open(DB_NAME_V79,DB_VERSION_V79);
-      req.onupgradeneeded=()=>{
-        const d=req.result;
-        if(!d.objectStoreNames.contains(INK_STORE_V79))d.createObjectStore(INK_STORE_V79,{keyPath:"key"});
-        if(!d.objectStoreNames.contains(META_STORE_V79))d.createObjectStore(META_STORE_V79,{keyPath:"key"});
-      };
-      req.onsuccess=()=>resolve(req.result);
-      req.onerror=()=>reject(req.error);
-    });
-    return dbPromiseV79;
-  }
-  async function metaGetV79(key){
-    const d=await openV79();
-    return new Promise((resolve,reject)=>{
-      const tx=d.transaction(META_STORE_V79,"readonly");
-      const req=tx.objectStore(META_STORE_V79).get(key);
-      req.onsuccess=()=>resolve(req.result?.value);
-      req.onerror=()=>reject(req.error);
-    });
-  }
-  async function metaSetV79(key,value){
-    const d=await openV79();
-    return new Promise((resolve,reject)=>{
-      const tx=d.transaction(META_STORE_V79,"readwrite");
-      tx.oncomplete=()=>resolve();
-      tx.onerror=()=>reject(tx.error);
-      tx.objectStore(META_STORE_V79).put({key,value});
-    });
-  }
-  async function inkRowsV79(){
-    const d=await openV79();
-    return new Promise((resolve,reject)=>{
-      const tx=d.transaction(INK_STORE_V79,"readonly");
-      const req=tx.objectStore(INK_STORE_V79).getAll();
-      req.onsuccess=()=>resolve(req.result||[]);
-      req.onerror=()=>reject(req.error);
-    });
-  }
-  function nextRevisionV79(){
-    return Date.now().toString(36)+":"+Math.random().toString(36).slice(2,8);
-  }
-  async function replaceAllInkV79(obj,revisionToken=""){
-    const d=await openV79();
-    const entries=Object.entries(obj&&typeof obj==="object"?obj:{});
-    const revision=revisionToken||nextRevisionV79();
-    await new Promise((resolve,reject)=>{
-      const tx=d.transaction([INK_STORE_V79,META_STORE_V79],"readwrite");
-      tx.oncomplete=()=>resolve();
-      tx.onerror=()=>reject(tx.error);
-      const ink=tx.objectStore(INK_STORE_V79);
-      ink.clear();
-      for(const [key,strokes] of entries)ink.put({key,strokes:Array.isArray(strokes)?strokes:[]});
-      tx.objectStore(META_STORE_V79).put({key:"inkRevision",value:revision});
-      tx.objectStore(META_STORE_V79).put({key:"legacyInkMigrated",value:true});
-    });
-    state.inkData=obj&&typeof obj==="object"?obj:{};
-    inkRevisionV79=revision;
-    window.__essayInkRevisionV79=revision;
-  }
-  async function prepareV79(){
-    if(preparedV79)return;
-    await openV79();
+  // O(1) current-problem lookup; refresh map only after DB load.
+  let pmap=new Map((state.problems||[]).map(p=>[String(p?.id||""),p]));
+  const loadBefore=loadData;
+  loadData=async function(){const out=await loadBefore.apply(this,arguments);pmap=new Map((state.problems||[]).map(p=>[String(p?.id||""),p]));return out;};
+  currentProblem=function(){const id=state.solve?.ids?.[Number(state.solve?.index||0)];return id==null?null:(pmap.get(String(id))||(state.problems||[]).find(p=>String(p?.id)===String(id))||null);};
 
-    let migrated=await metaGetV79("legacyInkMigrated");
-    let legacyInk="";
-    try{legacyInk=localStorage.getItem("essayPsatBaseInk_v2")||"";}catch{}
-    if(!migrated&&legacyInk){
-      try{
-        const obj=JSON.parse(legacyInk||"{}");
-        await replaceAllInkV79(obj);
-        migrated=true;
-      }catch(err){
-        console.warn("v79 legacy ink migration failed",err);
-      }
-    }
-
-    const rows=await inkRowsV79();
-    const map={};
-    for(const row of rows)if(row?.key)map[row.key]=Array.isArray(row.strokes)?row.strokes:[];
-    state.inkData=map;
-    inkRevisionV79=String((await metaGetV79("inkRevision"))||inkRevisionV79||"");
-    window.__essayInkRevisionV79=inkRevisionV79;
-
-    let storedDraft=await metaGetV79("draftText");
-    let legacyDraft="";
-    try{legacyDraft=localStorage.getItem("essayPsatBaseDraft")||"";}catch{}
-    if(typeof storedDraft!=="string"&&legacyDraft){
-      storedDraft=legacyDraft;
-      draftRevisionV79=nextRevisionV79();
-      await metaSetV79("draftText",storedDraft);
-      await metaSetV79("draftRevision",draftRevisionV79);
-    }
-    draftCacheV79=typeof storedDraft==="string"?storedDraft:"";
-    draftRevisionV79=String((await metaGetV79("draftRevision"))||draftRevisionV79||"");
-    window.__essayDraftRevisionV79=draftRevisionV79;
-
-    // 성공적으로 이전된 경우에만 legacy localStorage를 제거한다. 이전 실패 시 원본은 남긴다.
-    if(migrated||!legacyInk){try{localStorage.removeItem("essayPsatBaseInk_v2");}catch{}}
-    if(typeof storedDraft==="string"||!legacyDraft){try{localStorage.removeItem("essayPsatBaseDraft");}catch{}}
-    try{await navigator.storage?.persist?.();}catch{}
-    preparedV79=true;
-  }
-  async function saveInkKeyV79(key,strokes){
-    if(!key)return;
-    const d=await openV79();
-    const revision=nextRevisionV79();
-    await new Promise((resolve,reject)=>{
-      const tx=d.transaction([INK_STORE_V79,META_STORE_V79],"readwrite");
-      tx.oncomplete=()=>resolve();
-      tx.onerror=()=>reject(tx.error);
-      tx.objectStore(INK_STORE_V79).put({key,strokes:Array.isArray(strokes)?strokes:[]});
-      tx.objectStore(META_STORE_V79).put({key:"inkRevision",value:revision});
-    });
-    inkRevisionV79=revision;
-    window.__essayInkRevisionV79=revision;
-  }
-  async function exportInkJSONV79(){
-    return JSON.stringify(state.inkData||{});
-  }
-  async function importInkJSONV79(text,revisionToken=""){
-    let obj={};
-    try{obj=JSON.parse(text||"{}")||{};}catch(err){console.warn("v79 remote ink parse failed",err);return;}
-    await replaceAllInkV79(obj,revisionToken||nextRevisionV79());
-    try{drawProblemInkV13?.();}catch{}
-  }
-  function queueDraftWriteV80(task){
-    draftWriteChainV79=draftWriteChainV79.catch(()=>{}).then(task);
-    return draftWriteChainV79;
-  }
-  function saveDraftTextV79(text,revisionToken=""){
-    const nextText=String(text||"");
-    const revision=revisionToken||nextRevisionV79();
-    draftCacheV79=nextText;
-    draftRevisionV79=revision;
-    window.__essayDraftRevisionV79=revision;
-    return queueDraftWriteV80(async()=>{
-      const d=await openV79();
-      await new Promise((resolve,reject)=>{
-        const tx=d.transaction(META_STORE_V79,"readwrite");
-        tx.oncomplete=()=>resolve();
-        tx.onerror=()=>reject(tx.error);
-        const st=tx.objectStore(META_STORE_V79);
-        st.put({key:"draftText",value:nextText});
-        st.put({key:"draftRevision",value:revision});
-      });
-    });
-  }
-  function clearDraftV79(){
-    const revision=nextRevisionV79();
-    draftCacheV79="";
-    draftRevisionV79=revision;
-    window.__essayDraftRevisionV79=revision;
-    return queueDraftWriteV80(async()=>{
-      const d=await openV79();
-      await new Promise((resolve,reject)=>{
-        const tx=d.transaction(META_STORE_V79,"readwrite");
-        tx.oncomplete=()=>resolve();
-        tx.onerror=()=>reject(tx.error);
-        const st=tx.objectStore(META_STORE_V79);
-        st.put({key:"draftText",value:""});
-        st.put({key:"draftRevision",value:revision});
-      });
-    });
-  }
-  async function clearAllV79(){
-    const d=await openV79();
-    await new Promise((resolve,reject)=>{
-      const tx=d.transaction([INK_STORE_V79,META_STORE_V79],"readwrite");
-      tx.oncomplete=()=>resolve();
-      tx.onerror=()=>reject(tx.error);
-      tx.objectStore(INK_STORE_V79).clear();
-      tx.objectStore(META_STORE_V79).clear();
-    });
-    state.inkData={};
-    draftCacheV79="";
-    inkRevisionV79=nextRevisionV79();
-    draftRevisionV79=nextRevisionV79();
-    window.__essayInkRevisionV79=inkRevisionV79;
-    window.__essayDraftRevisionV79=draftRevisionV79;
-  }
-
-  window.essayLargeStorageV79={
-    prepare:prepareV79,
-    saveInkKey:saveInkKeyV79,
-    exportInkJSON:exportInkJSONV79,
-    importInkJSON:importInkJSONV79,
-    getDraftTextSync:()=>draftCacheV79,
-    saveDraftText:saveDraftTextV79,
-    importDraftText:(text,revision)=>saveDraftTextV79(text,revision||nextRevisionV79()),
-    clearDraft:clearDraftV79,
-    clearAll:clearAllV79
+  // Solve list: never create thousands of DOM cards at once.
+  const BATCH=50;let limit=BATCH;
+  renderSolveList=function(){
+    const list=byId("solveList");if(!list)return;
+    const args={subject:byId("solveSubject")?.value||"",session:byId("solveSession")?.value||""};
+    let arr=filterProblems(args);
+    if(typeof filterProblemsByScopeV25==="function")arr=filterProblemsByScopeV25(arr,typeof solveScopeV25==="function"?solveScopeV25():undefined);
+    const shown=arr.slice(0,limit);list.innerHTML="";
+    try{renderScopeSummaryV25?.(arr)}catch{}
+    if(!arr.length){list.innerHTML='<p class="hint">조건에 맞는 문제가 없어.</p>';return;}
+    const frag=document.createDocumentFragment();for(const p of shown)frag.appendChild(problemCard(p,{solve:true}));list.appendChild(frag);
+    if(shown.length<arr.length){const b=document.createElement("button");b.type="button";b.className="secondary";b.textContent=`더 보기 (${shown.length}/${arr.length})`;b.style.cssText="display:block;margin:10px auto";b.onclick=()=>{limit=Math.min(arr.length,limit+BATCH);renderSolveList()};list.appendChild(b);}
   };
+  document.addEventListener("input",e=>{if(e.target?.matches?.("#solveSubject,#solveSession,#solveScope"))limit=BATCH},true);
+  document.addEventListener("change",e=>{if(e.target?.matches?.("#solveSubject,#solveSession,#solveScope"))limit=BATCH},true);
 
-  const oldSafeSetDraftV79=typeof safeSetDraftV72==="function"?safeSetDraftV72:null;
-  const oldSafeGetDraftV79=typeof safeGetDraftV72==="function"?safeGetDraftV72:null;
-  const oldSafeRemoveDraftV79=typeof safeRemoveDraftV72==="function"?safeRemoveDraftV72:null;
-  safeSetDraftV72=function(value){
-    const text=typeof value==="string"?value:JSON.stringify(value);
-    const large=window.essayLargeStorageV79;
-    if(large){
-      large.saveDraftText(text).catch(err=>console.warn("v79 draft save failed",err));
-      return true;
-    }
-    return oldSafeSetDraftV79?oldSafeSetDraftV79(value):false;
-  };
-  safeGetDraftV72=function(){
-    const large=window.essayLargeStorageV79;
-    return large?large.getDraftTextSync():(oldSafeGetDraftV79?oldSafeGetDraftV79():null);
-  };
-  safeRemoveDraftV72=function(){
-    const large=window.essayLargeStorageV79;
-    if(large){
-      large.clearDraft().catch(err=>console.warn("v79 draft clear failed",err));
-      return true;
-    }
-    return oldSafeRemoveDraftV79?oldSafeRemoveDraftV79():false;
-  };
-
-  function persistCurrentProblemInkV79(){
-    let key="";
-    try{key=typeof currentProblemInkKeyV13==="function"?currentProblemInkKeyV13():"";}catch{}
-    if(!key){try{key=typeof problemInkKeyV10==="function"?problemInkKeyV10():"";}catch{}}
-    if(!key){try{key=typeof problemInkKeyV9==="function"?problemInkKeyV9():"";}catch{}}
-    if(!key)return;
-    window.essayLargeStorageV79?.saveInkKey(key,state.inkData?.[key]||[])
-      .catch(err=>console.warn("v79 ink save failed",err));
+  // Save-and-finish: direct IDB save, no full reload, no PNG conversion, await draft clear, then close.
+  let finishBusy=false;
+  function clone(v){try{return structuredClone(v)}catch{return JSON.parse(JSON.stringify(v??null))}}
+  function num(id){const el=byId(id);return !el||el.value===""?null:Number(el.value)}
+  async function saveFinish(button){
+    if(finishBusy||!state.solve)return;finishBusy=true;const old=button?.textContent||"저장 후 끝내기";if(button){button.disabled=true;button.textContent="저장 중..."}
+    try{
+      try{saveCurrentAnswerPageV10?.()}catch{}
+      const p=currentProblem();if(!p)throw new Error("current problem missing");
+      const attempt={id:uuid(),problemId:p.id,subject:p.subject,session:p.session,mode:state.solve.mode,answer:state.solve.answer||"",elapsedMs:Number(state.solve.elapsedBase||0),score:num("attemptScoreInput"),maxScore:p.maxScore||0,difficulty:byId("difficultyResultInput")?.value||"중",needReview:byId("needReviewInput")?.value||"true",completion:byId("completionInput")?.value||(state.solve.mode==="outline"?"목차만":"완성"),memo:(byId("memoInput")?.value||"").trim(),checkedPoints:Array.from(document.querySelectorAll("#pointChecklist input")).map(x=>!!x.checked),completedAt:nowIso(),answerInkData:"",answerInkStrokes:clone(state.solve.answerInkStrokes||state.answerInkStrokes||[]),answerInputMode:state.solve.answerInputMode||state.answerInputMode||"handwriting",answerPages:clone(state.solve.answerPages||[])};
+      await put(STORE_ATTEMPTS,attempt);
+      const i=(state.attempts||[]).findIndex(a=>String(a?.id)===String(attempt.id));if(i>=0)state.attempts[i]=attempt;else state.attempts.unshift(attempt);state.attempts.sort((a,b)=>String(b.completedAt||"").localeCompare(String(a.completedAt||"")));
+      if(p.manualUnseenV78===true){p.manualUnseenV78=false;put(STORE_PROBLEMS,p).catch(()=>{});}
+      await window.essayPerfStoreV85?.clearDraft?.();
+      clearInterval(state.timer);state.timer=null;state.solve=null;byId("solveOverlay")?.classList.add("hidden");byId("scoreOverlay")?.classList.add("hidden");try{renderAll()}catch{};try{toast("풀이 기록 저장 후 종료 완료")}catch{}
+    }catch(err){console.error("v85 finish",err);try{toast("기록 저장 실패 · 화면은 유지했어")}catch{}}
+    finally{finishBusy=false;if(button&&document.body.contains(button)){button.disabled=false;button.textContent=old}}
   }
-  window.essayPersistCurrentInkV79=persistCurrentProblemInkV79;
-  try{saveInkData=persistCurrentProblemInkV79;}catch{}
-  try{saveInkDataV9=persistCurrentProblemInkV79;}catch{}
-  try{saveProblemInkV10=persistCurrentProblemInkV79;}catch{}
-  try{saveProblemInkV13=persistCurrentProblemInkV79;}catch{}
+  document.addEventListener("click",e=>{const b=e.target?.closest?.("#finishBtn");if(!b)return;e.preventDefault();e.stopPropagation();e.stopImmediatePropagation?.();saveFinish(b)},true);
 
-  // 새 서비스워커가 활성화되면 풀이 중이 아닐 때 자동 반영.
+  // Installed PWA: check on focus; reload only when not inside solve/score screen.
   if("serviceWorker" in navigator){
-    let reloadingV79=false;
-    let updatePendingV79=false;
-    const studyOpenV79=()=>{
-      const solve=document.getElementById("solveOverlay");
-      const score=document.getElementById("scoreOverlay");
-      return !!((solve&&!solve.classList.contains("hidden"))||(score&&!score.classList.contains("hidden")));
-    };
-    const applyUpdateV79=()=>{
-      if(reloadingV79)return;
-      if(studyOpenV79()){
-        updatePendingV79=true;
-        try{toast("앱 업데이트 준비됨 · 풀이 종료 후 자동 적용");}catch{}
-        return;
-      }
-      reloadingV79=true;
-      location.reload();
-    };
-    navigator.serviceWorker.addEventListener("controllerchange",applyUpdateV79);
-    setInterval(()=>{
-      if(updatePendingV79&&!studyOpenV79()){
-        updatePendingV79=false;
-        applyUpdateV79();
-      }
-    },1200);
-    const checkUpdateV79=()=>navigator.serviceWorker.getRegistration("./").then(reg=>reg?.update?.()).catch(()=>{});
-    window.addEventListener("focus",checkUpdateV79);
-    document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")checkUpdateV79();});
+    let reloadOnce=false,pending=false;
+    const studying=()=>{const a=byId("solveOverlay"),b=byId("scoreOverlay");return !!((a&&!a.classList.contains("hidden"))||(b&&!b.classList.contains("hidden")))};
+    const apply=()=>{if(reloadOnce)return;if(studying()){pending=true;return}reloadOnce=true;location.reload()};
+    navigator.serviceWorker.addEventListener("controllerchange",apply);
+    window.addEventListener("focus",()=>navigator.serviceWorker.getRegistration("./").then(r=>r?.update?.()).catch(()=>{}));
+    setInterval(()=>{if(pending&&!studying()){pending=false;apply()}},1500);
   }
 })();
 
 
-/* === v81: 이어풀기 초안 저장 디바운스 ===
-   답안 입력/필기 stroke마다 큰 draft 전체를 IndexedDB에 즉시 쓰지 않고 최신 상태만 350ms 뒤 1회 저장.
-   저장 후 끝내기/일시정지 시 clearDraft가 pending write를 먼저 취소해 삭제 후 재생성을 막는다.
+/* === v85 clean solve + submitted-answer controller ===
+   This is intentionally the only new interaction layer in the clean rebuild.
+   - solve open/page path bypasses accumulated legacy openCurrentProblem wrappers
+   - problem canvas is cloned once per page: touch pan/pinch has one owner; document S Pen bridge remains the pen owner
+   - submitted answer wrap is cloned on open: one controller owns touch pan/pinch and S Pen correction
+   - old v69 document score-pen controller is disabled above
 */
-(function essayDraftDebounceV81(){
-  if(window.__essayDraftDebounceV81)return;
-  window.__essayDraftDebounceV81=true;
-  const large=window.essayLargeStorageV79;
-  if(!large)return;
-  const originalSave=large.saveDraftText?.bind(large);
-  const originalClear=large.clearDraft?.bind(large);
-  if(typeof originalSave!=="function"||typeof originalClear!=="function")return;
-  let timer=0,pending=null;
-
-  function flush(){
-    clearTimeout(timer);timer=0;
-    if(pending===null)return Promise.resolve();
-    const text=pending;pending=null;
-    return originalSave(text).catch(err=>console.warn("v81 draft flush failed",err));
-  }
-  safeSetDraftV72=function(value){
-    pending=typeof value==="string"?value:JSON.stringify(value);
-    clearTimeout(timer);
-    timer=setTimeout(()=>{flush();},350);
-    return true;
-  };
-  safeGetDraftV72=function(){
-    return pending!==null?pending:large.getDraftTextSync();
-  };
-  large.clearDraft=async function(){
-    clearTimeout(timer);timer=0;pending=null;
-    return originalClear();
-  };
-  safeRemoveDraftV72=function(){
-    large.clearDraft().catch(err=>console.warn("v81 draft clear failed",err));
-    return true;
-  };
-  window.addEventListener("pagehide",()=>{if(pending!==null)flush();});
-  document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="hidden"&&pending!==null)flush();});
-  window.essayFlushDraftV81=flush;
-})();
-
-
-/* === v80: 저장 후 끝내기 확정 저장/종료 ===
-   - 기존 saveAttempt 래퍼 체인과 분리해 끝내기 버튼에서 현재 답안을 직접 확정 저장
-   - 기록 저장 성공 후 IndexedDB 이어풀기 draft 삭제를 완료한 다음 화면 종료
-   - 저장 중 중복 클릭 차단, 오류 시 화면을 닫지 않고 안내
-   - 기존 저장 후 다음/일반 저장/Firebase 경로는 유지
-*/
-(function essayFinishAfterSaveV80(){
-  if(window.__essayFinishAfterSaveV80)return;
-  window.__essayFinishAfterSaveV80=true;
-  let busyV80=false;
-
-  function cloneV80(value){
-    try{return structuredClone(value);}catch{}
-    try{return JSON.parse(JSON.stringify(value));}catch{return value;}
-  }
-
-  function numV80(id){
-    const el=document.getElementById(id);
-    return el?.value===""?null:Number(el?.value||0);
-  }
-
-  async function saveAttemptDirectV80(){
-    const p=typeof currentProblem==="function"?currentProblem():null;
-    if(!p||!state.solve)throw new Error("현재 풀이 정보를 찾을 수 없어");
-
-    // 현재 답안 페이지/필기를 state.solve에 먼저 확정.
-    try{if(typeof saveCurrentAnswerPageV10==="function")saveCurrentAnswerPageV10();}catch(err){console.warn("v80 answer page save",err);}
-    // v84: 저장 후 끝내기에서는 대용량 canvas.toDataURL()을 만들지 않는다.
-    // answerPages/answerInkStrokes 벡터 데이터가 최종 기록 원본이다.
-    state.solve.answerInkData="";
-    state.solve.answerInkStrokes=Array.isArray(state.answerInkStrokes)?state.answerInkStrokes:[];
-    state.solve.answerInputMode=state.answerInputMode||state.solve.answerInputMode||"handwriting";
-
-    const attempt={
-      id:uuid(),
-      problemId:p.id,
-      subject:p.subject,
-      session:p.session,
-      mode:state.solve.mode,
-      answer:state.solve.answer||"",
-      elapsedMs:Number(state.solve.elapsedBase||0),
-      score:numV80("attemptScoreInput"),
-      maxScore:p.maxScore||0,
-      difficulty:document.getElementById("difficultyResultInput")?.value||"중",
-      needReview:document.getElementById("needReviewInput")?.value||"true",
-      completion:document.getElementById("completionInput")?.value||(state.solve.mode==="outline"?"목차만":"완성"),
-      memo:(document.getElementById("memoInput")?.value||"").trim(),
-      checkedPoints:Array.from(document.querySelectorAll("#pointChecklist input")).map(x=>!!x.checked),
-      completedAt:nowIso(),
-      answerInkData:state.solve.answerInkData||"",
-      answerInkStrokes:cloneV80(state.solve.answerInkStrokes||[]),
-      answerInputMode:state.solve.answerInputMode||"handwriting",
-      answerPages:cloneV80(state.solve.answerPages||[])
-    };
-
-    // put은 IndexedDB 저장 완료까지만 기다리고 Firebase 업로드는 기존 래퍼가 비동기로 예약한다.
-    await put(STORE_ATTEMPTS,attempt);
-
-    // loadData 전체 재조회 없이 메모리만 즉시 반영해 끝내기 지연을 없앤다.
-    const idx=(state.attempts||[]).findIndex(a=>String(a?.id)===String(attempt.id));
-    if(idx>=0)state.attempts[idx]=attempt;
-    else state.attempts.unshift(attempt);
-    state.attempts.sort((a,b)=>String(b.completedAt||"").localeCompare(String(a.completedAt||"")));
-
-    // v78 수동 안 푼 상태는 재풀이 기록 저장 시 해제. 이 부가 저장은 종료를 막지 않는다.
-    if(p.manualUnseenV78===true){
-      p.manualUnseenV78=false;
-      put(STORE_PROBLEMS,p).catch(err=>console.warn("v80 unseen reset",err));
-    }
-    return attempt;
-  }
-
-  async function clearDraftBeforeFinishV80(){
-    try{
-      if(window.essayLargeStorageV79?.clearDraft){
-        await window.essayLargeStorageV79.clearDraft();
-      }else if(typeof safeRemoveDraftV72==="function"){
-        safeRemoveDraftV72();
-      }
-    }catch(err){
-      console.warn("v80 draft clear",err);
-      try{localStorage.removeItem("essayPsatBaseDraft");}catch{}
-    }
-  }
-
-  async function finishAfterSaveV80(button){
-    if(busyV80)return;
-    busyV80=true;
-    const oldText=button?.textContent||"저장 후 끝내기";
-    if(button){button.disabled=true;button.textContent="저장 중...";}
-    try{
-      await saveAttemptDirectV80();
-      await clearDraftBeforeFinishV80();
-      // draft는 이미 지웠으므로 기존 finishSolve의 재삭제를 피한다.
-      if(typeof finishSolve==="function")finishSolve(false);
-      else{
-        clearInterval(state.timer);state.timer=null;state.solve=null;
-        document.getElementById("solveOverlay")?.classList.add("hidden");
-        document.getElementById("scoreOverlay")?.classList.add("hidden");
-        try{renderAll();}catch{}
-      }
-      try{toast("풀이 기록 저장 후 종료 완료");}catch{}
-    }catch(err){
-      console.error("v80 save and finish failed",err);
-      try{toast("기록 저장 실패 · 끝내지 않았어");}catch{}
-    }finally{
-      busyV80=false;
-      if(button&&document.body.contains(button)){button.disabled=false;button.textContent=oldText;}
-    }
-  }
-
-  // 기존 bubble 핸들러보다 먼저 처리해 중복 저장/이중 종료를 막는다.
-  document.addEventListener("click",event=>{
-    const button=event.target?.closest?.("#finishBtn");
-    if(!button)return;
-    event.preventDefault();
-    event.stopPropagation();
-    event.stopImmediatePropagation();
-    finishAfterSaveV80(button);
-  },true);
-
-  window.essayFinishAfterSaveV80=finishAfterSaveV80;
-})();
-
-
-/* === v82: 풀이화면 긴급 안정화 — 중복 touch/zoom 경로 차단 ===
-   - 문제화면 손가락 입력을 document capture 한 경로에서만 처리해 과거 touch/pinch listener의 중복 실행 차단
-   - pinch 중에는 이미지/캔버스 CSS 크기만 바꾸고 backing canvas 재생성/전체 redraw는 gesture 종료 후 1회
-   - draft는 호출할 때 JSON.stringify하지 않고 저장 시점에만 직렬화
-   - S펜 stroke 시작 시 캔버스 크기가 실제로 어긋난 경우에만 resize
-   데이터 구조/IndexedDB/Firebase 경로는 변경하지 않음.
-*/
-(function essayEmergencyPerformanceV82(){
-  if(window.__essayEmergencyPerformanceV82)return;
-  window.__essayEmergencyPerformanceV82=true;
-
+(function essayCleanInteractionV85(){
+  if(window.__essayCleanInteractionV85)return;window.__essayCleanInteractionV85=true;
   const byId=id=>document.getElementById(id);
   const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
-  const solveOpen=()=>{
-    const solve=byId('solveOverlay'), score=byId('scoreOverlay');
-    return !!(state.solve && solve && !solve.classList.contains('hidden') && (!score || score.classList.contains('hidden')));
-  };
-  const questionScroller=()=>byId('questionImageScroller');
-  const questionImg=()=>byId('questionImageView');
-  const questionWrap=()=>byId('imageCanvasWrap');
-  const questionCanvas=()=>byId('inkCanvas');
+  const isPen=e=>!!e&&e.pointerType!=="touch"&&(e.pointerType==="pen"||((e.pointerType==="mouse"||e.pointerType==="")&&(e.buttons===1||e.type==="pointerup"||e.type==="pointercancel")));
 
-  let zoomRaf=0, commitTimer=0;
-  function applyZoomCssV82(){
-    zoomRaf=0;
-    const img=questionImg(), wrap=questionWrap(), canvas=questionCanvas();
-    if(!img||!wrap||!img.naturalWidth||!img.naturalHeight)return;
-    const z=Math.max(.05,Number(state.zoom||1));
-    const w=Math.max(1,Math.round(img.naturalWidth*z));
-    const h=Math.max(1,Math.round(img.naturalHeight*z));
-    img.style.width=w+'px'; img.style.height=h+'px';
-    wrap.style.width=w+'px'; wrap.style.height=h+'px';
-    wrap.style.minWidth=w+'px'; wrap.style.minHeight=h+'px';
-    // pinch 중 backing canvas를 재생성하지 않고 기존 bitmap만 CSS scale한다.
-    if(canvas){canvas.style.width=w+'px';canvas.style.height=h+'px';}
+  /* ---------- solve question: one lightweight open/page/touch path ---------- */
+  let qTouches=new Map(), qPan=null, qPinch=null, qZoomRaf=0, qCommitTimer=0;
+  const qScroller=()=>byId("questionImageScroller"), qImg=()=>byId("questionImageView"), qWrap=()=>byId("imageCanvasWrap"), qCanvas=()=>byId("inkCanvas");
+  function qApplyCss(){
+    qZoomRaf=0;const img=qImg(),wrap=qWrap(),canvas=qCanvas();if(!img||!wrap||!img.naturalWidth||!img.naturalHeight)return;
+    const z=clamp(Number(state.zoom||1),.05,5),w=Math.max(1,Math.round(img.naturalWidth*z)),h=Math.max(1,Math.round(img.naturalHeight*z));
+    img.style.width=w+"px";img.style.height=h+"px";wrap.style.width=w+"px";wrap.style.height=h+"px";wrap.style.minWidth=w+"px";wrap.style.minHeight=h+"px";
+    if(canvas){canvas.style.width=w+"px";canvas.style.height=h+"px";}
   }
-  function commitCanvasV82(delay=90){
-    clearTimeout(commitTimer);
-    commitTimer=setTimeout(()=>{
-      if(!solveOpen())return;
-      try{
-        if(typeof resizeInkCanvasV10==='function')resizeInkCanvasV10();
-        else if(typeof resizeInkCanvasV9==='function')resizeInkCanvasV9();
-      }catch(err){console.warn('v82 canvas commit resize',err);}
-      try{
-        if(typeof drawInkV10==='function')drawInkV10();
-        else if(typeof drawInkV9==='function')drawInkV9();
-      }catch(err){console.warn('v82 canvas commit draw',err);}
-    },delay);
-  }
-  function applyZoomV82(){
-    if(!zoomRaf)zoomRaf=requestAnimationFrame(applyZoomCssV82);
-    commitCanvasV82(110);
-  }
-  try{applyZoom=applyZoomV82;}catch{}
-  try{
-    fitImage=function(){
-      const img=questionImg(), scroller=questionScroller();
-      if(!img||!scroller)return;
-      const run=()=>{
-        if(!img.naturalWidth||!scroller.clientWidth)return;
-        state.zoom=clamp((scroller.clientWidth-20)/img.naturalWidth,.05,2);
-        applyZoomV82();
-        scroller.scrollLeft=0;scroller.scrollTop=0;
-      };
-      if(img.complete&&img.naturalWidth)run();
-      else img.addEventListener('load',run,{once:true});
-    };
-  }catch{}
-
-  // 기존 scroller 내부 touch listener보다 document capture가 먼저 실행되어 중복 pinch/pan을 막는다.
-  let oneStart=null;
-  let pinch=null;
-  function touchPoint(t){return {x:t.clientX,y:t.clientY};}
-  function dist(a,b){return Math.hypot(a.x-b.x,a.y-b.y)||1;}
-  function mid(a,b){return {x:(a.x+b.x)/2,y:(a.y+b.y)/2};}
-  function targetIsQuestionV82(target){
-    if(window.__essayE84PointerOnly)return false;
-    const sc=questionScroller();
-    return !!(sc && target && (target===sc || sc.contains(target)));
-  }
-  document.addEventListener('touchstart',e=>{
-    if(!solveOpen()||!targetIsQuestionV82(e.target))return;
-    e.preventDefault();e.stopPropagation();e.stopImmediatePropagation?.();
-    const sc=questionScroller(); if(!sc)return;
-    if(e.touches.length>=2){
-      const a=touchPoint(e.touches[0]),b=touchPoint(e.touches[1]),m=mid(a,b);
-      const r=sc.getBoundingClientRect();
-      pinch={
-        dist:dist(a,b),zoom:Number(state.zoom||1),
-        contentX:(sc.scrollLeft+(m.x-r.left))/Math.max(.0001,Number(state.zoom||1)),
-        contentY:(sc.scrollTop +(m.y-r.top ))/Math.max(.0001,Number(state.zoom||1)),
-        midX:m.x-r.left,midY:m.y-r.top
-      };
-      oneStart=null;
-    }else if(e.touches.length===1){
-      const t=e.touches[0];
-      oneStart={x:t.clientX,y:t.clientY,left:sc.scrollLeft,top:sc.scrollTop};
-      pinch=null;
-    }
-  },{capture:true,passive:false});
-  document.addEventListener('touchmove',e=>{
-    if(!solveOpen()||!targetIsQuestionV82(e.target))return;
-    e.preventDefault();e.stopPropagation();e.stopImmediatePropagation?.();
-    const sc=questionScroller(); if(!sc)return;
-    if(e.touches.length>=2){
-      const a=touchPoint(e.touches[0]),b=touchPoint(e.touches[1]);
-      if(!pinch){
-        const m=mid(a,b),r=sc.getBoundingClientRect();
-        pinch={dist:dist(a,b),zoom:Number(state.zoom||1),contentX:(sc.scrollLeft+(m.x-r.left))/Math.max(.0001,Number(state.zoom||1)),contentY:(sc.scrollTop+(m.y-r.top))/Math.max(.0001,Number(state.zoom||1)),midX:m.x-r.left,midY:m.y-r.top};
-      }
-      state.zoom=clamp(pinch.zoom*(dist(a,b)/Math.max(1,pinch.dist)),.20,6);
-      applyZoomV82();
-      const z=Number(state.zoom||1);
-      sc.scrollLeft=Math.max(0,pinch.contentX*z-pinch.midX);
-      sc.scrollTop =Math.max(0,pinch.contentY*z-pinch.midY);
-      return;
-    }
-    if(e.touches.length===1&&oneStart){
-      const t=e.touches[0];
-      sc.scrollLeft=oneStart.left-(t.clientX-oneStart.x);
-      sc.scrollTop =oneStart.top -(t.clientY-oneStart.y);
-    }
-  },{capture:true,passive:false});
-  const touchEndV82=e=>{
-    if(!solveOpen()||!targetIsQuestionV82(e.target))return;
-    e.preventDefault();e.stopPropagation();e.stopImmediatePropagation?.();
-    if(e.touches?.length===1){
-      const sc=questionScroller(),t=e.touches[0];
-      if(sc)oneStart={x:t.clientX,y:t.clientY,left:sc.scrollLeft,top:sc.scrollTop};
-      pinch=null;
-    }else if(!e.touches?.length){
-      oneStart=null;pinch=null;commitCanvasV82(0);
-    }
-  };
-  document.addEventListener('touchend',touchEndV82,{capture:true,passive:false});
-  document.addEventListener('touchcancel',touchEndV82,{capture:true,passive:false});
-
-  // draft JSON stringify를 이벤트 호출 시점에서 제거한다.
-  const large=window.essayLargeStorageV79;
-  if(large?.saveDraftText && large?.clearDraft){
-    const rawSave=large.saveDraftText.bind(large);
-    const rawClear=large.clearDraft.bind(large);
-    let draftTimer=0, pendingValue=null;
-    const serialize=()=>pendingValue==null?'':(typeof pendingValue==='string'?pendingValue:JSON.stringify(pendingValue));
-    async function flushDraftV82(){
-      clearTimeout(draftTimer);draftTimer=0;
-      if(pendingValue===null)return;
-      const value=pendingValue;pendingValue=null;
-      const text=typeof value==='string'?value:JSON.stringify(value);
-      await rawSave(text).catch(err=>console.warn('v82 draft save failed',err));
-    }
-    safeSetDraftV72=function(value){
-      pendingValue=value;
-      clearTimeout(draftTimer);
-      draftTimer=setTimeout(flushDraftV82,650);
-      return true;
-    };
-    safeGetDraftV72=function(){
-      if(pendingValue!==null){try{return serialize();}catch{return large.getDraftTextSync();}}
-      return large.getDraftTextSync();
-    };
-    large.clearDraft=async function(){
-      clearTimeout(draftTimer);draftTimer=0;pendingValue=null;
-      return rawClear();
-    };
-    safeRemoveDraftV72=function(){large.clearDraft().catch(err=>console.warn('v82 draft clear failed',err));return true;};
-    window.essayFlushDraftV81=flushDraftV82;
-    window.essayFlushDraftV82=flushDraftV82;
-  }
-
-  // S펜 시작 시 캔버스 backing size가 맞으면 전체 resize/redraw를 생략한다.
-  window.essayEnsureInkCanvasSizeV82=function(kind){
-    const canvas=kind==='answer'?byId('answerInkCanvas'):questionCanvas();
-    if(!canvas)return;
-    const r=canvas.getBoundingClientRect(); if(r.width<2||r.height<2)return;
-    const dpr=window.devicePixelRatio||1;
-    const need=Math.abs(canvas.width-r.width*dpr)>3||Math.abs(canvas.height-r.height*dpr)>3;
-    if(!need)return;
-    try{
-      if(kind==='answer'){
-        if(typeof resizeAnswerCanvasV10==='function')resizeAnswerCanvasV10();
-        else if(typeof resizeAnswerCanvasV9==='function')resizeAnswerCanvasV9();
-      }else if(typeof resizeProblemInkCanvasV13==='function')resizeProblemInkCanvasV13();
-    }catch{}
-  };
-})();
-
-
-/* === v83: 문제 선택/열기 경량화 ===
-   원인:
-   - solve 필터 변경 때 input/change가 연속 발생하며 목록 전체를 두 번 이상 렌더
-   - 조건에 맞는 문제 카드를 전부 DOM으로 생성
-   - openCurrentProblem이 v2~v68 wrapper를 10개 넘게 연쇄 호출하며 수십 개 delayed resize/redraw 예약
-   조치:
-   - solve 목록은 50개씩만 렌더하고 더보기로 확장
-   - renderAll은 한 프레임에 1회만 실행
-   - currentProblem은 id Map 즉시 조회
-   - 문제 열기/페이지 변경은 최종 경량 경로 하나만 사용
-   - 기존 IndexedDB/Firebase/필기 데이터 형식은 그대로 유지
-*/
-(function essayFastProblemSelectV83(){
-  if(window.__essayFastProblemSelectV83)return;
-  window.__essayFastProblemSelectV83=true;
-
-  const byId=id=>document.getElementById(id);
-  const SOLVE_BATCH_V83=50;
-  let solveLimitV83=SOLVE_BATCH_V83;
-  let renderRafV83=0;
-  let problemMapV83=new Map();
-
-  function rebuildProblemMapV83(){
-    problemMapV83=new Map((state.problems||[]).map(p=>[String(p?.id||''),p]));
-  }
-  rebuildProblemMapV83();
-
-  const loadDataBeforeV83=loadData;
-  loadData=async function(){
-    const out=await loadDataBeforeV83.apply(this,arguments);
-    rebuildProblemMapV83();
-    return out;
-  };
-
-  currentProblem=function(){
-    const id=state.solve?.ids?.[Number(state.solve?.index||0)];
-    if(id===undefined||id===null)return null;
-    return problemMapV83.get(String(id)) || (state.problems||[]).find(p=>String(p?.id)===String(id)) || null;
-  };
-
-  // 이미 v7 이후 앱을 실행해 온 데이터는 매 부팅마다 base64 배열 전체 JSON.stringify 비교가 필요 없다.
-  // 구형 단일 이미지 필드만 남은 문제에 한해서 기존 정리 루틴을 실행한다.
-  const normalizeBeforeV83=typeof normalizeStoredProblems==='function'?normalizeStoredProblems:null;
-  if(normalizeBeforeV83){
-    normalizeStoredProblems=async function(){
-      const needs=(state.problems||[]).some(p=>
-        (!Array.isArray(p?.questionPages) && (p?.questionImage||p?.questionImageData||p?.problemImage||p?.problemImageData||p?.imageData||p?.image)) ||
-        (!Array.isArray(p?.explanationPages) && (p?.explanationImage||p?.explanationImageData||p?.modelImage||p?.modelImageData||p?.answerImageData))
-      );
-      if(!needs)return;
-      return normalizeBeforeV83.apply(this,arguments);
-    };
-  }
-
-  function renderSolveListV83(){
-    const list=byId('solveList');
-    if(!list)return;
-    const arr=filterProblems({
-      subject:byId('solveSubject')?.value||'',
-      session:byId('solveSession')?.value||'',
-      scope:typeof solveScopeV25==='function'?solveScopeV25():(byId('solveScope')?.value||'all')
-    });
-    list.innerHTML='';
-    const shown=arr.slice(0,solveLimitV83);
-    try{renderScopeSummaryV25?.(arr);}catch{}
-    const summary=byId('solveScopeSummaryV25');
-    if(summary)summary.textContent=`${typeof scopeLabelV25==='function'?scopeLabelV25():'문제'} · 표시 ${shown.length}/${arr.length}문제`;
-    if(!arr.length){
-      list.innerHTML='<p class="hint">조건에 맞는 문제가 없어.</p>';
-      return;
-    }
-    const frag=document.createDocumentFragment();
-    for(const problem of shown)frag.appendChild(problemCard(problem,{solve:true}));
-    list.appendChild(frag);
-    if(shown.length<arr.length){
-      const more=document.createElement('button');
-      more.type='button';
-      more.className='secondary';
-      more.textContent=`더 보기 (${shown.length}/${arr.length})`;
-      more.style.margin='10px auto';
-      more.style.display='block';
-      more.addEventListener('click',()=>{
-        solveLimitV83=Math.min(arr.length,solveLimitV83+SOLVE_BATCH_V83);
-        renderSolveListV83();
-      });
-      list.appendChild(more);
-    }
-  }
-  renderSolveList=renderSolveListV83;
-
-  // input + change가 연속 발생해도 한 프레임에 한 번만 화면 갱신.
-  renderAll=function(){
-    if(renderRafV83)return;
-    renderRafV83=requestAnimationFrame(()=>{
-      renderRafV83=0;
-      try{renderContinue();}catch{}
-      const active=document.querySelector('.view.active')?.id||'solveView';
-      if(active==='solveView')try{renderSolveListV83();}catch(err){console.warn('v83 solve render',err);}
-      else if(active==='listView')try{renderList();}catch(err){console.warn('v83 list render',err);}
-      else if(active==='reviewView')try{renderReview();}catch(err){console.warn('v83 review render',err);}
-      else if(active==='backupView')try{renderStats();}catch(err){console.warn('v83 stats render',err);}
-      else if(active==='addView')try{renderPageLists();}catch(err){console.warn('v83 page render',err);}
-    });
-  };
-
-  // 풀이 중에는 draft 전체 JSON을 만들어 존재 여부를 확인하지 않는다.
-  renderContinue=function(){
-    const btn=byId('continueBtn');
-    if(!btn)return;
-    let has=!!state.solve;
-    if(!has){
-      try{has=!!window.essayLargeStorageV79?.getDraftTextSync?.();}catch{}
-      if(!has){try{has=!!safeGetDraftV72();}catch{}}
-    }
-    btn.classList.toggle('hidden',!has);
-  };
-
-  document.addEventListener('input',e=>{
-    if(e.target?.matches?.('#solveSubject,#solveSession,#solveScope'))solveLimitV83=SOLVE_BATCH_V83;
-  },true);
-  document.addEventListener('change',e=>{
-    if(e.target?.matches?.('#solveSubject,#solveSession,#solveScope'))solveLimitV83=SOLVE_BATCH_V83;
-  },true);
-
-  function ensureAnswerStateV83(){
-    if(!state.solve)return;
-    if(!Array.isArray(state.solve.answerPages)||!state.solve.answerPages.length){
-      state.solve.answerPages=[{text:state.solve.answer||'',strokes:Array.isArray(state.solve.answerInkStrokes)?state.solve.answerInkStrokes:[]}];
-      state.solve.answerPageIndex=0;
-    }
-    const max=state.solve.answerPages.length-1;
-    state.solve.answerPageIndex=Math.max(0,Math.min(Number(state.solve.answerPageIndex)||0,max));
-    const page=state.solve.answerPages[state.solve.answerPageIndex]||{text:'',strokes:[]};
-    const text=byId('answerText'); if(text)text.value=page.text||'';
-    state.answerInkCurrentStroke=null;
-    state.answerInkStrokes=Array.isArray(page.strokes)?page.strokes:[];
-    state.solve.answerInkStrokes=state.answerInkStrokes;
-    try{renderAnswerPageBadgeV10?.();}catch{}
-
-    state.answerInputMode=state.solve.answerInputMode==='keyboard'?'keyboard':'handwriting';
-    const wrap=byId('handwritingWrap'), textarea=byId('answerText'), toggle=byId('keyboardToggleBtn');
-    wrap?.classList.toggle('hidden',state.answerInputMode==='keyboard');
-    textarea?.classList.toggle('hidden',state.answerInputMode!=='keyboard');
-    if(toggle)toggle.textContent=state.answerInputMode==='keyboard'?'손글씨 입력':'키보드 입력';
-  }
-
-  function prepareAnswerCanvasV83(){
-    requestAnimationFrame(()=>{
-      try{
-        if(typeof resizeAnswerCanvasV10==='function')resizeAnswerCanvasV10();
-        else if(typeof resizeAnswerCanvasV9==='function')resizeAnswerCanvasV9();
-      }catch{}
-      try{
-        if(typeof drawAnswerInkV10==='function')drawAnswerInkV10();
-        else if(typeof drawAnswerInkV9==='function')drawAnswerInkV9();
-      }catch{}
-    });
-  }
-
-  showQuestionPage=function(index){
-    const p=currentProblem();
-    const pages=realPages(p?.questionPages||[]);
-    state.qPage=Math.max(0,Math.min(Number(index)||0,Math.max(0,pages.length-1)));
-    const img=byId('questionImageView');
-    const scroller=byId('questionImageScroller');
-    let note=byId('emptyQuestionNote');
-    if(!note&&scroller){
-      note=document.createElement('div');
-      note.id='emptyQuestionNote';
-      note.className='empty-image-note hidden';
-      note.textContent='문제 이미지가 없습니다. 목록에서 이 문제를 수정해 이미지를 넣어주세요.';
-      scroller.appendChild(note);
-    }
-    if(!img)return;
-    if(!pages.length){
-      img.classList.add('hidden');
-      note?.classList.remove('hidden');
-      const badge=byId('questionPageBadge'); if(badge)badge.textContent='문제 이미지 없음';
-      return;
-    }
-    note?.classList.add('hidden');
-    img.classList.remove('hidden');
-    const src=pages[state.qPage]||'';
-    if(img.src!==src)img.src=src;
-    const badge=byId('questionPageBadge'); if(badge)badge.textContent=`문제 ${state.qPage+1}/${pages.length}쪽`;
-    if(img.complete&&img.naturalWidth){
-      requestAnimationFrame(()=>{try{fitImage();}catch{}});
-    }
-  };
-
-  openCurrentProblem=function(){
-    const p=currentProblem();
-    if(!p){finishSolve(false);return;}
-    const solve=byId('solveOverlay'),score=byId('scoreOverlay');
-    score?.classList.add('hidden');
-    solve?.classList.remove('hidden');
-    state.qPage=0;
-
-    const title=byId('solveTitle'); if(title)title.textContent=titleOf(p);
-    const meta=byId('solveMeta'); if(meta)meta.textContent=metaOf(p);
-    const badge=byId('setBadge'); if(badge)badge.textContent=`${Number(state.solve?.index||0)+1}/${state.solve?.ids?.length||1} · ${state.solve?.mode==='outline'?'목차연습':'실전답안'}`;
-    const label=byId('answerLabel'); if(label)label.textContent=state.solve?.mode==='outline'?'내 목차/쟁점':'내 답안';
-
-    ensureAnswerStateV83();
-    showQuestionPage(0);
-    prepareAnswerCanvasV83();
-    try{removeSolveBadgesV24?.();}catch{}
-
-    clearInterval(state.timer);
-    state.timer=setInterval(updateTimer,500);
-    try{updateTimer();}catch{}
-
-    // 화면을 먼저 연고 draft 저장은 뒤로 미룬다. 대용량 PNG는 넣지 않는다.
-    try{safeSetDraftV72({...state.solve,answerInkData:''});}catch{}
-  };
-
-  window.essayFastProblemSelectV83={renderSolveList:renderSolveListV83,rebuildProblemMap:rebuildProblemMapV83};
-})();
-
-
-/* === v84: 필기/이동/제출후 답안 확대 + 저장후끝내기 안정화 ===
-   - 문제 화면 finger pan/pinch는 pointer capture 한 경로만 사용(v82 touch 경로 차단)
-   - 제출 후 내 답안은 전용 stage에서 pan/pinch/버튼 zoom + S펜 수정필기
-   - 제출 직전/끝내기에서 PNG 인코딩 제거, 벡터 answerPages를 원본으로 사용
-   - 해설 필기 redraw는 v47 내부 rAF로 제한
-*/
-(function essayInteractionV84(){
-  if(window.__essayInteractionV84)return;
-  window.__essayInteractionV84=true;
-  window.__essayE84PointerOnly=true;
-  const byId=id=>document.getElementById(id);
-  const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
-  const isPen=e=>e?.pointerType==='pen'||((e?.pointerType==='mouse'||e?.pointerType==='')&&e.buttons===1);
-
-  /* ---------- 문제 화면: 손가락 이동/핀치 한 경로 ---------- */
-  const qTouches=new Map();
-  let qPan=null,qPinch=null,qScrollRaf=0,qNextScroll=null;
-  const qOpen=()=>{const s=byId('solveOverlay'),c=byId('scoreOverlay');return !!(state.solve&&s&&!s.classList.contains('hidden')&&(!c||c.classList.contains('hidden')))};
-  const qScroller=()=>byId('questionImageScroller');
-  function qTarget(t){const sc=qScroller();return !!(sc&&t&&(t===sc||sc.contains(t)));}
-  function qList(){return [...qTouches.values()];}
-  function qDist(){const p=qList();return p.length<2?1:Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y)||1;}
-  function qMid(){const p=qList();return p.length<2?{x:0,y:0}:{x:(p[0].x+p[1].x)/2,y:(p[0].y+p[1].y)/2};}
-  function qApplyScroll(left,top){qNextScroll={left,top};if(qScrollRaf)return;qScrollRaf=requestAnimationFrame(()=>{qScrollRaf=0;const sc=qScroller();if(sc&&qNextScroll){sc.scrollLeft=qNextScroll.left;sc.scrollTop=qNextScroll.top;}qNextScroll=null;});}
-  function qStartPinch(){const sc=qScroller();if(!sc||qTouches.size<2)return;const m=qMid(),r=sc.getBoundingClientRect(),z=Math.max(.001,Number(state.zoom||1));qPinch={dist:qDist(),zoom:z,cx:(sc.scrollLeft+m.x-r.left)/z,cy:(sc.scrollTop+m.y-r.top)/z,mx:m.x-r.left,my:m.y-r.top};qPan=null;}
-  document.addEventListener('pointerdown',e=>{
-    if(e.pointerType!=='touch'||!qOpen()||!qTarget(e.target))return;
-    e.preventDefault();e.stopPropagation();e.stopImmediatePropagation?.();
-    qTouches.set(e.pointerId,{x:e.clientX,y:e.clientY});
-    try{e.target?.setPointerCapture?.(e.pointerId);}catch{}
-    if(qTouches.size>=2)qStartPinch();
-    else{const sc=qScroller();qPan=sc?{id:e.pointerId,x:e.clientX,y:e.clientY,left:sc.scrollLeft,top:sc.scrollTop}:null;qPinch=null;}
-  },true);
-  document.addEventListener('pointermove',e=>{
-    if(e.pointerType!=='touch'||!qTouches.has(e.pointerId)||!qOpen())return;
-    e.preventDefault();e.stopPropagation();e.stopImmediatePropagation?.();
-    qTouches.set(e.pointerId,{x:e.clientX,y:e.clientY});
-    const sc=qScroller();if(!sc)return;
-    if(qTouches.size>=2){
-      if(!qPinch)qStartPinch();
-      const next=clamp(qPinch.zoom*(qDist()/Math.max(1,qPinch.dist)),.20,5);
-      state.zoom=next;
-      try{applyZoom();}catch{}
-      qApplyScroll(Math.max(0,qPinch.cx*next-qPinch.mx),Math.max(0,qPinch.cy*next-qPinch.my));
-    }else if(qPan&&qPan.id===e.pointerId){
-      qApplyScroll(qPan.left-(e.clientX-qPan.x),qPan.top-(e.clientY-qPan.y));
-    }
-  },true);
-  function qEnd(e){
-    if(e.pointerType!=='touch'||!qTouches.has(e.pointerId))return;
-    e.preventDefault();e.stopPropagation();e.stopImmediatePropagation?.();
-    qTouches.delete(e.pointerId);
-    if(qTouches.size>=2)qStartPinch();
-    else if(qTouches.size===1){const p=qList()[0],sc=qScroller();qPinch=null;qPan=sc?{id:[...qTouches.keys()][0],x:p.x,y:p.y,left:sc.scrollLeft,top:sc.scrollTop}:null;}
-    else{qPan=null;qPinch=null;try{window.essayEnsureInkCanvasSizeV82?.('problem');window.essaySolvePenBridgeV76?.fullDraw?.('problem');}catch{}}
-  }
-  document.addEventListener('pointerup',qEnd,true);document.addEventListener('pointercancel',qEnd,true);
-
-  /* ---------- 제출 후 내 답안: 전용 stage ---------- */
-  let aScale=1,aPanX=0,aPanY=0,aBaseW=1,aBaseH=1,aRaf=0;
-  let aPen=null;const aTouches=new Map();let aPan=null,aPinch=null;
-  function scoreVisible(){const o=byId('scoreOverlay');return !!(o&&!o.classList.contains('hidden')&&state.solve);}
-  function answerKey(){const p=typeof currentProblem==='function'?currentProblem():null;return `${p?.id||'unknown'}:answer:${Number(state.scoreAnswerPageIndex||0)}`;}
-  function editStore(){if(!state.scoreAnswerEdits||typeof state.scoreAnswerEdits!=='object'){try{state.scoreAnswerEdits=JSON.parse(localStorage.getItem('essayScoreAnswerEditsV11')||'{}')||{};}catch{state.scoreAnswerEdits={};}}return state.scoreAnswerEdits;}
-  function answerPages(){return Array.isArray(state.solve?.answerPages)&&state.solve.answerPages.length?state.solve.answerPages:[{text:state.solve?.answer||'',strokes:state.solve?.answerInkStrokes||[]}];}
-  function answerPage(){const pages=answerPages();state.scoreAnswerPageIndex=clamp(Number(state.scoreAnswerPageIndex||0),0,pages.length-1);return pages[state.scoreAnswerPageIndex]||pages[0];}
-  function ensureStage(){
-    const wrap=byId('scoreAnswerEditWrap');if(!wrap)return null;
-    let stage=byId('scoreAnswerStageV84');
-    if(!stage){stage=document.createElement('div');stage.id='scoreAnswerStageV84';stage.className='score-answer-stage-v84';const pre=byId('ownAnswerView'),img=byId('ownAnswerInkView'),canvas=byId('scoreAnswerCanvas');wrap.appendChild(stage);if(pre)stage.appendChild(pre);if(img)stage.appendChild(img);if(canvas)stage.appendChild(canvas);}
-    return {wrap,stage,pre:byId('ownAnswerView'),img:byId('ownAnswerInkView'),canvas:byId('scoreAnswerCanvas')};
-  }
-  function sizeAnswerStage(){
-    const x=ensureStage();if(!x)return null;const {wrap,stage,pre,img,canvas}=x;const page=answerPage();
-    aBaseW=Math.max(240,Math.floor(wrap.clientWidth||wrap.getBoundingClientRect().width||600));
-    const aspect=Number(page.canvasAspectV66||0);
-    aBaseH=aspect>0?Math.max(260,Math.round(aBaseW/aspect)):Math.max(320,Math.round((wrap.clientHeight||360)*1.25));
-    const text=String(page.text||'');if(pre){pre.textContent=text;pre.classList.toggle('hidden',!text.trim());pre.style.width=aBaseW+'px';pre.style.minHeight=aBaseH+'px';}
-    if(img)img.classList.add('hidden');
-    stage.style.width=aBaseW+'px';stage.style.height=aBaseH+'px';
-    if(canvas){const dpr=Math.min(1.5,window.devicePixelRatio||1);const bw=Math.max(1,Math.round(aBaseW*dpr)),bh=Math.max(1,Math.round(aBaseH*dpr));if(canvas.width!==bw||canvas.height!==bh){canvas.width=bw;canvas.height=bh;}canvas.style.width=aBaseW+'px';canvas.style.height=aBaseH+'px';canvas.style.pointerEvents='none';}
-    return x;
-  }
-  function drawStroke(ctx,w,h,s,color){if(!s?.points?.length)return;ctx.save();ctx.globalCompositeOperation=s.tool==='eraser'?'destination-out':'source-over';ctx.strokeStyle=s.tool==='eraser'?'#000':color;ctx.lineWidth=Math.max(1,Number(s.size||3));ctx.lineCap='round';ctx.lineJoin='round';ctx.beginPath();s.points.forEach((p,i)=>{const px=(p.x??p[0]??0)*w,py=(p.y??p[1]??0)*h;i?ctx.lineTo(px,py):ctx.moveTo(px,py)});if(s.points.length===1){const p=s.points[0],px=(p.x??p[0]??0)*w,py=(p.y??p[1]??0)*h;ctx.lineTo(px+.1,py+.1)}ctx.stroke();ctx.restore();}
-  function redrawAnswer(){aRaf=0;const x=sizeAnswerStage();if(!x?.canvas)return;const c=x.canvas,ctx=c.getContext('2d'),sx=c.width/aBaseW,sy=c.height/aBaseH;ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,c.width,c.height);ctx.setTransform(sx,0,0,sy,0,0);for(const st of (answerPage().strokes||[]))drawStroke(ctx,aBaseW,aBaseH,st,'#111827');for(const st of (editStore()[answerKey()]||[]))drawStroke(ctx,aBaseW,aBaseH,st,'#ef4444');}
-  function scheduleAnswerDraw(){if(!aRaf)aRaf=requestAnimationFrame(redrawAnswer);}
-  function clampAnswerPan(){const x=ensureStage();if(!x)return;const vw=x.wrap.clientWidth||1,vh=x.wrap.clientHeight||1,sw=aBaseW*aScale,sh=aBaseH*aScale;aPanX=clamp(aPanX,Math.min(0,vw-sw),0);aPanY=clamp(aPanY,Math.min(0,vh-sh),0);}
-  function applyAnswerTransform(){const x=ensureStage();if(!x)return;clampAnswerPan();x.stage.style.transform=`translate3d(${aPanX}px,${aPanY}px,0) scale(${aScale})`;const label=byId('scoreAnswerZoomLabelV84');if(label)label.textContent=Math.round(aScale*100)+'%';}
-  function setAnswerZoom(next,focusX=null,focusY=null){const x=ensureStage();if(!x)return;const old=aScale,nextScale=clamp(next,.5,4);const fx=focusX??(x.wrap.clientWidth/2),fy=focusY??(x.wrap.clientHeight/2);const cx=(fx-aPanX)/Math.max(.001,old),cy=(fy-aPanY)/Math.max(.001,old);aScale=nextScale;aPanX=fx-cx*aScale;aPanY=fy-cy*aScale;applyAnswerTransform();}
-  function fitAnswer(){aScale=1;aPanX=0;aPanY=0;sizeAnswerStage();applyAnswerTransform();scheduleAnswerDraw();}
-  function aPoint(e){const st=byId('scoreAnswerStageV84');if(!st)return null;const r=st.getBoundingClientRect();return {x:clamp((e.clientX-r.left)/Math.max(1,r.width),0,1),y:clamp((e.clientY-r.top)/Math.max(1,r.height),0,1)};}
-  function eraseNear(pt){const arr=editStore()[answerKey()]||[],rx=.025/Math.max(.5,aScale),ry=.025/Math.max(.5,aScale);let changed=false;for(let i=arr.length-1;i>=0;i--){if((arr[i]?.points||[]).some(p=>Math.abs((p.x??p[0])-pt.x)<rx&&Math.abs((p.y??p[1])-pt.y)<ry)){arr.splice(i,1);changed=true;}}if(changed)scheduleAnswerDraw();}
-  function saveEdits(){try{localStorage.setItem('essayScoreAnswerEditsV11',JSON.stringify(editStore()));}catch{}try{scheduleFirebaseSyncV36?.('local')}catch{}}
-  function aTouchList(){return [...aTouches.values()];}
-  function aDist(){const p=aTouchList();return p.length<2?1:Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y)||1;}
-  function aMid(){const p=aTouchList();return p.length<2?{x:0,y:0}:{x:(p[0].x+p[1].x)/2,y:(p[0].y+p[1].y)/2};}
-  function bindAnswerGestures(){const x=ensureStage();if(!x||x.wrap.dataset.v84Bound)return;x.wrap.dataset.v84Bound='1';x.wrap.addEventListener('pointerdown',e=>{
-      if(!scoreVisible())return;
-      if(isPen(e)){
-        e.preventDefault();e.stopPropagation();e.stopImmediatePropagation?.();const pt=aPoint(e);if(!pt)return;const tool=state.scoreAnswerEditTool==='eraser'?'eraser':'pen';if(tool==='eraser'){eraseNear(pt);aPen={id:e.pointerId,eraser:true};}else{const stroke={tool:'pen',size:Number(state.scoreAnswerSize||byId('scoreAnswerSizeInput')?.value||4),points:[pt]};const k=answerKey();if(!Array.isArray(editStore()[k]))editStore()[k]=[];editStore()[k].push(stroke);aPen={id:e.pointerId,stroke};scheduleAnswerDraw();}try{x.wrap.setPointerCapture(e.pointerId)}catch{}return;
-      }
-      if(e.pointerType!=='touch')return;e.preventDefault();e.stopPropagation();e.stopImmediatePropagation?.();aTouches.set(e.pointerId,{x:e.clientX,y:e.clientY});try{x.wrap.setPointerCapture(e.pointerId)}catch{}if(aTouches.size>=2){const m=aMid(),r=x.wrap.getBoundingClientRect();aPinch={dist:aDist(),scale:aScale,panX:aPanX,panY:aPanY,fx:m.x-r.left,fy:m.y-r.top,cx:(m.x-r.left-aPanX)/aScale,cy:(m.y-r.top-aPanY)/aScale};aPan=null;}else aPan={id:e.pointerId,x:e.clientX,y:e.clientY,panX:aPanX,panY:aPanY};
+  function qApply(){if(!qZoomRaf)qZoomRaf=requestAnimationFrame(qApplyCss);}
+  function qCommit(delay=70){clearTimeout(qCommitTimer);qCommitTimer=setTimeout(()=>{const c=qCanvas(),img=qImg();if(!c||!img?.naturalWidth)return;try{if(typeof resizeInkCanvasV10==="function")resizeInkCanvasV10();else if(typeof resizeInkCanvasV9==="function")resizeInkCanvasV9();}catch{}try{if(typeof drawInkV10==="function")drawInkV10();else if(typeof drawInkV9==="function")drawInkV9();}catch{}},delay);}
+  function qFit(){const img=qImg(),sc=qScroller();if(!img||!sc)return;const run=()=>{if(!img.naturalWidth||!sc.clientWidth)return;state.zoom=clamp((sc.clientWidth-12)/img.naturalWidth,.05,1);qApplyCss();sc.scrollLeft=0;sc.scrollTop=0;qCommit(0)};if(img.complete&&img.naturalWidth)run();else img.addEventListener("load",run,{once:true});}
+  function qDistance(){const p=[...qTouches.values()];return p.length<2?1:Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y)||1;}
+  function qMid(){const p=[...qTouches.values()];return p.length<2?{x:0,y:0}:{x:(p[0].x+p[1].x)/2,y:(p[0].y+p[1].y)/2};}
+  function bindQuestionTouch(canvas){
+    if(!canvas)return;canvas.style.touchAction="none";qTouches.clear();qPan=null;qPinch=null;
+    canvas.addEventListener("pointerdown",e=>{
+      if(e.pointerType!=="touch")return;e.preventDefault();e.stopPropagation();try{canvas.setPointerCapture(e.pointerId)}catch{};qTouches.set(e.pointerId,{x:e.clientX,y:e.clientY});const sc=qScroller();if(!sc)return;
+      if(qTouches.size>=2){const m=qMid(),r=sc.getBoundingClientRect();qPinch={dist:qDistance(),zoom:Number(state.zoom||1),cx:(sc.scrollLeft+(m.x-r.left))/Math.max(.001,Number(state.zoom||1)),cy:(sc.scrollTop+(m.y-r.top))/Math.max(.001,Number(state.zoom||1)),mx:m.x-r.left,my:m.y-r.top};qPan=null;}
+      else qPan={id:e.pointerId,x:e.clientX,y:e.clientY,left:sc.scrollLeft,top:sc.scrollTop};
     },true);
-    x.wrap.addEventListener('pointermove',e=>{
-      if(aPen&&e.pointerId===aPen.id&&isPen(e)){e.preventDefault();e.stopPropagation();e.stopImmediatePropagation?.();const events=e.getCoalescedEvents?.()||[e];for(const ev of events){const pt=aPoint(ev);if(!pt)continue;if(aPen.eraser)eraseNear(pt);else aPen.stroke.points.push(pt);}if(!aPen.eraser)scheduleAnswerDraw();return;}
-      if(e.pointerType!=='touch'||!aTouches.has(e.pointerId))return;e.preventDefault();e.stopPropagation();e.stopImmediatePropagation?.();aTouches.set(e.pointerId,{x:e.clientX,y:e.clientY});
-      if(aTouches.size>=2){if(!aPinch)return;const m=aMid(),r=x.wrap.getBoundingClientRect();aScale=clamp(aPinch.scale*(aDist()/Math.max(1,aPinch.dist)),.5,4);const fx=m.x-r.left,fy=m.y-r.top;aPanX=fx-aPinch.cx*aScale;aPanY=fy-aPinch.cy*aScale;applyAnswerTransform();}
-      else if(aPan&&aPan.id===e.pointerId){aPanX=aPan.panX+(e.clientX-aPan.x);aPanY=aPan.panY+(e.clientY-aPan.y);applyAnswerTransform();}
+    canvas.addEventListener("pointermove",e=>{
+      if(e.pointerType!=="touch"||!qTouches.has(e.pointerId))return;e.preventDefault();e.stopPropagation();qTouches.set(e.pointerId,{x:e.clientX,y:e.clientY});const sc=qScroller();if(!sc)return;
+      if(qTouches.size>=2){if(!qPinch)return;const m=qMid(),r=sc.getBoundingClientRect();state.zoom=clamp(qPinch.zoom*(qDistance()/Math.max(1,qPinch.dist)),.05,5);qApply();const z=Number(state.zoom||1);sc.scrollLeft=Math.max(0,qPinch.cx*z-(m.x-r.left));sc.scrollTop=Math.max(0,qPinch.cy*z-(m.y-r.top));}
+      else if(qPan&&qPan.id===e.pointerId){sc.scrollLeft=qPan.left-(e.clientX-qPan.x);sc.scrollTop=qPan.top-(e.clientY-qPan.y);}
     },true);
-    const end=e=>{if(aPen&&e.pointerId===aPen.id){e.preventDefault();aPen=null;saveEdits();scheduleAnswerDraw();return;}if(e.pointerType!=='touch'||!aTouches.has(e.pointerId))return;e.preventDefault();aTouches.delete(e.pointerId);if(aTouches.size===1){const id=[...aTouches.keys()][0],p=aTouchList()[0];aPan={id,x:p.x,y:p.y,panX:aPanX,panY:aPanY};aPinch=null;}else if(!aTouches.size){aPan=null;aPinch=null;}};x.wrap.addEventListener('pointerup',end,true);x.wrap.addEventListener('pointercancel',end,true);
+    const end=e=>{if(e.pointerType!=="touch"||!qTouches.has(e.pointerId))return;e.preventDefault();e.stopPropagation();qTouches.delete(e.pointerId);const sc=qScroller();if(qTouches.size===1&&sc){const [id,p]=[...qTouches.entries()][0];qPan={id,x:p.x,y:p.y,left:sc.scrollLeft,top:sc.scrollTop};qPinch=null;}else if(!qTouches.size){qPan=null;qPinch=null;qCommit(0);}};
+    canvas.addEventListener("pointerup",end,true);canvas.addEventListener("pointercancel",end,true);canvas.addEventListener("lostpointercapture",end,true);
   }
-  function renderScoreAnswer(index=0){const pages=answerPages();state.scoreAnswerPageIndex=clamp(Number(index)||0,0,pages.length-1);const badge=byId('scoreAnswerPageBadge');if(badge)badge.textContent=`답안 ${state.scoreAnswerPageIndex+1}/${pages.length}쪽`;sizeAnswerStage();bindAnswerGestures();fitAnswer();}
-  window.essayRenderScoreAnswerV84=renderScoreAnswer;
+  function freshQuestionSurface(){
+    const oldImg=qImg();if(oldImg){const img=oldImg.cloneNode(false);oldImg.replaceWith(img);}
+    const oldCanvas=qCanvas();if(oldCanvas){const canvas=oldCanvas.cloneNode(false);oldCanvas.replaceWith(canvas);bindQuestionTouch(canvas);}
+    const pen=byId("penToolBtn"),eraser=byId("eraserToolBtn"),clear=byId("clearInkBtn"),size=byId("inkSizeInput");
+    if(pen)pen.onclick=()=>{state.inkTool="pen";try{setInkTool?.("pen")}catch{}};if(eraser)eraser.onclick=()=>{state.inkTool="eraser";try{setInkTool?.("eraser")}catch{}};
+    if(size)size.oninput=e=>{state.inkSize=Number(e.target.value||3)};
+    if(clear)clear.onclick=()=>{let key="";try{key=typeof currentProblemInkKeyV13==="function"?currentProblemInkKeyV13():problemInkKeyV10()}catch{};if(!key||!confirm("현재 문제의 현재 쪽 필기를 지울까?"))return;if(!state.inkData)state.inkData={};state.inkData[key]=[];window.essayPerfStoreV85?.saveCurrent?.();try{drawInkV10?.()}catch{}};
+  }
+  function ensureAnswerState(){
+    if(!state.solve)return;try{ensureAnswerPagesV10?.()}catch{};if(!Array.isArray(state.solve.answerPages)||!state.solve.answerPages.length)state.solve.answerPages=[{text:state.solve.answer||"",strokes:Array.isArray(state.solve.answerInkStrokes)?state.solve.answerInkStrokes:[]}];
+    state.solve.answerPageIndex=clamp(Number(state.solve.answerPageIndex)||0,0,state.solve.answerPages.length-1);const page=state.solve.answerPages[state.solve.answerPageIndex]||{};const txt=byId("answerText");if(txt)txt.value=page.text||"";state.answerInkStrokes=Array.isArray(page.strokes)?page.strokes:[];state.answerInkCurrentStroke=null;state.solve.answerInkStrokes=state.answerInkStrokes;
+    state.answerInputMode=state.solve.answerInputMode==="keyboard"?"keyboard":"handwriting";byId("handwritingWrap")?.classList.toggle("hidden",state.answerInputMode==="keyboard");txt?.classList.toggle("hidden",state.answerInputMode!=="keyboard");const toggle=byId("keyboardToggleBtn");if(toggle)toggle.textContent=state.answerInputMode==="keyboard"?"손글씨 입력":"키보드 입력";try{renderAnswerPageBadgeV10?.()}catch{}
+    requestAnimationFrame(()=>{try{resizeAnswerCanvasV10?.();drawAnswerInkV10?.()}catch{}});
+  }
+  function showQuestionV85(index){
+    const p=currentProblem(),pages=realPages(p?.questionPages||[]);state.qPage=clamp(Number(index)||0,0,Math.max(0,pages.length-1));freshQuestionSurface();const img=qImg(),badge=byId("questionPageBadge");if(!img)return;
+    if(!pages.length){img.removeAttribute("src");img.classList.add("hidden");if(badge)badge.textContent="문제 없음";return;}img.classList.remove("hidden");if(badge)badge.textContent=`문제 ${state.qPage+1}/${pages.length}쪽`;img.onload=()=>qFit();img.src=pages[state.qPage]||"";if(img.complete&&img.naturalWidth)qFit();
+  }
+  function openProblemV85(){
+    const p=currentProblem();if(!p){try{finishSolve(false)}catch{};return;}byId("scoreOverlay")?.classList.add("hidden");byId("solveOverlay")?.classList.remove("hidden");state.qPage=0;const title=byId("solveTitle"),meta=byId("solveMeta"),badge=byId("setBadge"),label=byId("answerLabel");if(title)title.textContent=titleOf(p);if(meta)meta.textContent=metaOf(p);if(badge)badge.textContent=`${Number(state.solve?.index||0)+1}/${state.solve?.ids?.length||1} · ${state.solve?.mode==="outline"?"목차연습":"실전답안"}`;if(label)label.textContent=state.solve?.mode==="outline"?"내 목차/쟁점":"내 답안";
+    ensureAnswerState();showQuestionV85(0);clearInterval(state.timer);state.timer=setInterval(updateTimer,500);try{updateTimer()}catch{};try{safeSetDraftV72({...state.solve,answerInkData:""})}catch{}
+  }
+  showQuestionPage=showQuestionV85;openCurrentProblem=openProblemV85;applyZoom=function(){qApply();qCommit(90)};fitImage=qFit;
+  const safeQuestionRefreshV85=()=>qCommit(0);
+  try{resetProblemInkLayerV13=safeQuestionRefreshV85}catch{};try{resetProblemInkLayerV12=safeQuestionRefreshV85}catch{};try{resetProblemInkLayerV10=safeQuestionRefreshV85}catch{};try{resetProblemInkLayerV9=safeQuestionRefreshV85}catch{};
+  document.addEventListener("click",e=>{const b=e.target?.closest?.("#fitBtn,#zoomInBtn,#zoomOutBtn");if(!b)return;e.preventDefault();e.stopPropagation();e.stopImmediatePropagation?.();if(b.id==="fitBtn")qFit();else{state.zoom=clamp(Number(state.zoom||1)+(b.id==="zoomInBtn"?.15:-.15),.05,5);qApply();qCommit(90)}},true);
 
-  // Final lightweight submit/score open bypasses old openScore wrapper chain.
-  openScore=function(){const p=typeof currentProblem==='function'?currentProblem():null;if(!p||!state.solve)return;state.expPage=0;const o=byId('scoreOverlay');o?.classList.remove('hidden');o?.classList.add('v58-one-screen');byId('solveOverlay')?.classList.add('hidden');const meta=byId('scoreMeta');if(meta)meta.textContent=`${titleOf(p)} · 풀이시간 ${fmtTime(state.solve.elapsedBase)}`;const score=byId('attemptScoreInput');if(score){score.value='';score.max=p.maxScore||'';}if(byId('completionInput'))byId('completionInput').value=state.solve.mode==='outline'?'목차만':'완성';if(byId('needReviewInput'))byId('needReviewInput').value='true';try{renderChecklist(p)}catch{};renderScoreAnswer(0);requestAnimationFrame(()=>{try{showExplanationPage(0)}catch(err){console.warn('v84 explanation open',err)}});};
-  submitAnswer=function(){if(!state.solve)return;try{saveCurrentAnswerPageV10?.()}catch{}state.solve.elapsedBase=elapsedNow();state.solve.answer=state.solve.answerPages?.map((p,i)=>`[${i+1}쪽]\n${p?.text||''}`).join('\n\n')||byId('answerText')?.value||'';state.solve.answerInkData='';clearInterval(state.timer);state.timer=null;openScore();};
-
-  const prev=byId('prevScoreAnswerPageBtn'),next=byId('nextScoreAnswerPageBtn');if(prev)prev.onclick=()=>renderScoreAnswer((state.scoreAnswerPageIndex||0)-1);if(next)next.onclick=()=>renderScoreAnswer((state.scoreAnswerPageIndex||0)+1);
-  const pen=byId('scoreAnswerPenBtn'),eraser=byId('scoreAnswerEraserBtn');if(pen)pen.onclick=()=>{state.scoreAnswerEditTool='pen';pen.classList.add('ink-active');eraser?.classList.remove('ink-active')};if(eraser)eraser.onclick=()=>{state.scoreAnswerEditTool='eraser';eraser.classList.add('ink-active');pen?.classList.remove('ink-active')};
-  const clear=byId('clearScoreAnswerInkBtn');if(clear)clear.onclick=()=>{if(!confirm('현재 답안 수정필기를 지울까?'))return;delete editStore()[answerKey()];saveEdits();scheduleAnswerDraw();};
-  byId('scoreAnswerZoomOutV84')?.addEventListener('click',()=>setAnswerZoom(aScale-.2));byId('scoreAnswerZoomInV84')?.addEventListener('click',()=>setAnswerZoom(aScale+.2));byId('scoreAnswerFitV84')?.addEventListener('click',fitAnswer);
-  window.addEventListener('resize',()=>{if(scoreVisible())requestAnimationFrame(()=>{sizeAnswerStage();applyAnswerTransform();scheduleAnswerDraw();})});
+  /* ---------- submitted answer: one clean correction/pan/pinch controller ---------- */
+  let aScale=1,aPanX=0,aPanY=0,aTouches=new Map(),aPan=null,aPinch=null,aPen=null,aDrawRaf=0,aBaseW=1,aBaseH=1;
+  function scoreVisible(){const o=byId("scoreOverlay");return !!(o&&!o.classList.contains("hidden"));}
+  function answerPages(){if(Array.isArray(state.solve?.answerPages)&&state.solve.answerPages.length)return state.solve.answerPages;return[{text:state.solve?.answer||"",strokes:Array.isArray(state.solve?.answerInkStrokes)?state.solve.answerInkStrokes:[]}];}
+  function answerPage(){const pages=answerPages();state.scoreAnswerPageIndex=clamp(Number(state.scoreAnswerPageIndex)||0,0,pages.length-1);return pages[state.scoreAnswerPageIndex]||{};}
+  function editStore(){if(!state.scoreAnswerEdits||typeof state.scoreAnswerEdits!=="object"){try{state.scoreAnswerEdits=JSON.parse(localStorage.getItem("essayScoreAnswerEditsV11")||"{}")||{}}catch{state.scoreAnswerEdits={}}}return state.scoreAnswerEdits;}
+  function answerKey(){const p=currentProblem();return `${p?.id||"unknown"}:answer:${state.scoreAnswerPageIndex||0}`;}
+  function saveEdits(){try{localStorage.setItem("essayScoreAnswerEditsV11",JSON.stringify(editStore()))}catch{}try{scheduleFirebaseSyncV36?.("local")}catch{}}
+  function freshAnswerWrap(){const old=byId("scoreAnswerEditWrap");if(!old)return null;const fresh=old.cloneNode(true);old.replaceWith(fresh);fresh.classList.add("score-answer-wrap-v85");let pre=fresh.querySelector("#ownAnswerView"),img=fresh.querySelector("#ownAnswerInkView"),canvas=fresh.querySelector("#scoreAnswerCanvas");const oldStage=fresh.querySelector("#scoreAnswerStageV85");if(oldStage){if(pre)fresh.appendChild(pre);if(img)fresh.appendChild(img);if(canvas)fresh.appendChild(canvas);oldStage.remove();}fresh.querySelector("#scoreAnswerBaseCanvasV85")?.remove();const stage=document.createElement("div");stage.id="scoreAnswerStageV85";stage.className="score-answer-stage-v85";const base=document.createElement("canvas");base.id="scoreAnswerBaseCanvasV85";base.className="score-answer-base-canvas-v85";fresh.appendChild(stage);if(pre)stage.appendChild(pre);if(img){img.classList.add("hidden");stage.appendChild(img)}stage.appendChild(base);if(canvas){canvas.style.pointerEvents="none";stage.appendChild(canvas)}return{wrap:fresh,stage,pre,img,base,canvas};}
+  function stageEls(){const wrap=byId("scoreAnswerEditWrap"),stage=byId("scoreAnswerStageV85"),pre=byId("ownAnswerView"),img=byId("ownAnswerInkView"),base=byId("scoreAnswerBaseCanvasV85"),canvas=byId("scoreAnswerCanvas");return wrap&&stage&&base&&canvas?{wrap,stage,pre,img,base,canvas}:freshAnswerWrap();}
+  function sizeAnswer(){const x=stageEls();if(!x)return null;const page=answerPage();aBaseW=Math.max(280,Math.floor(x.wrap.clientWidth||x.wrap.getBoundingClientRect().width||600));const aspect=Number(page.canvasAspectV66||0);const hasText=String(page.text||"").trim().length>0;if(x.pre){x.pre.textContent=hasText?page.text:"";x.pre.classList.toggle("hidden",!hasText);x.pre.style.width=aBaseW+"px";x.pre.style.minHeight="0";x.pre.style.height="auto";x.pre.style.margin="0";x.pre.style.padding="18px";x.pre.style.boxSizing="border-box";x.pre.style.whiteSpace="pre-wrap";}
+    let textH=0;if(hasText&&x.pre)textH=Math.ceil(x.pre.scrollHeight||0);let handH=aspect>0?Math.round(aBaseW/aspect):Math.round(aBaseW*4/3);aBaseH=Math.max(300,textH,Array.isArray(page.strokes)&&page.strokes.length?handH:0);x.stage.style.width=aBaseW+"px";x.stage.style.height=aBaseH+"px";if(x.pre){x.pre.style.height=aBaseH+"px";x.pre.style.background="#fff";}const dpr=Math.min(1.5,window.devicePixelRatio||1);for(const c of [x.base,x.canvas]){c.width=Math.max(1,Math.round(aBaseW*dpr));c.height=Math.max(1,Math.round(aBaseH*dpr));c.style.width=aBaseW+"px";c.style.height=aBaseH+"px";}return x;}
+  function strokePoint(p){return{x:Number(p?.x??p?.[0]??0),y:Number(p?.y??p?.[1]??0)};}
+  function drawStroke(ctx,w,h,s,color){const pts=s?.points||s?.p||[];if(!pts.length)return;ctx.save();ctx.globalCompositeOperation=s.tool==="eraser"||s.t==="eraser"?"destination-out":"source-over";ctx.strokeStyle=color;ctx.lineWidth=Math.max(1,Number(s.size||4));ctx.lineCap="round";ctx.lineJoin="round";ctx.beginPath();pts.forEach((raw,i)=>{const p=strokePoint(raw),px=p.x*w,py=p.y*h;i?ctx.lineTo(px,py):ctx.moveTo(px,py)});if(pts.length===1){const p=strokePoint(pts[0]);ctx.lineTo(p.x*w+.1,p.y*h+.1)}ctx.stroke();ctx.restore();}
+  function drawAnswerBase(){const x=stageEls();if(!x||aBaseW<2||aBaseH<2)return;const ctx=x.base.getContext("2d"),dpr=x.base.width/aBaseW;ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,x.base.width,x.base.height);ctx.setTransform(dpr,0,0,dpr,0,0);const page=answerPage(),hasText=String(page.text||"").trim().length>0;if(!hasText){ctx.strokeStyle="#eef2f7";ctx.lineWidth=1;for(let y=28;y<aBaseH;y+=32){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(aBaseW,y);ctx.stroke()}}for(const st of (page.strokes||[]))drawStroke(ctx,aBaseW,aBaseH,st,"#111827");}
+  function drawAnswerNow(){aDrawRaf=0;let x=stageEls();if(!x)return;if(aBaseW<2||aBaseH<2||x.canvas.width<2){x=sizeAnswer();if(!x)return;drawAnswerBase();}const ctx=x.canvas.getContext("2d"),dpr=x.canvas.width/aBaseW;ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,x.canvas.width,x.canvas.height);ctx.setTransform(dpr,0,0,dpr,0,0);for(const st of (editStore()[answerKey()]||[]))drawStroke(ctx,aBaseW,aBaseH,st,"#ef4444");}
+  function scheduleAnswerDraw(){if(!aDrawRaf)aDrawRaf=requestAnimationFrame(drawAnswerNow);}
+  function clampAPan(){const x=stageEls();if(!x)return;const vw=x.wrap.clientWidth||1,vh=x.wrap.clientHeight||1,sw=aBaseW*aScale,sh=aBaseH*aScale;aPanX=clamp(aPanX,Math.min(0,vw-sw),0);aPanY=clamp(aPanY,Math.min(0,vh-sh),0);}
+  function applyATransform(){const x=stageEls();if(!x)return;clampAPan();x.stage.style.transform=`translate3d(${aPanX}px,${aPanY}px,0) scale(${aScale})`;const l=byId("scoreAnswerZoomLabelV85");if(l)l.textContent=Math.round(aScale*100)+"%";}
+  function setAZoom(next,fx=null,fy=null){const x=stageEls();if(!x)return;const old=aScale,n=clamp(next,.5,4),px=fx??x.wrap.clientWidth/2,py=fy??x.wrap.clientHeight/2,cx=(px-aPanX)/Math.max(.001,old),cy=(py-aPanY)/Math.max(.001,old);aScale=n;aPanX=px-cx*n;aPanY=py-cy*n;applyATransform();}
+  function fitA(){aScale=1;aPanX=0;aPanY=0;sizeAnswer();drawAnswerBase();applyATransform();scheduleAnswerDraw();}
+  function aPoint(e){const st=byId("scoreAnswerStageV85");if(!st)return null;const r=st.getBoundingClientRect();return{x:clamp((e.clientX-r.left)/Math.max(1,r.width),0,1),y:clamp((e.clientY-r.top)/Math.max(1,r.height),0,1)};}
+  function eraseEdit(pt){const arr=editStore()[answerKey()]||[],rad=.03/Math.max(.5,aScale);let changed=false;for(let i=arr.length-1;i>=0;i--){const pts=arr[i]?.points||[];if(pts.some(raw=>{const p=strokePoint(raw);return Math.hypot(p.x-pt.x,p.y-pt.y)<=rad})){arr.splice(i,1);changed=true}}if(changed)scheduleAnswerDraw();}
+  function aDist(){const p=[...aTouches.values()];return p.length<2?1:Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y)||1;}
+  function aMid(){const p=[...aTouches.values()];return p.length<2?{x:0,y:0}:{x:(p[0].x+p[1].x)/2,y:(p[0].y+p[1].y)/2};}
+  function bindAnswerInput(){const x=stageEls();if(!x)return;x.wrap.style.touchAction="none";aTouches.clear();aPan=null;aPinch=null;aPen=null;
+    x.wrap.addEventListener("pointerdown",e=>{if(!scoreVisible())return;if(isPen(e)){e.preventDefault();e.stopPropagation();e.stopImmediatePropagation?.();const pt=aPoint(e);if(!pt)return;try{x.wrap.setPointerCapture(e.pointerId)}catch{};const tool=state.scoreAnswerEditTool==="eraser"?"eraser":"pen";if(tool==="eraser"){eraseEdit(pt);aPen={id:e.pointerId,eraser:true}}else{const st={tool:"pen",size:Number(state.scoreAnswerSize||byId("scoreAnswerSizeInput")?.value||4),points:[pt]},k=answerKey();if(!Array.isArray(editStore()[k]))editStore()[k]=[];editStore()[k].push(st);aPen={id:e.pointerId,stroke:st};scheduleAnswerDraw()}return;}if(e.pointerType!=="touch")return;e.preventDefault();e.stopPropagation();e.stopImmediatePropagation?.();try{x.wrap.setPointerCapture(e.pointerId)}catch{};aTouches.set(e.pointerId,{x:e.clientX,y:e.clientY});if(aTouches.size>=2){const m=aMid(),r=x.wrap.getBoundingClientRect();aPinch={dist:aDist(),scale:aScale,cx:(m.x-r.left-aPanX)/aScale,cy:(m.y-r.top-aPanY)/aScale};aPan=null}else aPan={id:e.pointerId,x:e.clientX,y:e.clientY,panX:aPanX,panY:aPanY};},true);
+    x.wrap.addEventListener("pointermove",e=>{if(aPen&&e.pointerId===aPen.id&&isPen(e)){e.preventDefault();e.stopPropagation();e.stopImmediatePropagation?.();const evs=e.getCoalescedEvents?.()||[e];for(const ev of evs){const pt=aPoint(ev);if(!pt)continue;if(aPen.eraser)eraseEdit(pt);else aPen.stroke.points.push(pt)}if(!aPen.eraser)scheduleAnswerDraw();return;}if(e.pointerType!=="touch"||!aTouches.has(e.pointerId))return;e.preventDefault();e.stopPropagation();e.stopImmediatePropagation?.();aTouches.set(e.pointerId,{x:e.clientX,y:e.clientY});if(aTouches.size>=2&&aPinch){const m=aMid(),r=x.wrap.getBoundingClientRect();aScale=clamp(aPinch.scale*(aDist()/Math.max(1,aPinch.dist)),.5,4);aPanX=m.x-r.left-aPinch.cx*aScale;aPanY=m.y-r.top-aPinch.cy*aScale;applyATransform()}else if(aPan&&aPan.id===e.pointerId){aPanX=aPan.panX+(e.clientX-aPan.x);aPanY=aPan.panY+(e.clientY-aPan.y);applyATransform()}},true);
+    const end=e=>{if(aPen&&e.pointerId===aPen.id){e.preventDefault();e.stopPropagation();aPen=null;saveEdits();scheduleAnswerDraw();return}if(e.pointerType!=="touch"||!aTouches.has(e.pointerId))return;e.preventDefault();e.stopPropagation();aTouches.delete(e.pointerId);if(aTouches.size===1){const [id,p]=[...aTouches.entries()][0];aPan={id,x:p.x,y:p.y,panX:aPanX,panY:aPanY};aPinch=null}else if(!aTouches.size){aPan=null;aPinch=null}};x.wrap.addEventListener("pointerup",end,true);x.wrap.addEventListener("pointercancel",end,true);x.wrap.addEventListener("lostpointercapture",end,true);
+  }
+  function renderScoreAnswerV85(index=0){state.scoreAnswerPageIndex=clamp(Number(index)||0,0,answerPages().length-1);const badge=byId("scoreAnswerPageBadge");if(badge)badge.textContent=`답안 ${state.scoreAnswerPageIndex+1}/${answerPages().length}쪽`;freshAnswerWrap();fitA();bindAnswerInput();}
+  function openScoreV85(){const p=currentProblem();if(!p||!state.solve)return;byId("solveOverlay")?.classList.add("hidden");byId("scoreOverlay")?.classList.remove("hidden");state.expPage=0;const meta=byId("scoreMeta");if(meta)meta.textContent=`${titleOf(p)} · 풀이시간 ${fmtTime(state.solve.elapsedBase||0)}`;try{loadScoreEditsV11?.()}catch{};const model=byId("modelTextView");if(model)model.textContent=p.modelText||"";const score=byId("attemptScoreInput");if(score){score.value="";score.max=p.maxScore||""}const comp=byId("completionInput");if(comp)comp.value=state.solve.mode==="outline"?"목차만":"완성";const need=byId("needReviewInput");if(need)need.value="true";try{renderChecklist(p)}catch{};renderScoreAnswerV85(0);try{showExplanationPage(0)}catch(err){console.warn("v85 explanation",err)}}
+  function submitV85(){if(!state.solve)return;try{saveCurrentAnswerPageV10?.()}catch{};state.solve.elapsedBase=elapsedNow();state.solve.answer=(state.solve.answerPages||[]).map((p,i)=>`[${i+1}쪽]\n${p?.text||""}`).join("\n\n")||byId("answerText")?.value||"";state.solve.answerInkData="";clearInterval(state.timer);state.timer=null;openScoreV85();}
+  openScore=openScoreV85;
+  document.addEventListener("click",e=>{const b=e.target?.closest?.("#submitAnswerBtn,#prevScoreAnswerPageBtn,#nextScoreAnswerPageBtn,#scoreAnswerPenBtn,#scoreAnswerEraserBtn,#clearScoreAnswerInkBtn,#scoreAnswerZoomOutV85,#scoreAnswerZoomInV85,#scoreAnswerFitV85,#backToAnswerBtn");if(!b)return;
+    if(b.id==="submitAnswerBtn"){e.preventDefault();e.stopPropagation();e.stopImmediatePropagation?.();submitV85();return}if(!scoreVisible())return;e.preventDefault();e.stopPropagation();e.stopImmediatePropagation?.();
+    if(b.id==="prevScoreAnswerPageBtn")renderScoreAnswerV85((state.scoreAnswerPageIndex||0)-1);else if(b.id==="nextScoreAnswerPageBtn")renderScoreAnswerV85((state.scoreAnswerPageIndex||0)+1);else if(b.id==="scoreAnswerPenBtn"){state.scoreAnswerEditTool="pen";b.classList.add("ink-active");byId("scoreAnswerEraserBtn")?.classList.remove("ink-active")}else if(b.id==="scoreAnswerEraserBtn"){state.scoreAnswerEditTool="eraser";b.classList.add("ink-active");byId("scoreAnswerPenBtn")?.classList.remove("ink-active")}else if(b.id==="clearScoreAnswerInkBtn"){if(confirm("현재 답안 수정필기를 지울까?")){delete editStore()[answerKey()];saveEdits();scheduleAnswerDraw()}}else if(b.id==="scoreAnswerZoomOutV85")setAZoom(aScale-.2);else if(b.id==="scoreAnswerZoomInV85")setAZoom(aScale+.2);else if(b.id==="scoreAnswerFitV85")fitA();else if(b.id==="backToAnswerBtn"){byId("scoreOverlay")?.classList.add("hidden");if(state.solve){state.solve.startedProblemAt=Date.now();clearInterval(state.timer);state.timer=setInterval(updateTimer,500);byId("solveOverlay")?.classList.remove("hidden");try{loadAnswerPageV10?.(Number(state.solve.answerPageIndex||0))}catch{}requestAnimationFrame(()=>{try{resizeAnswerCanvasV10?.();drawAnswerInkV10?.()}catch{}})}}
+  },true);
+  window.addEventListener("resize",()=>{if(scoreVisible())requestAnimationFrame(()=>{sizeAnswer();drawAnswerBase();applyATransform();scheduleAnswerDraw()})});
+  window.essayCleanInteractionV85={openProblem:openProblemV85,showQuestion:showQuestionV85,openScore:openScoreV85,renderScoreAnswer:renderScoreAnswerV85};
 })();
