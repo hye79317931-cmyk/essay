@@ -1,5 +1,5 @@
 'use strict';
-const CACHE_NAME='essay-pwa-v83';
+const CACHE_NAME='essay-pwa-v84';
 const APP_SHELL=['./?v=83&source=pwa','./index.html','./styles.css?v=83','./app.js?v=83','./manifest.webmanifest?v=83','./icon-192.png','./icon-512.png'];
 self.addEventListener('install',event=>{event.waitUntil(caches.open(CACHE_NAME).then(c=>c.addAll(APP_SHELL)));self.skipWaiting();});
 self.addEventListener('activate',event=>{event.waitUntil((async()=>{const ks=await caches.keys();await Promise.all(ks.filter(k=>k.startsWith('essay-pwa-')&&k!==CACHE_NAME).map(k=>caches.delete(k)));await self.clients.claim();})());});

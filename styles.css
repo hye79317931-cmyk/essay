@@ -1661,3 +1661,38 @@
 }
 .review-pick-v78 input{width:18px;height:18px;margin:0;}
 .review-select-card-v78{position:relative;}
+
+
+/* === v84: 제출 후 내 답안 전용 pan/pinch/S펜 stage === */
+#scoreOverlay #scoreAnswerEditWrap,
+#scoreOverlay.v58-one-screen #scoreAnswerEditWrap{
+  position:relative!important;
+  overflow:hidden!important;
+  touch-action:none!important;
+  overscroll-behavior:contain!important;
+  background:#fff!important;
+}
+#scoreAnswerStageV84{
+  position:relative!important;
+  transform-origin:0 0!important;
+  will-change:transform!important;
+  background:#fff!important;
+}
+#scoreAnswerStageV84 #ownAnswerView{
+  position:absolute!important;
+  left:0!important;top:0!important;
+  z-index:1!important;
+  box-sizing:border-box!important;
+  pointer-events:none!important;
+}
+#scoreAnswerStageV84 #scoreAnswerCanvas{
+  position:absolute!important;
+  left:0!important;top:0!important;
+  z-index:5!important;
+  pointer-events:none!important;
+  touch-action:none!important;
+  max-width:none!important;
+  transform:none!important;
+}
+#scoreAnswerStageV84 #ownAnswerInkView{display:none!important;}
+#scoreAnswerZoomLabelV84{min-width:48px;justify-content:center;}
