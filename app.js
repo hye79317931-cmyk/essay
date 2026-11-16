@@ -1,4 +1,4 @@
-const APP_VERSION="essay-psat-base-v80";const DB_NAME="essayPsatBaseDB_v1";const DB_VERSION=1;const STORE_PROBLEMS="problems";const STORE_ATTEMPTS="attempts";const $=id=>document.getElementById(id);const $$=sel=>Array.from(document.querySelectorAll(sel));let db;const state={problems:[],attempts:[],questionPages:[],explanationPages:[],selectedQuestionPage:-1,selectedExplanationPage:-1,activePasteTarget:"question",solve:null,timer:null,qPage:0,expPage:0,zoom:1,installPrompt:null};
+const APP_VERSION="essay-psat-base-v81";const DB_NAME="essayPsatBaseDB_v1";const DB_VERSION=1;const STORE_PROBLEMS="problems";const STORE_ATTEMPTS="attempts";const $=id=>document.getElementById(id);const $$=sel=>Array.from(document.querySelectorAll(sel));let db;const state={problems:[],attempts:[],questionPages:[],explanationPages:[],selectedQuestionPage:-1,selectedExplanationPage:-1,activePasteTarget:"question",solve:null,timer:null,qPage:0,expPage:0,zoom:1,installPrompt:null};
 
 /* === v76: 설치 이벤트를 DB 로딩 전에 확보 === */
 window.addEventListener("beforeinstallprompt",event=>{
@@ -680,7 +680,7 @@ async function resetEssayPwaOnceV49(){
 async function registerEssayServiceWorkerV49(){
   if(!("serviceWorker" in navigator))return;
   try{
-    const reg=await navigator.serviceWorker.register("./sw.js?v=80",{scope:"./",updateViaCache:"none"});
+    const reg=await navigator.serviceWorker.register("./sw.js?v=81",{scope:"./",updateViaCache:"none"});
     await reg.update().catch(()=>{});
   }catch(err){
     console.warn("Service worker registration failed",err);
@@ -854,8 +854,9 @@ function setupInkLayer() {
 
 const originalApplyZoomForInk = applyZoom;
 applyZoom = function() {
-  originalApplyZoomForInk();
-  requestAnimationFrame(resizeInkCanvas);
+  // v81: 최종 applyZoom 자체가 캔버스 resize/redraw를 프레임당 1회 처리한다.
+  // 여기서 다시 resize를 예약하면 pinch 중 같은 작업이 중복되어 버벅였다.
+  return originalApplyZoomForInk();
 };
 
 const originalShowQuestionPageForInk = showQuestionPage;
@@ -1977,7 +1978,8 @@ function saveCurrentAnswerPageV10() {
 
   state.solve.answer = state.solve.answerPages.map((p, i) => `[${i+1}쪽]\n${p.text || ""}`).join("\n\n");
   state.solve.answerInkStrokes = state.answerInkStrokes || [];
-  state.solve.answerInkData = answerHasInk?.() ? dataUrlFromAnswerCanvas?.() : "";
+  // v81: 풀이 중에는 매 획/입력마다 canvas.toDataURL()을 만들지 않는다.
+  // 벡터 strokes만 초안에 저장하고 PNG snapshot은 제출/최종저장 시 기존 submit/save 경로에서 1회 생성.
   safeSetDraftV72(state.solve);
   renderAnswerPageBadgeV10();
 }
@@ -2214,27 +2216,29 @@ function setupSplitHandleV11() {
 
 /* v10 함수가 없을 수 있는 경우 대비: 문제 폭맞춤/이동 */
 function problemScrollerV11(){ return $("questionImageScroller"); }
+let solveZoomRafV81 = 0;
 function applyZoom() {
-  const img = $("questionImageView"), wrap = $("imageCanvasWrap");
-  if (!img || !wrap || !img.naturalWidth) return;
-  const w = Math.max(1, Math.floor(img.naturalWidth * (state.zoom || 1)));
-  const h = Math.max(1, Math.floor(img.naturalHeight * (state.zoom || 1)));
-  img.style.width = w + "px"; img.style.height = h + "px";
-  wrap.style.width = w + "px"; wrap.style.height = h + "px";
-  wrap.style.minWidth = w + "px"; wrap.style.minHeight = h + "px";
-  requestAnimationFrame(() => { try { resizeInkCanvasV10(); drawInkV10(); } catch {} });
+  // v81: pinch/tap zoom 이벤트가 몰려도 한 화면 프레임에 실제 레이아웃/캔버스 변경은 1회만.
+  if (solveZoomRafV81) return;
+  solveZoomRafV81 = requestAnimationFrame(() => {
+    solveZoomRafV81 = 0;
+    const img = $("questionImageView"), wrap = $("imageCanvasWrap");
+    if (!img || !wrap || !img.naturalWidth) return;
+    const w = Math.max(1, Math.floor(img.naturalWidth * (state.zoom || 1)));
+    const h = Math.max(1, Math.floor(img.naturalHeight * (state.zoom || 1)));
+    img.style.width = w + "px"; img.style.height = h + "px";
+    wrap.style.width = w + "px"; wrap.style.height = h + "px";
+    wrap.style.minWidth = w + "px"; wrap.style.minHeight = h + "px";
+    try { resizeInkCanvasV10(); drawInkV10(); } catch {}
+  });
 }
 function fitImage() {
   const img = $("questionImageView"), scroller = problemScrollerV11();
-  if (!img || !scroller) return;
-  const run = () => {
-    if (!img.naturalWidth || !scroller.clientWidth) return;
-    state.zoom = clampV11(scroller.clientWidth / img.naturalWidth, 0.05, 2);
-    applyZoom();
-    scroller.scrollLeft = 0; scroller.scrollTop = 0;
-  };
-  img.onload = run;
-  run(); setTimeout(run, 80); setTimeout(run, 250);
+  if (!img || !scroller || !img.naturalWidth || !scroller.clientWidth) return;
+  // image load 이벤트가 이미 setupEvents에 연결되어 있으므로 80/250ms 반복 재맞춤을 하지 않는다.
+  state.zoom = clampV11(scroller.clientWidth / img.naturalWidth, 0.05, 2);
+  applyZoom();
+  scroller.scrollLeft = 0; scroller.scrollTop = 0;
 }
 function zoomByV11(delta) {
   const scroller = problemScrollerV11();
@@ -6113,9 +6117,8 @@ setTimeout(() => {
         e.touches[0].clientY-e.touches[1].clientY
       )||1;
       state.zoom=clamp(startZoom*(d/startDist),.35,6);
+      // v81: applyZoom이 프레임당 1회 resize+redraw까지 담당. 중복 전체 redraw 금지.
       try{applyZoom()}catch{}
-      try{resizeInkCanvas()}catch{}
-      try{drawInk()}catch{}
     },{passive:false,capture:true});
 
     const end=()=>{startDist=0};
@@ -8141,11 +8144,11 @@ startSolve = function(ids, mode) {
 };
 
 
-/* === v76: 설치앱 S펜 입력 최종 브리지 ===
-   - 손가락(pointerType=touch)은 절대 필기하지 않음
-   - S펜 pen 이벤트를 document capture에서 직접 받아 canvas 겹침/포인터 레이어 영향 제거
-   - 일부 Android WebAPK에서 장치종류를 불명확하게 주는 경우 pressure가 있는 mouse/unknown도 펜으로 허용
-   - 문제 필기 + 제출 전 답안 필기만 담당. 채점 수정펜/해설펜은 기존 v47/v69 컨트롤러 유지.
+/* === v81: 설치앱 S펜 입력 브리지 경량화 (v76 대체) ===
+   - capture 브리지는 하나만 유지해 겹친 캔버스 이벤트 영향을 차단
+   - pointermove마다 기존 필기 전체를 재그리지 않고 새 선분만 즉시 그림
+   - stroke 종료 때만 IndexedDB 저장
+   - 손가락은 계속 이동/확대 전용
 */
 (function essaySolvePenBridgeV76(){
   if(window.__essaySolvePenBridgeV76)return;
@@ -8169,8 +8172,6 @@ startSolve = function(ids, mode) {
   function isPenLike(e){
     if(!e||e.pointerType==="touch")return false;
     if(e.pointerType==="pen")return true;
-    // v79: 일부 Samsung WebAPK에서 S펜이 mouse/빈 값 + pressure 0으로 오는 경우도 허용.
-    // 손가락은 pointerType=touch라 계속 필기에서 제외된다.
     return (e.pointerType==="mouse"||e.pointerType==="") &&
       (e.buttons===1||e.type==="pointerup"||e.type==="pointercancel");
   }
@@ -8183,12 +8184,31 @@ startSolve = function(ids, mode) {
     const score=byId("scoreOverlay");
     return !!(solve&&!solve.classList.contains("hidden")&&(!score||score.classList.contains("hidden"))&&state.solve);
   }
-  function draw(kind){
+  function fullDraw(kind){
     if(kind==="answer"){
       try{if(typeof drawAnswerInkV10==="function")drawAnswerInkV10();else if(typeof drawAnswerInkV9==="function")drawAnswerInkV9();}catch{}
     }else{
       try{if(typeof drawProblemInkV13==="function")drawProblemInkV13();else if(typeof drawInkV10==="function")drawInkV10();else if(typeof drawInkV9==="function")drawInkV9();}catch{}
     }
+  }
+  function drawSegment(kind,canvas,stroke,a,b){
+    if(!canvas||!a||!b)return;
+    const r=canvas.getBoundingClientRect();
+    if(r.width<2||r.height<2)return;
+    const ctx=canvas.getContext("2d");
+    if(!ctx)return;
+    const dpr=window.devicePixelRatio||1;
+    ctx.save();
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    ctx.globalCompositeOperation=stroke.tool==="eraser"?"destination-out":"source-over";
+    ctx.lineCap="round";ctx.lineJoin="round";
+    ctx.lineWidth=Math.max(1,Number(stroke.size||3));
+    ctx.strokeStyle=kind==="answer"?"#111827":"#0ea5e9";
+    ctx.beginPath();
+    ctx.moveTo(a.x*r.width,a.y*r.height);
+    ctx.lineTo(b.x*r.width,b.y*r.height);
+    ctx.stroke();
+    ctx.restore();
   }
   function save(kind){
     if(kind==="answer"){
@@ -8216,25 +8236,29 @@ startSolve = function(ids, mode) {
     e.preventDefault();e.stopPropagation();e.stopImmediatePropagation?.();
     if(kind==="answer"){
       const tool=state.answerInkTool==="eraser"?"eraser":"pen";
-      const stroke={tool,size:Number(state.answerInkSize||3)*(tool==="eraser"?5:1),points:[point(e,canvas)]};
+      const first=point(e,canvas);
+      const stroke={tool,size:Number(state.answerInkSize||3)*(tool==="eraser"?5:1),points:[first]};
       if(!Array.isArray(state.answerInkStrokes))state.answerInkStrokes=[];
       state.answerInkStrokes.push(stroke);
       state.answerInkCurrentStroke=stroke;
-      active={id:e.pointerId,kind,canvas,stroke};
+      active={id:e.pointerId,kind,canvas,stroke,last:first};
     }else{
       let key="";
       try{key=typeof currentProblemInkKeyV13==="function"?currentProblemInkKeyV13():"";}catch{}
       if(!key){try{key=typeof inkKey==="function"?inkKey():"";}catch{}}
       if(!key)return;
       const tool=state.inkTool==="eraser"?"eraser":"pen";
-      const stroke={tool,size:Number(state.inkSize||3)*(tool==="eraser"?5:1),points:[point(e,canvas)]};
+      const first=point(e,canvas);
+      const stroke={tool,size:Number(state.inkSize||3)*(tool==="eraser"?5:1),points:[first]};
       if(!state.inkData||typeof state.inkData!=="object")state.inkData={};
       if(!Array.isArray(state.inkData[key]))state.inkData[key]=[];
       state.inkData[key].push(stroke);
       state.currentStroke=stroke;
-      active={id:e.pointerId,kind,canvas,stroke};
+      active={id:e.pointerId,kind,canvas,stroke,last:first};
     }
-    draw(kind);
+    // 첫 점만 있는 stroke도 바로 보이도록 아주 짧은 선분으로 표시.
+    const p0=active.last;
+    drawSegment(kind,canvas,active.stroke,p0,{x:Math.min(1,p0.x+0.0001),y:p0.y});
   },true);
 
   document.addEventListener("pointermove",e=>{
@@ -8242,8 +8266,14 @@ startSolve = function(ids, mode) {
     e.preventDefault();e.stopPropagation();e.stopImmediatePropagation?.();
     let events=[e];
     try{const c=e.getCoalescedEvents?.();if(c?.length)events=c;}catch{}
-    for(const item of events)active.stroke.points.push(point(item,active.canvas));
-    draw(active.kind);
+    for(const item of events){
+      const next=point(item,active.canvas);
+      const prev=active.last;
+      if(prev&&Math.hypot(next.x-prev.x,next.y-prev.y)<0.00015)continue;
+      active.stroke.points.push(next);
+      drawSegment(active.kind,active.canvas,active.stroke,prev,next);
+      active.last=next;
+    }
   },true);
 
   function end(e){
@@ -8252,14 +8282,14 @@ startSolve = function(ids, mode) {
     e.preventDefault();e.stopPropagation();e.stopImmediatePropagation?.();
     const kind=active.kind;
     active=null;
-    save(kind);draw(kind);
+    save(kind);
+    // 저장 뒤 전체 redraw를 다시 하지 않는다. 페이지/줌 변경 때만 전체 redraw.
   }
   document.addEventListener("pointerup",end,true);
   document.addEventListener("pointercancel",end,true);
 
-  window.essaySolvePenBridgeV76={isPenLike};
+  window.essaySolvePenBridgeV76={isPenLike,fullDraw};
 })();
-
 
 /* === v77: 필기 보존형 성능 패치 ===
    원칙: v76 S펜 브리지는 수정하지 않는다.
@@ -8846,6 +8876,49 @@ startSolve = function(ids, mode) {
     window.addEventListener("focus",checkUpdateV79);
     document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")checkUpdateV79();});
   }
+})();
+
+
+/* === v81: 이어풀기 초안 저장 디바운스 ===
+   답안 입력/필기 stroke마다 큰 draft 전체를 IndexedDB에 즉시 쓰지 않고 최신 상태만 350ms 뒤 1회 저장.
+   저장 후 끝내기/일시정지 시 clearDraft가 pending write를 먼저 취소해 삭제 후 재생성을 막는다.
+*/
+(function essayDraftDebounceV81(){
+  if(window.__essayDraftDebounceV81)return;
+  window.__essayDraftDebounceV81=true;
+  const large=window.essayLargeStorageV79;
+  if(!large)return;
+  const originalSave=large.saveDraftText?.bind(large);
+  const originalClear=large.clearDraft?.bind(large);
+  if(typeof originalSave!=="function"||typeof originalClear!=="function")return;
+  let timer=0,pending=null;
+
+  function flush(){
+    clearTimeout(timer);timer=0;
+    if(pending===null)return Promise.resolve();
+    const text=pending;pending=null;
+    return originalSave(text).catch(err=>console.warn("v81 draft flush failed",err));
+  }
+  safeSetDraftV72=function(value){
+    pending=typeof value==="string"?value:JSON.stringify(value);
+    clearTimeout(timer);
+    timer=setTimeout(()=>{flush();},350);
+    return true;
+  };
+  safeGetDraftV72=function(){
+    return pending!==null?pending:large.getDraftTextSync();
+  };
+  large.clearDraft=async function(){
+    clearTimeout(timer);timer=0;pending=null;
+    return originalClear();
+  };
+  safeRemoveDraftV72=function(){
+    large.clearDraft().catch(err=>console.warn("v81 draft clear failed",err));
+    return true;
+  };
+  window.addEventListener("pagehide",()=>{if(pending!==null)flush();});
+  document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="hidden"&&pending!==null)flush();});
+  window.essayFlushDraftV81=flush;
 })();
 
 
