@@ -1,4 +1,4 @@
-const APP_VERSION="essay-psat-base-v82";const DB_NAME="essayPsatBaseDB_v1";const DB_VERSION=1;const STORE_PROBLEMS="problems";const STORE_ATTEMPTS="attempts";const $=id=>document.getElementById(id);const $$=sel=>Array.from(document.querySelectorAll(sel));let db;const state={problems:[],attempts:[],questionPages:[],explanationPages:[],selectedQuestionPage:-1,selectedExplanationPage:-1,activePasteTarget:"question",solve:null,timer:null,qPage:0,expPage:0,zoom:1,installPrompt:null};
+const APP_VERSION="essay-psat-base-v83";const DB_NAME="essayPsatBaseDB_v1";const DB_VERSION=1;const STORE_PROBLEMS="problems";const STORE_ATTEMPTS="attempts";const $=id=>document.getElementById(id);const $$=sel=>Array.from(document.querySelectorAll(sel));let db;const state={problems:[],attempts:[],questionPages:[],explanationPages:[],selectedQuestionPage:-1,selectedExplanationPage:-1,activePasteTarget:"question",solve:null,timer:null,qPage:0,expPage:0,zoom:1,installPrompt:null};
 
 /* === v76: 설치 이벤트를 DB 로딩 전에 확보 === */
 window.addEventListener("beforeinstallprompt",event=>{
@@ -680,7 +680,7 @@ async function resetEssayPwaOnceV49(){
 async function registerEssayServiceWorkerV49(){
   if(!("serviceWorker" in navigator))return;
   try{
-    const reg=await navigator.serviceWorker.register("./sw.js?v=82",{scope:"./",updateViaCache:"none"});
+    const reg=await navigator.serviceWorker.register("./sw.js?v=83",{scope:"./",updateViaCache:"none"});
     await reg.update().catch(()=>{});
   }catch(err){
     console.warn("Service worker registration failed",err);
@@ -9233,4 +9233,224 @@ startSolve = function(ids, mode) {
       }else if(typeof resizeProblemInkCanvasV13==='function')resizeProblemInkCanvasV13();
     }catch{}
   };
+})();
+
+
+/* === v83: 문제 선택/열기 경량화 ===
+   원인:
+   - solve 필터 변경 때 input/change가 연속 발생하며 목록 전체를 두 번 이상 렌더
+   - 조건에 맞는 문제 카드를 전부 DOM으로 생성
+   - openCurrentProblem이 v2~v68 wrapper를 10개 넘게 연쇄 호출하며 수십 개 delayed resize/redraw 예약
+   조치:
+   - solve 목록은 50개씩만 렌더하고 더보기로 확장
+   - renderAll은 한 프레임에 1회만 실행
+   - currentProblem은 id Map 즉시 조회
+   - 문제 열기/페이지 변경은 최종 경량 경로 하나만 사용
+   - 기존 IndexedDB/Firebase/필기 데이터 형식은 그대로 유지
+*/
+(function essayFastProblemSelectV83(){
+  if(window.__essayFastProblemSelectV83)return;
+  window.__essayFastProblemSelectV83=true;
+
+  const byId=id=>document.getElementById(id);
+  const SOLVE_BATCH_V83=50;
+  let solveLimitV83=SOLVE_BATCH_V83;
+  let renderRafV83=0;
+  let problemMapV83=new Map();
+
+  function rebuildProblemMapV83(){
+    problemMapV83=new Map((state.problems||[]).map(p=>[String(p?.id||''),p]));
+  }
+  rebuildProblemMapV83();
+
+  const loadDataBeforeV83=loadData;
+  loadData=async function(){
+    const out=await loadDataBeforeV83.apply(this,arguments);
+    rebuildProblemMapV83();
+    return out;
+  };
+
+  currentProblem=function(){
+    const id=state.solve?.ids?.[Number(state.solve?.index||0)];
+    if(id===undefined||id===null)return null;
+    return problemMapV83.get(String(id)) || (state.problems||[]).find(p=>String(p?.id)===String(id)) || null;
+  };
+
+  // 이미 v7 이후 앱을 실행해 온 데이터는 매 부팅마다 base64 배열 전체 JSON.stringify 비교가 필요 없다.
+  // 구형 단일 이미지 필드만 남은 문제에 한해서 기존 정리 루틴을 실행한다.
+  const normalizeBeforeV83=typeof normalizeStoredProblems==='function'?normalizeStoredProblems:null;
+  if(normalizeBeforeV83){
+    normalizeStoredProblems=async function(){
+      const needs=(state.problems||[]).some(p=>
+        (!Array.isArray(p?.questionPages) && (p?.questionImage||p?.questionImageData||p?.problemImage||p?.problemImageData||p?.imageData||p?.image)) ||
+        (!Array.isArray(p?.explanationPages) && (p?.explanationImage||p?.explanationImageData||p?.modelImage||p?.modelImageData||p?.answerImageData))
+      );
+      if(!needs)return;
+      return normalizeBeforeV83.apply(this,arguments);
+    };
+  }
+
+  function renderSolveListV83(){
+    const list=byId('solveList');
+    if(!list)return;
+    const arr=filterProblems({
+      subject:byId('solveSubject')?.value||'',
+      session:byId('solveSession')?.value||'',
+      scope:typeof solveScopeV25==='function'?solveScopeV25():(byId('solveScope')?.value||'all')
+    });
+    list.innerHTML='';
+    const shown=arr.slice(0,solveLimitV83);
+    try{renderScopeSummaryV25?.(arr);}catch{}
+    const summary=byId('solveScopeSummaryV25');
+    if(summary)summary.textContent=`${typeof scopeLabelV25==='function'?scopeLabelV25():'문제'} · 표시 ${shown.length}/${arr.length}문제`;
+    if(!arr.length){
+      list.innerHTML='<p class="hint">조건에 맞는 문제가 없어.</p>';
+      return;
+    }
+    const frag=document.createDocumentFragment();
+    for(const problem of shown)frag.appendChild(problemCard(problem,{solve:true}));
+    list.appendChild(frag);
+    if(shown.length<arr.length){
+      const more=document.createElement('button');
+      more.type='button';
+      more.className='secondary';
+      more.textContent=`더 보기 (${shown.length}/${arr.length})`;
+      more.style.margin='10px auto';
+      more.style.display='block';
+      more.addEventListener('click',()=>{
+        solveLimitV83=Math.min(arr.length,solveLimitV83+SOLVE_BATCH_V83);
+        renderSolveListV83();
+      });
+      list.appendChild(more);
+    }
+  }
+  renderSolveList=renderSolveListV83;
+
+  // input + change가 연속 발생해도 한 프레임에 한 번만 화면 갱신.
+  renderAll=function(){
+    if(renderRafV83)return;
+    renderRafV83=requestAnimationFrame(()=>{
+      renderRafV83=0;
+      try{renderContinue();}catch{}
+      const active=document.querySelector('.view.active')?.id||'solveView';
+      if(active==='solveView')try{renderSolveListV83();}catch(err){console.warn('v83 solve render',err);}
+      else if(active==='listView')try{renderList();}catch(err){console.warn('v83 list render',err);}
+      else if(active==='reviewView')try{renderReview();}catch(err){console.warn('v83 review render',err);}
+      else if(active==='backupView')try{renderStats();}catch(err){console.warn('v83 stats render',err);}
+      else if(active==='addView')try{renderPageLists();}catch(err){console.warn('v83 page render',err);}
+    });
+  };
+
+  // 풀이 중에는 draft 전체 JSON을 만들어 존재 여부를 확인하지 않는다.
+  renderContinue=function(){
+    const btn=byId('continueBtn');
+    if(!btn)return;
+    let has=!!state.solve;
+    if(!has){
+      try{has=!!window.essayLargeStorageV79?.getDraftTextSync?.();}catch{}
+      if(!has){try{has=!!safeGetDraftV72();}catch{}}
+    }
+    btn.classList.toggle('hidden',!has);
+  };
+
+  document.addEventListener('input',e=>{
+    if(e.target?.matches?.('#solveSubject,#solveSession,#solveScope'))solveLimitV83=SOLVE_BATCH_V83;
+  },true);
+  document.addEventListener('change',e=>{
+    if(e.target?.matches?.('#solveSubject,#solveSession,#solveScope'))solveLimitV83=SOLVE_BATCH_V83;
+  },true);
+
+  function ensureAnswerStateV83(){
+    if(!state.solve)return;
+    if(!Array.isArray(state.solve.answerPages)||!state.solve.answerPages.length){
+      state.solve.answerPages=[{text:state.solve.answer||'',strokes:Array.isArray(state.solve.answerInkStrokes)?state.solve.answerInkStrokes:[]}];
+      state.solve.answerPageIndex=0;
+    }
+    const max=state.solve.answerPages.length-1;
+    state.solve.answerPageIndex=Math.max(0,Math.min(Number(state.solve.answerPageIndex)||0,max));
+    const page=state.solve.answerPages[state.solve.answerPageIndex]||{text:'',strokes:[]};
+    const text=byId('answerText'); if(text)text.value=page.text||'';
+    state.answerInkCurrentStroke=null;
+    state.answerInkStrokes=Array.isArray(page.strokes)?page.strokes:[];
+    state.solve.answerInkStrokes=state.answerInkStrokes;
+    try{renderAnswerPageBadgeV10?.();}catch{}
+
+    state.answerInputMode=state.solve.answerInputMode==='keyboard'?'keyboard':'handwriting';
+    const wrap=byId('handwritingWrap'), textarea=byId('answerText'), toggle=byId('keyboardToggleBtn');
+    wrap?.classList.toggle('hidden',state.answerInputMode==='keyboard');
+    textarea?.classList.toggle('hidden',state.answerInputMode!=='keyboard');
+    if(toggle)toggle.textContent=state.answerInputMode==='keyboard'?'손글씨 입력':'키보드 입력';
+  }
+
+  function prepareAnswerCanvasV83(){
+    requestAnimationFrame(()=>{
+      try{
+        if(typeof resizeAnswerCanvasV10==='function')resizeAnswerCanvasV10();
+        else if(typeof resizeAnswerCanvasV9==='function')resizeAnswerCanvasV9();
+      }catch{}
+      try{
+        if(typeof drawAnswerInkV10==='function')drawAnswerInkV10();
+        else if(typeof drawAnswerInkV9==='function')drawAnswerInkV9();
+      }catch{}
+    });
+  }
+
+  showQuestionPage=function(index){
+    const p=currentProblem();
+    const pages=realPages(p?.questionPages||[]);
+    state.qPage=Math.max(0,Math.min(Number(index)||0,Math.max(0,pages.length-1)));
+    const img=byId('questionImageView');
+    const scroller=byId('questionImageScroller');
+    let note=byId('emptyQuestionNote');
+    if(!note&&scroller){
+      note=document.createElement('div');
+      note.id='emptyQuestionNote';
+      note.className='empty-image-note hidden';
+      note.textContent='문제 이미지가 없습니다. 목록에서 이 문제를 수정해 이미지를 넣어주세요.';
+      scroller.appendChild(note);
+    }
+    if(!img)return;
+    if(!pages.length){
+      img.classList.add('hidden');
+      note?.classList.remove('hidden');
+      const badge=byId('questionPageBadge'); if(badge)badge.textContent='문제 이미지 없음';
+      return;
+    }
+    note?.classList.add('hidden');
+    img.classList.remove('hidden');
+    const src=pages[state.qPage]||'';
+    if(img.src!==src)img.src=src;
+    const badge=byId('questionPageBadge'); if(badge)badge.textContent=`문제 ${state.qPage+1}/${pages.length}쪽`;
+    if(img.complete&&img.naturalWidth){
+      requestAnimationFrame(()=>{try{fitImage();}catch{}});
+    }
+  };
+
+  openCurrentProblem=function(){
+    const p=currentProblem();
+    if(!p){finishSolve(false);return;}
+    const solve=byId('solveOverlay'),score=byId('scoreOverlay');
+    score?.classList.add('hidden');
+    solve?.classList.remove('hidden');
+    state.qPage=0;
+
+    const title=byId('solveTitle'); if(title)title.textContent=titleOf(p);
+    const meta=byId('solveMeta'); if(meta)meta.textContent=metaOf(p);
+    const badge=byId('setBadge'); if(badge)badge.textContent=`${Number(state.solve?.index||0)+1}/${state.solve?.ids?.length||1} · ${state.solve?.mode==='outline'?'목차연습':'실전답안'}`;
+    const label=byId('answerLabel'); if(label)label.textContent=state.solve?.mode==='outline'?'내 목차/쟁점':'내 답안';
+
+    ensureAnswerStateV83();
+    showQuestionPage(0);
+    prepareAnswerCanvasV83();
+    try{removeSolveBadgesV24?.();}catch{}
+
+    clearInterval(state.timer);
+    state.timer=setInterval(updateTimer,500);
+    try{updateTimer();}catch{}
+
+    // 화면을 먼저 연고 draft 저장은 뒤로 미룬다. 대용량 PNG는 넣지 않는다.
+    try{safeSetDraftV72({...state.solve,answerInkData:''});}catch{}
+  };
+
+  window.essayFastProblemSelectV83={renderSolveList:renderSolveListV83,rebuildProblemMap:rebuildProblemMapV83};
 })();
