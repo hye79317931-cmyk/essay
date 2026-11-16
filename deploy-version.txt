@@ -1,1 +1,1 @@
-Essay v86 STABLE ROLLBACK: exact e78 interaction/handwriting/zoom/score-edit baseline restored; only PWA/app version bumped. e79-e85 browser storage is NOT deleted or migrated.
+Essay v87 SAVE-AND-FINISH ONLY PATCH for e86 stable rollback: no handwriting/zoom/score-edit/layout code changed. A capture-phase finish handler directly saves the current attempt to IndexedDB, clears the draft, closes the solve/score overlays, and prevents the legacy saveAttempt wrapper chain from blocking finish.
