@@ -1,4 +1,4 @@
-const APP_VERSION="essay-psat-base-v81";const DB_NAME="essayPsatBaseDB_v1";const DB_VERSION=1;const STORE_PROBLEMS="problems";const STORE_ATTEMPTS="attempts";const $=id=>document.getElementById(id);const $$=sel=>Array.from(document.querySelectorAll(sel));let db;const state={problems:[],attempts:[],questionPages:[],explanationPages:[],selectedQuestionPage:-1,selectedExplanationPage:-1,activePasteTarget:"question",solve:null,timer:null,qPage:0,expPage:0,zoom:1,installPrompt:null};
+const APP_VERSION="essay-psat-base-v82";const DB_NAME="essayPsatBaseDB_v1";const DB_VERSION=1;const STORE_PROBLEMS="problems";const STORE_ATTEMPTS="attempts";const $=id=>document.getElementById(id);const $$=sel=>Array.from(document.querySelectorAll(sel));let db;const state={problems:[],attempts:[],questionPages:[],explanationPages:[],selectedQuestionPage:-1,selectedExplanationPage:-1,activePasteTarget:"question",solve:null,timer:null,qPage:0,expPage:0,zoom:1,installPrompt:null};
 
 /* === v76: 설치 이벤트를 DB 로딩 전에 확보 === */
 window.addEventListener("beforeinstallprompt",event=>{
@@ -680,7 +680,7 @@ async function resetEssayPwaOnceV49(){
 async function registerEssayServiceWorkerV49(){
   if(!("serviceWorker" in navigator))return;
   try{
-    const reg=await navigator.serviceWorker.register("./sw.js?v=81",{scope:"./",updateViaCache:"none"});
+    const reg=await navigator.serviceWorker.register("./sw.js?v=82",{scope:"./",updateViaCache:"none"});
     await reg.update().catch(()=>{});
   }catch(err){
     console.warn("Service worker registration failed",err);
@@ -8222,8 +8222,7 @@ startSolve = function(ids, mode) {
 
   document.addEventListener("pointerdown",e=>{
     if(!solveVisible()||!isPenLike(e))return;
-    try{if(typeof resizeProblemInkCanvasV13==="function")resizeProblemInkCanvasV13();}catch{}
-    try{if(typeof resizeAnswerCanvasV10==="function")resizeAnswerCanvasV10();else if(typeof resizeAnswerCanvasV9==="function")resizeAnswerCanvasV9();}catch{}
+    try{window.essayEnsureInkCanvasSizeV82?.('problem');window.essayEnsureInkCanvasSizeV82?.('answer');}catch{}
     const answer=byId("answerInkCanvas");
     const problem=byId("inkCanvas");
     const answerZone=byId("handwritingWrap")||answer;
@@ -9046,4 +9045,192 @@ startSolve = function(ids, mode) {
   },true);
 
   window.essayFinishAfterSaveV80=finishAfterSaveV80;
+})();
+
+
+/* === v82: 풀이화면 긴급 안정화 — 중복 touch/zoom 경로 차단 ===
+   - 문제화면 손가락 입력을 document capture 한 경로에서만 처리해 과거 touch/pinch listener의 중복 실행 차단
+   - pinch 중에는 이미지/캔버스 CSS 크기만 바꾸고 backing canvas 재생성/전체 redraw는 gesture 종료 후 1회
+   - draft는 호출할 때 JSON.stringify하지 않고 저장 시점에만 직렬화
+   - S펜 stroke 시작 시 캔버스 크기가 실제로 어긋난 경우에만 resize
+   데이터 구조/IndexedDB/Firebase 경로는 변경하지 않음.
+*/
+(function essayEmergencyPerformanceV82(){
+  if(window.__essayEmergencyPerformanceV82)return;
+  window.__essayEmergencyPerformanceV82=true;
+
+  const byId=id=>document.getElementById(id);
+  const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+  const solveOpen=()=>{
+    const solve=byId('solveOverlay'), score=byId('scoreOverlay');
+    return !!(state.solve && solve && !solve.classList.contains('hidden') && (!score || score.classList.contains('hidden')));
+  };
+  const questionScroller=()=>byId('questionImageScroller');
+  const questionImg=()=>byId('questionImageView');
+  const questionWrap=()=>byId('imageCanvasWrap');
+  const questionCanvas=()=>byId('inkCanvas');
+
+  let zoomRaf=0, commitTimer=0;
+  function applyZoomCssV82(){
+    zoomRaf=0;
+    const img=questionImg(), wrap=questionWrap(), canvas=questionCanvas();
+    if(!img||!wrap||!img.naturalWidth||!img.naturalHeight)return;
+    const z=Math.max(.05,Number(state.zoom||1));
+    const w=Math.max(1,Math.round(img.naturalWidth*z));
+    const h=Math.max(1,Math.round(img.naturalHeight*z));
+    img.style.width=w+'px'; img.style.height=h+'px';
+    wrap.style.width=w+'px'; wrap.style.height=h+'px';
+    wrap.style.minWidth=w+'px'; wrap.style.minHeight=h+'px';
+    // pinch 중 backing canvas를 재생성하지 않고 기존 bitmap만 CSS scale한다.
+    if(canvas){canvas.style.width=w+'px';canvas.style.height=h+'px';}
+  }
+  function commitCanvasV82(delay=90){
+    clearTimeout(commitTimer);
+    commitTimer=setTimeout(()=>{
+      if(!solveOpen())return;
+      try{
+        if(typeof resizeInkCanvasV10==='function')resizeInkCanvasV10();
+        else if(typeof resizeInkCanvasV9==='function')resizeInkCanvasV9();
+      }catch(err){console.warn('v82 canvas commit resize',err);}
+      try{
+        if(typeof drawInkV10==='function')drawInkV10();
+        else if(typeof drawInkV9==='function')drawInkV9();
+      }catch(err){console.warn('v82 canvas commit draw',err);}
+    },delay);
+  }
+  function applyZoomV82(){
+    if(!zoomRaf)zoomRaf=requestAnimationFrame(applyZoomCssV82);
+    commitCanvasV82(110);
+  }
+  try{applyZoom=applyZoomV82;}catch{}
+  try{
+    fitImage=function(){
+      const img=questionImg(), scroller=questionScroller();
+      if(!img||!scroller)return;
+      const run=()=>{
+        if(!img.naturalWidth||!scroller.clientWidth)return;
+        state.zoom=clamp((scroller.clientWidth-20)/img.naturalWidth,.05,2);
+        applyZoomV82();
+        scroller.scrollLeft=0;scroller.scrollTop=0;
+      };
+      if(img.complete&&img.naturalWidth)run();
+      else img.addEventListener('load',run,{once:true});
+    };
+  }catch{}
+
+  // 기존 scroller 내부 touch listener보다 document capture가 먼저 실행되어 중복 pinch/pan을 막는다.
+  let oneStart=null;
+  let pinch=null;
+  function touchPoint(t){return {x:t.clientX,y:t.clientY};}
+  function dist(a,b){return Math.hypot(a.x-b.x,a.y-b.y)||1;}
+  function mid(a,b){return {x:(a.x+b.x)/2,y:(a.y+b.y)/2};}
+  function targetIsQuestionV82(target){
+    const sc=questionScroller();
+    return !!(sc && target && (target===sc || sc.contains(target)));
+  }
+  document.addEventListener('touchstart',e=>{
+    if(!solveOpen()||!targetIsQuestionV82(e.target))return;
+    e.preventDefault();e.stopPropagation();e.stopImmediatePropagation?.();
+    const sc=questionScroller(); if(!sc)return;
+    if(e.touches.length>=2){
+      const a=touchPoint(e.touches[0]),b=touchPoint(e.touches[1]),m=mid(a,b);
+      const r=sc.getBoundingClientRect();
+      pinch={
+        dist:dist(a,b),zoom:Number(state.zoom||1),
+        contentX:(sc.scrollLeft+(m.x-r.left))/Math.max(.0001,Number(state.zoom||1)),
+        contentY:(sc.scrollTop +(m.y-r.top ))/Math.max(.0001,Number(state.zoom||1)),
+        midX:m.x-r.left,midY:m.y-r.top
+      };
+      oneStart=null;
+    }else if(e.touches.length===1){
+      const t=e.touches[0];
+      oneStart={x:t.clientX,y:t.clientY,left:sc.scrollLeft,top:sc.scrollTop};
+      pinch=null;
+    }
+  },{capture:true,passive:false});
+  document.addEventListener('touchmove',e=>{
+    if(!solveOpen()||!targetIsQuestionV82(e.target))return;
+    e.preventDefault();e.stopPropagation();e.stopImmediatePropagation?.();
+    const sc=questionScroller(); if(!sc)return;
+    if(e.touches.length>=2){
+      const a=touchPoint(e.touches[0]),b=touchPoint(e.touches[1]);
+      if(!pinch){
+        const m=mid(a,b),r=sc.getBoundingClientRect();
+        pinch={dist:dist(a,b),zoom:Number(state.zoom||1),contentX:(sc.scrollLeft+(m.x-r.left))/Math.max(.0001,Number(state.zoom||1)),contentY:(sc.scrollTop+(m.y-r.top))/Math.max(.0001,Number(state.zoom||1)),midX:m.x-r.left,midY:m.y-r.top};
+      }
+      state.zoom=clamp(pinch.zoom*(dist(a,b)/Math.max(1,pinch.dist)),.20,6);
+      applyZoomV82();
+      const z=Number(state.zoom||1);
+      sc.scrollLeft=Math.max(0,pinch.contentX*z-pinch.midX);
+      sc.scrollTop =Math.max(0,pinch.contentY*z-pinch.midY);
+      return;
+    }
+    if(e.touches.length===1&&oneStart){
+      const t=e.touches[0];
+      sc.scrollLeft=oneStart.left-(t.clientX-oneStart.x);
+      sc.scrollTop =oneStart.top -(t.clientY-oneStart.y);
+    }
+  },{capture:true,passive:false});
+  const touchEndV82=e=>{
+    if(!solveOpen()||!targetIsQuestionV82(e.target))return;
+    e.preventDefault();e.stopPropagation();e.stopImmediatePropagation?.();
+    if(e.touches?.length===1){
+      const sc=questionScroller(),t=e.touches[0];
+      if(sc)oneStart={x:t.clientX,y:t.clientY,left:sc.scrollLeft,top:sc.scrollTop};
+      pinch=null;
+    }else if(!e.touches?.length){
+      oneStart=null;pinch=null;commitCanvasV82(0);
+    }
+  };
+  document.addEventListener('touchend',touchEndV82,{capture:true,passive:false});
+  document.addEventListener('touchcancel',touchEndV82,{capture:true,passive:false});
+
+  // draft JSON stringify를 이벤트 호출 시점에서 제거한다.
+  const large=window.essayLargeStorageV79;
+  if(large?.saveDraftText && large?.clearDraft){
+    const rawSave=large.saveDraftText.bind(large);
+    const rawClear=large.clearDraft.bind(large);
+    let draftTimer=0, pendingValue=null;
+    const serialize=()=>pendingValue==null?'':(typeof pendingValue==='string'?pendingValue:JSON.stringify(pendingValue));
+    async function flushDraftV82(){
+      clearTimeout(draftTimer);draftTimer=0;
+      if(pendingValue===null)return;
+      const value=pendingValue;pendingValue=null;
+      const text=typeof value==='string'?value:JSON.stringify(value);
+      await rawSave(text).catch(err=>console.warn('v82 draft save failed',err));
+    }
+    safeSetDraftV72=function(value){
+      pendingValue=value;
+      clearTimeout(draftTimer);
+      draftTimer=setTimeout(flushDraftV82,650);
+      return true;
+    };
+    safeGetDraftV72=function(){
+      if(pendingValue!==null){try{return serialize();}catch{return large.getDraftTextSync();}}
+      return large.getDraftTextSync();
+    };
+    large.clearDraft=async function(){
+      clearTimeout(draftTimer);draftTimer=0;pendingValue=null;
+      return rawClear();
+    };
+    safeRemoveDraftV72=function(){large.clearDraft().catch(err=>console.warn('v82 draft clear failed',err));return true;};
+    window.essayFlushDraftV81=flushDraftV82;
+    window.essayFlushDraftV82=flushDraftV82;
+  }
+
+  // S펜 시작 시 캔버스 backing size가 맞으면 전체 resize/redraw를 생략한다.
+  window.essayEnsureInkCanvasSizeV82=function(kind){
+    const canvas=kind==='answer'?byId('answerInkCanvas'):questionCanvas();
+    if(!canvas)return;
+    const r=canvas.getBoundingClientRect(); if(r.width<2||r.height<2)return;
+    const dpr=window.devicePixelRatio||1;
+    const need=Math.abs(canvas.width-r.width*dpr)>3||Math.abs(canvas.height-r.height*dpr)>3;
+    if(!need)return;
+    try{
+      if(kind==='answer'){
+        if(typeof resizeAnswerCanvasV10==='function')resizeAnswerCanvasV10();
+        else if(typeof resizeAnswerCanvasV9==='function')resizeAnswerCanvasV9();
+      }else if(typeof resizeProblemInkCanvasV13==='function')resizeProblemInkCanvasV13();
+    }catch{}
+  };
 })();
