@@ -1,4 +1,4 @@
-const APP_VERSION="essay-psat-base-v89";const DB_NAME="essayPsatBaseDB_v1";const DB_VERSION=1;const STORE_PROBLEMS="problems";const STORE_ATTEMPTS="attempts";const $=id=>document.getElementById(id);const $$=sel=>Array.from(document.querySelectorAll(sel));let db;const state={problems:[],attempts:[],questionPages:[],explanationPages:[],selectedQuestionPage:-1,selectedExplanationPage:-1,activePasteTarget:"question",solve:null,timer:null,qPage:0,expPage:0,zoom:1,installPrompt:null};
+const APP_VERSION="essay-psat-base-v90";const DB_NAME="essayPsatBaseDB_v1";const DB_VERSION=1;const STORE_PROBLEMS="problems";const STORE_ATTEMPTS="attempts";const $=id=>document.getElementById(id);const $$=sel=>Array.from(document.querySelectorAll(sel));let db;const state={problems:[],attempts:[],questionPages:[],explanationPages:[],selectedQuestionPage:-1,selectedExplanationPage:-1,activePasteTarget:"question",solve:null,timer:null,qPage:0,expPage:0,zoom:1,installPrompt:null};
 
 /* === v76: 설치 이벤트를 DB 로딩 전에 확보 === */
 window.addEventListener("beforeinstallprompt",event=>{
@@ -697,11 +697,8 @@ state.inkTool = "pen";
 state.inkSize = 3;
 state.currentStroke = null;
 state.inkData = {};
-try {
-  state.inkData = JSON.parse(localStorage.getItem("essayPsatBaseInk_v2") || "{}");
-} catch {
-  state.inkData = {};
-}
+try { localStorage.removeItem("essayPsatBaseInk_v2"); } catch {}
+// v90: 문제필기는 현재 풀이 세션 메모리에서만 사용하고 영구 저장하지 않는다.
 
 function inkKey() {
   const p = currentProblem?.();
@@ -2805,11 +2802,11 @@ function resizeProblemInkCanvasV13() {
 let problemInkSaveTimerV89 = 0;
 function flushProblemInkV89(){
   clearTimeout(problemInkSaveTimerV89); problemInkSaveTimerV89=0;
-  try { localStorage.setItem("essayPsatBaseInk_v2", JSON.stringify(state.inkData || {})); } catch(err) { console.warn("v89 ink save",err); }
+  // v90: 필기는 세션 전용. 영구 저장하지 않음.
 }
 function saveProblemInkV13() {
-  clearTimeout(problemInkSaveTimerV89);
-  problemInkSaveTimerV89=setTimeout(flushProblemInkV89,700);
+  state.currentStroke=null;
+  // v90: localStorage/Firebase 저장 없음.
 }
 
 /* 문제 이미지: 손가락 드래그로 스크롤, S펜으로만 필기 */
@@ -6471,7 +6468,6 @@ setTimeout(() => {
 
   // 기기 간 공유할 Essay 로컬 필기/이어풀기 데이터
   const LOCAL_KEYS = [
-    "essayPsatBaseInk_v2",
     "essayScoreAnswerEditsV11",
     "essayScoreExpEditsV11"
   ];
@@ -7950,9 +7946,12 @@ setTimeout(() => {
   }
 
   function save(){
-    try{localStorage.setItem("essayScoreAnswerEditsV11",JSON.stringify(store()));}catch{}
-    try{scheduleFirebaseSyncV36?.("local")}catch{}
-    try{scheduleCloudSyncV46?.()}catch{}
+    // v90: 수정펜도 현재 채점 세션에서만 유지. 영구 저장/Firebase 없음.
+  }
+  function isPenLikeV90(e){
+    if(!e||e.pointerType==="touch")return false;
+    if(e.pointerType==="pen")return true;
+    return (e.pointerType==="mouse"||e.pointerType==="") && (e.buttons===1||e.type==="pointerup"||e.type==="pointercancel");
   }
 
   function visible(){
@@ -8029,9 +8028,21 @@ setTimeout(() => {
     const py=e.clientY-r.top+x.wrap.scrollTop;
     return {x:clamp(px/x.width,0,1),y:clamp(py/x.height,0,1)};
   }
+  function drawSegmentV90(x,stroke,a,b){
+    if(!x?.canvas||!a||!b)return;
+    const ctx=x.canvas.getContext("2d");
+    if(!ctx)return;
+    ctx.save();
+    ctx.setTransform(x.dpr,0,0,x.dpr,0,0);
+    ctx.globalCompositeOperation=stroke.tool==="eraser"?"destination-out":"source-over";
+    ctx.strokeStyle=stroke.tool==="eraser"?"#000":"#ef4444";
+    ctx.lineWidth=Math.max(1,Number(stroke.size||4));
+    ctx.lineCap="round";ctx.lineJoin="round";
+    ctx.beginPath();ctx.moveTo(a.x*x.width,a.y*x.height);ctx.lineTo(b.x*x.width,b.y*x.height);ctx.stroke();ctx.restore();
+  }
 
   document.addEventListener("pointerdown",e=>{
-    if(e.pointerType!=="pen"||!visible())return;
+    if(!isPenLikeV90(e)||!visible())return;
     const x=prepare(); if(!x||!inside(e,x.wrap))return;
 
     e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
@@ -8048,19 +8059,18 @@ setTimeout(() => {
   },true);
 
   document.addEventListener("pointermove",e=>{
-    if(!active||e.pointerId!==active.id||e.pointerType!=="pen")return;
+    if(!active||e.pointerId!==active.id||!isPenLikeV90(e))return;
     const x=prepare(); if(!x)return;
     e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
     let events=[e];
     try{const c=e.getCoalescedEvents?.();if(c?.length)events=c;}catch{}
-    for(const item of events)active.stroke.points.push(point(item,x));
-    draw();
+    for(const item of events){const prev=active.stroke.points[active.stroke.points.length-1],next=point(item,x);active.stroke.points.push(next);drawSegmentV90(x,active.stroke,prev,next);}
   },true);
 
   function end(e){
-    if(!active||e.pointerId!==active.id||e.pointerType!=="pen")return;
+    if(!active||e.pointerId!==active.id||!isPenLikeV90(e))return;
     e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
-    active=null; save(); draw();
+    active=null; save();
   }
   document.addEventListener("pointerup",end,true);
   document.addEventListener("pointercancel",end,true);
@@ -8157,21 +8167,36 @@ startSolve = function(ids, mode) {
     const score=byId("scoreOverlay");
     return !!(solve&&!solve.classList.contains("hidden")&&(!score||score.classList.contains("hidden"))&&state.solve);
   }
-  function draw(kind){
+  function fullDraw(kind){
     if(kind==="answer"){
       try{if(typeof drawAnswerInkV10==="function")drawAnswerInkV10();else if(typeof drawAnswerInkV9==="function")drawAnswerInkV9();}catch{}
     }else{
       try{if(typeof drawProblemInkV13==="function")drawProblemInkV13();else if(typeof drawInkV10==="function")drawInkV10();else if(typeof drawInkV9==="function")drawInkV9();}catch{}
     }
   }
+  function drawSegment(kind,canvas,stroke,a,b){
+    if(!canvas||!a||!b)return;
+    const r=canvas.getBoundingClientRect();
+    if(r.width<2||r.height<2)return;
+    const ctx=canvas.getContext("2d");
+    if(!ctx)return;
+    const sx=canvas.width/Math.max(1,r.width), sy=canvas.height/Math.max(1,r.height);
+    ctx.save();
+    ctx.setTransform(sx,0,0,sy,0,0);
+    ctx.globalCompositeOperation=stroke.tool==="eraser"?"destination-out":"source-over";
+    ctx.strokeStyle=stroke.tool==="eraser"?"#000":(kind==="answer"?"#111827":"#0ea5e9");
+    ctx.lineWidth=Math.max(1,Number(stroke.size||3));
+    ctx.lineCap="round";ctx.lineJoin="round";
+    ctx.beginPath();
+    ctx.moveTo(a.x*r.width,a.y*r.height);
+    ctx.lineTo(b.x*r.width,b.y*r.height);
+    ctx.stroke();
+    ctx.restore();
+  }
   function save(kind){
-    if(kind==="answer"){
-      state.answerInkCurrentStroke=null;
-      try{if(typeof saveCurrentAnswerPageV10==="function")saveCurrentAnswerPageV10();else if(typeof saveAnswerDraftInk==="function")saveAnswerDraftInk();}catch{}
-    }else{
-      state.currentStroke=null;
-      try{if(typeof saveProblemInkV13==="function")saveProblemInkV13();else localStorage.setItem("essayPsatBaseInk_v2",JSON.stringify(state.inkData||{}));}catch{}
-    }
+    if(kind==="answer") state.answerInkCurrentStroke=null;
+    else state.currentStroke=null;
+    // v90: 획 종료 시에도 저장/직렬화하지 않는다. 현재 세션 메모리에만 유지.
   }
 
   document.addEventListener("pointerdown",e=>{
@@ -8204,7 +8229,8 @@ startSolve = function(ids, mode) {
       state.currentStroke=stroke;
       active={id:e.pointerId,kind,canvas,stroke};
     }
-    draw(kind);
+    // 획 시작에서만 현재 캔버스 상태를 한 번 맞춘다.
+    fullDraw(kind);
   },true);
 
   document.addEventListener("pointermove",e=>{
@@ -8212,8 +8238,12 @@ startSolve = function(ids, mode) {
     e.preventDefault();e.stopPropagation();e.stopImmediatePropagation?.();
     let events=[e];
     try{const c=e.getCoalescedEvents?.();if(c?.length)events=c;}catch{}
-    for(const item of events)active.stroke.points.push(point(item,active.canvas));
-    draw(active.kind);
+    for(const item of events){
+      const prev=active.stroke.points[active.stroke.points.length-1];
+      const next=point(item,active.canvas);
+      active.stroke.points.push(next);
+      drawSegment(active.kind,active.canvas,active.stroke,prev,next);
+    }
   },true);
 
   function end(e){
@@ -8222,12 +8252,13 @@ startSolve = function(ids, mode) {
     e.preventDefault();e.stopPropagation();e.stopImmediatePropagation?.();
     const kind=active.kind;
     active=null;
-    save(kind);draw(kind);
+    save(kind);
+    // v90: pointerup에서도 전체 redraw/저장을 하지 않는다.
   }
   document.addEventListener("pointerup",end,true);
   document.addEventListener("pointercancel",end,true);
 
-  window.essaySolvePenBridgeV76={isPenLike};
+  window.essaySolvePenBridgeV76={isPenLike,fullDraw};
 })();
 
 
@@ -8424,4 +8455,67 @@ startSolve = function(ids, mode) {
     try{toast("풀이 종료")}catch{}
   };
   window.addEventListener("pagehide",()=>{try{flushProblemInkV89()}catch{}});
+})();
+
+
+/* === v90: 필기는 세션 전용 + 풀이기록은 상태 판별용 메타데이터만 === */
+(function essaySessionInkOnlyV90(){
+  if(window.__essaySessionInkOnlyV90)return;window.__essaySessionInkOnlyV90=true;
+  try{localStorage.removeItem("essayPsatBaseInk_v2")}catch{}
+  state.inkData={};
+
+  // 구버전 함수가 호출되어도 문제필기 영구저장을 하지 않는다.
+  try{saveInkData=function(){}}catch{}
+  try{saveInkDataV9=function(){}}catch{}
+  try{saveProblemInkV13=function(){state.currentStroke=null}}catch{}
+  try{flushProblemInkV89=function(){clearTimeout(problemInkSaveTimerV89);problemInkSaveTimerV89=0}}catch{}
+
+  // 기록은 '푼 문제/안 푼 문제' 판별과 통계용 메타데이터만 저장한다.
+  saveAttempt=async function(){
+    const p=typeof currentProblem==="function"?currentProblem():null;
+    if(!p||!state.solve)return null;
+    try{state.solve.elapsedBase=typeof elapsedNow==="function"?elapsedNow():Number(state.solve.elapsedBase||0)}catch{}
+    const value=id=>document.getElementById(id)?.value;
+    const attempt={
+      id:uuid(), problemId:p.id, subject:p.subject, session:p.session, mode:state.solve.mode,
+      answer:"", elapsedMs:Number(state.solve.elapsedBase||0),
+      score:value("attemptScoreInput")===""?null:Number(value("attemptScoreInput")),
+      maxScore:p.maxScore||0,
+      difficulty:value("difficultyResultInput")||"중",
+      needReview:value("needReviewInput")||"true",
+      completion:value("completionInput")||(state.solve.mode==="outline"?"목차만":"완성"),
+      memo:(value("memoInput")||"").trim(),
+      checkedPoints:Array.from(document.querySelectorAll("#pointChecklist input")).map(x=>!!x.checked),
+      completedAt:nowIso()
+    };
+    await put(STORE_ATTEMPTS,attempt);
+    if(!Array.isArray(state.attempts))state.attempts=[];
+    state.attempts.unshift(attempt);
+    state.attempts.sort((a,b)=>String(b.completedAt||"").localeCompare(String(a.completedAt||"")));
+    if(p.manualUnseenV78===true){p.manualUnseenV78=false;try{await put(STORE_PROBLEMS,p)}catch{}}
+    try{toast("풀이 기록 저장 완료")}catch{}
+    return attempt;
+  };
+})();
+
+/* === v90b: no sync / no persisted ink hard override === */
+(function essayNoSyncHardOverrideV90(){
+  if(window.__essayNoSyncHardOverrideV90)return;window.__essayNoSyncHardOverrideV90=true;
+  try{ scheduleFirebaseSyncV36=function(){} }catch{}
+  try{ scheduleCloudSyncV46=function(){} }catch{}
+  try{ startLocalWatcherV36=function(){} }catch{}
+  try{ uploadLocalDataV36=async function(){ return null } }catch{}
+  try{ applySharedLocalV36=async function(){ return null } }catch{}
+  try{ saveInkData=function(){} }catch{}
+  try{ saveInkDataV9=function(){} }catch{}
+  try{ saveProblemInkV10=function(){} }catch{}
+  try{ saveProblemInkV13=function(){ state.currentStroke=null } }catch{}
+  try{ flushProblemInkV89=function(){ clearTimeout(problemInkSaveTimerV89); problemInkSaveTimerV89=0 } }catch{}
+  try{ saveEditStoreV68=function(){} }catch{}
+  try{ saveScoreEditsV11=function(){} }catch{}
+  try{ safeSetDraftV72=function(){ return false } }catch{}
+  try{ safeGetDraftV72=function(){ return '' } }catch{}
+  try{ safeRemoveDraftV72=function(){ return true } }catch{}
+  try{ localStorage.removeItem('essayPsatBaseInk_v2') }catch{}
+  try{ localStorage.removeItem('essayPsatBaseDraft') }catch{}
 })();
