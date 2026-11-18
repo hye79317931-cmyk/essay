@@ -1,4 +1,4 @@
-const APP_VERSION="essay-psat-base-v90";const DB_NAME="essayPsatBaseDB_v1";const DB_VERSION=1;const STORE_PROBLEMS="problems";const STORE_ATTEMPTS="attempts";const $=id=>document.getElementById(id);const $$=sel=>Array.from(document.querySelectorAll(sel));let db;const state={problems:[],attempts:[],questionPages:[],explanationPages:[],selectedQuestionPage:-1,selectedExplanationPage:-1,activePasteTarget:"question",solve:null,timer:null,qPage:0,expPage:0,zoom:1,installPrompt:null};
+const APP_VERSION="essay-psat-base-v91";const DB_NAME="essayPsatBaseDB_v1";const DB_VERSION=1;const STORE_PROBLEMS="problems";const STORE_ATTEMPTS="attempts";const $=id=>document.getElementById(id);const $$=sel=>Array.from(document.querySelectorAll(sel));let db;const state={problems:[],attempts:[],questionPages:[],explanationPages:[],selectedQuestionPage:-1,selectedExplanationPage:-1,activePasteTarget:"question",solve:null,timer:null,qPage:0,expPage:0,zoom:1,installPrompt:null};
 
 /* === v76: 설치 이벤트를 DB 로딩 전에 확보 === */
 window.addEventListener("beforeinstallprompt",event=>{
@@ -7427,11 +7427,8 @@ setTimeout(() => {
     if (fbUser) schedulePushV36();
   });
 
-  if("requestIdleCallback" in window){
-    requestIdleCallback(()=>startV36(),{timeout:4500});
-  }else{
-    setTimeout(startV36,2500);
-  }
+  // v91: cloud/Firebase synchronization removed for performance.
+  // startV36() is intentionally never started.
 })();
 
 /* === v67: 제출 후 내 답안으로 돌아가기 버튼 복구 === */
