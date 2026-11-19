@@ -27,21 +27,30 @@
       #fff;
   }
   .score-comparison{display:grid;grid-template-columns:minmax(0,1fr);gap:8px}
-  .score-paper{height:min(40vh,620px);overflow:auto;background:#eef1f5}
-  .score-paper .stage{margin-inline:auto;pointer-events:none}
+  .score-paper{height:min(40vh,620px);overflow:auto;overscroll-behavior:contain;background:#eef1f5}
+  .score-paper .stage{margin-inline:auto}
+  .score-paper #aCanvas{pointer-events:none}
+  #scoreCorrection{touch-action:pan-x pan-y}
+  .score-edit-tools{padding:3px 0;border:0}
   .score-comparison #model{margin:0;padding:8px;white-space:pre-wrap;overflow-wrap:anywhere}
   .score-comparison #model:empty{display:none}
-  @media(min-width:821px){
+  @media(min-width:821px) and (orientation:landscape){
     .score-comparison{grid-template-columns:repeat(2,minmax(0,1fr))}
     .score-comparison .score-paper{height:min(52vh,620px)}
   }
   @media(min-width:900px){.grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
   </style></head><body>
-  <section id="solve" class="hidden"><div class="bar"><strong id="title">문제</strong><span id="setBadge" class="badge"></span><span id="qBadge" class="badge"></span><span id="timer" class="badge">00:00</span><span id="limit" class="badge"></span><button id="prevQ">이전쪽</button><button id="nextQ">다음쪽</button><button id="fitQ">맞춤</button><button id="zoomOutQ">−</button><button id="zoomInQ">＋</button><button id="submit">제출</button><button id="exit">끝내기</button><span id="status" class="status"></span></div><div class="body"><div class="pane"><div id="qScroll" class="scroll"><div id="qStage" class="stage"><img id="qImg"><canvas id="qCanvas"></canvas></div></div><div class="tools"><button id="qPen" class="on">문제펜</button><button id="qErase">지우개</button><button id="qClear">필기삭제</button><label>굵기 <input id="qSize" type="range" min="1" max="14" value="3"></label></div></div><div class="divider"></div><div class="pane"><div id="aScroll" class="scroll"><div id="aStage" class="stage"><canvas id="aCanvas" class="answerCanvas"></canvas></div></div><div class="tools"><button id="aPen" class="on">답안펜</button><button id="aErase">지우개</button><button id="aClear">필기삭제</button><button id="fitA">맞춤</button><button id="zoomOutA">−</button><button id="zoomInA">＋</button><label>굵기 <input id="aSize" type="range" min="1" max="14" value="3"></label></div></div></div></section>
+  <section id="solve" class="hidden"><div class="bar"><strong id="title">문제</strong><span id="setBadge" class="badge"></span><span id="qBadge" class="badge"></span><span id="timer" class="badge">00:00</span><span id="limit" class="badge"></span><button id="prevQ">이전쪽</button><button id="nextQ">다음쪽</button><button id="fitQ">맞춤</button><button id="zoomOutQ">−</button><button id="zoomInQ">＋</button><button id="submit">제출</button><button id="exit">끝내기</button><span id="status" class="status"></span></div><div class="body"><div class="pane"><div id="qScroll" class="scroll"><div id="qStage" class="stage"><img id="qImg"><canvas id="qCanvas"></canvas></div></div><div class="tools"><button id="qPen" class="on">문제펜</button><button id="qErase">지우개</button><button id="qClear">필기삭제</button><label>굵기 <input id="qSize" type="range" min="1" max="14" value="3"></label></div></div><div class="divider"></div><div class="pane"><div id="aScroll" class="scroll"><div id="aStage" class="stage"><canvas id="aCanvas" class="answerCanvas"></canvas><canvas id="scoreCorrection" class="hidden" aria-label="답안 수정 필기"></canvas></div></div><div class="tools"><button id="aPen" class="on">답안펜</button><button id="aErase">지우개</button><button id="aClear">필기삭제</button><button id="fitA">맞춤</button><button id="zoomOutA">−</button><button id="zoomInA">＋</button><label>굵기 <input id="aSize" type="range" min="1" max="14" value="3"></label></div></div></div></section>
   <section id="score" class="hidden"><div class="bar"><strong>자가채점</strong><span id="scoreMeta" class="badge"></span><button id="back">답안으로</button><span id="scoreStatus" class="status"></span></div><div class="scorebody">
     <div class="score-comparison">
       <section class="card" aria-labelledby="scoreAnswerTitle">
         <div class="bar" style="padding:0;border:0"><strong id="scoreAnswerTitle">내 답안</strong></div>
+        <div class="bar score-edit-tools" role="group" aria-label="답안 수정 도구">
+          <button id="cPen">수정펜</button>
+          <button id="cErase">수정 지우개</button>
+          <button id="cClear">수정필기 삭제</button>
+          <label>수정 굵기 <input id="cSize" type="range" min="1" max="20" value="4"></label>
+        </div>
         <div id="scoreAnswer" class="score-paper" role="region" tabindex="0" aria-label="내 손글씨 답안"></div>
       </section>
       <section class="card" aria-labelledby="scoreExplanationTitle">
@@ -51,20 +60,35 @@
     </div>
     <div class="card"><strong>채점포인트</strong><div id="checklist"></div></div><div class="card"><div class="grid"><label>점수<input id="scoreValue" type="number" min="0" step="0.5"></label><label>난이도<select id="difficulty"><option value="중">중</option><option value="상">상</option><option value="하">하</option></select></label><label>복습필요<select id="review"><option value="true">예</option><option value="false">아니오</option></select></label><label>완성도<select id="completion"><option value="목차만">목차만</option><option value="불완전">불완전</option><option value="완성">완성</option></select></label></div><label>메모<textarea id="memo" rows="3"></textarea></label><div class="bar" style="padding:8px 0 0;border:0"><button id="save">기록 저장</button><button id="saveNext">저장 후 다음</button><button id="saveFinish">저장 후 끝내기</button></div></div></div></section>
   <script>
-  (()=>{const $=id=>document.getElementById(id),clamp=(v,a,b)=>Math.max(a,Math.min(b,v));let problem=null,index=0,total=1,mode='outline',qPage=0,expPage=0,qScale=1,aScale=1,aFitScale=1,startedAt=0,elapsedBase=0,timer=null,qTool='pen',aTool='pen',qSize=3,aSize=3;
+  (()=>{const $=id=>document.getElementById(id),clamp=(v,a,b)=>Math.max(a,Math.min(b,v));let problem=null,index=0,total=1,mode='outline',qPage=0,expPage=0,qScale=1,aScale=1,aFitScale=1,startedAt=0,elapsedBase=0,timer=null;
   const pages=v=>Array.isArray(v)?v.filter(Boolean):[];const fmt=ms=>{const s=Math.floor(Math.max(0,ms)/1000);return Math.floor(s/60).toString().padStart(2,'0')+':'+(s%60).toString().padStart(2,'0')};const elapsed=()=>elapsedBase+(Date.now()-startedAt);
   function tick(){const e=elapsed();$('timer').textContent=fmt(e);const lim=Number(problem?.timeLimit||0)*60000;$('limit').textContent=lim?(e<=lim?'남은 '+fmt(lim-e):'초과 '+fmt(e-lim)):''}
-  function setTool(kind,tool){if(kind==='q'){qTool=tool;$('qPen').classList.toggle('on',tool==='pen');$('qErase').classList.toggle('on',tool==='eraser')}else{aTool=tool;$('aPen').classList.toggle('on',tool==='pen');$('aErase').classList.toggle('on',tool==='eraser')}}
-  function bindInk(id,kind){
+  function bindInk(id,prefix,color){
     const canvas=$(id),stage=canvas.parentElement,ctx=canvas.getContext('2d');
     const strokes=[];
-    let active=null,resizeTimer;
+    const pen=$(prefix+'Pen'),erase=$(prefix+'Erase'),sizeInput=$(prefix+'Size');
+    let active=null,resizeTimer,erasing=false;
+
+    function selectTool(useEraser){
+      erasing=useEraser;
+      pen.classList.toggle('on',!erasing);
+      erase.classList.toggle('on',erasing);
+      pen.setAttribute('aria-pressed',String(!erasing));
+      erase.setAttribute('aria-pressed',String(erasing));
+    }
+
+    pen.onclick=()=>selectTool(false);
+    erase.onclick=()=>selectTool(true);
+    $(prefix+'Clear').onclick=()=>{
+      if(prefix!=='c'||confirm('현재 답안 수정필기를 지울까요?'))clear();
+    };
+    selectTool(false);
 
     function paint(stroke,start=0){
       const {points,size,eraser}=stroke;
       ctx.setTransform(canvas.width/Number(stage.dataset.w),0,0,canvas.height/Number(stage.dataset.h),0,0);
       ctx.globalCompositeOperation=eraser?'destination-out':'source-over';
-      ctx.fillStyle=ctx.strokeStyle=kind==='q'?'#0ea5e9':'#111827';
+      ctx.fillStyle=ctx.strokeStyle=color;
       if(start===0){
         ctx.beginPath();
         ctx.arc(points[0].x,points[0].y,size/2,0,Math.PI*2);
@@ -108,16 +132,15 @@
     }
 
     canvas.addEventListener('pointerdown',event=>{
-      if(event.pointerType==='touch'||active)return;
+      if(event.pointerType==='touch'||active||(prefix==='c'&&event.pointerType!=='pen'))return;
       const rect=canvas.getBoundingClientRect();
       if(rect.width<2||rect.height<2||!Number(stage.dataset.w))return;
       event.preventDefault();
       event.stopPropagation();
       try{canvas.setPointerCapture(event.pointerId)}catch{}
       resize();
-      const eraser=(kind==='q'?qTool:aTool)==='eraser';
-      const size=(kind==='q'?qSize:aSize)*(eraser?5:1);
-      const stroke={eraser,size,points:[point(event,rect)]};
+      const size=Number(sizeInput.value)*(erasing?5:1);
+      const stroke={eraser:erasing,size,points:[point(event,rect)]};
       strokes.push(stroke);
       active={id:event.pointerId,stroke};
       paint(stroke);
@@ -147,18 +170,19 @@
     }
     for(const type of ['pointerup','pointercancel','lostpointercapture'])canvas.addEventListener(type,end,true);
 
-    return {
-      resize,
-      scheduleResize,
-      clear(){
-        active=null;
-        strokes.length=0;
-        ctx.resetTransform();
-        ctx.clearRect(0,0,canvas.width,canvas.height);
-      }
-    };
+    function clear(){
+      active=null;
+      strokes.length=0;
+      ctx.resetTransform();
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+    }
+    return {resize,scheduleResize,clear};
   }
-  const ink={q:bindInk('qCanvas','q'),a:bindInk('aCanvas','a')};
+  const ink={
+    q:bindInk('qCanvas','q','#0ea5e9'),
+    a:bindInk('aCanvas','a','#111827'),
+    correction:bindInk('scoreCorrection','c','#ef4444')
+  };
   window.addEventListener('resize',()=>{
     if(answerView)fitScoreAnswer();
     ink.q.scheduleResize();
@@ -171,13 +195,14 @@
     const z=key==='q'?qScale:aScale,w=Number(st.dataset.w||1),h=Number(st.dataset.h||1);st.style.width=Math.round(w*z)+'px';st.style.height=Math.round(h*z)+'px';ink[key].scheduleResize()};sc.addEventListener('pointerdown',e=>{if(e.pointerType!=='touch')return;e.preventDefault();try{sc.setPointerCapture(e.pointerId)}catch{};touch.set(e.pointerId,{x:e.clientX,y:e.clientY});if(touch.size>=2){const m=mid(),r=sc.getBoundingClientRect(),z=key==='q'?qScale:aScale;pinch={d:dist(),z,cx:(sc.scrollLeft+m.x-r.left)/z,cy:(sc.scrollTop+m.y-r.top)/z};pan=null}else pan={id:e.pointerId,x:e.clientX,y:e.clientY,l:sc.scrollLeft,t:sc.scrollTop}},true);sc.addEventListener('pointermove',e=>{if(e.pointerType!=='touch'||!touch.has(e.pointerId))return;e.preventDefault();touch.set(e.pointerId,{x:e.clientX,y:e.clientY});if(touch.size>=2&&pinch){const m=mid(),r=sc.getBoundingClientRect(),z=clamp(pinch.z*dist()/Math.max(1,pinch.d),min,max);apply(z);sc.scrollLeft=Math.max(0,pinch.cx*z-(m.x-r.left));sc.scrollTop=Math.max(0,pinch.cy*z-(m.y-r.top))}else if(pan&&pan.id===e.pointerId){sc.scrollLeft=pan.l-(e.clientX-pan.x);sc.scrollTop=pan.t-(e.clientY-pan.y)}},true);const end=e=>{if(e.pointerType!=='touch'||!touch.has(e.pointerId))return;touch.delete(e.pointerId);if(touch.size===1){const [id,p]=[...touch.entries()][0];pan={id,x:p.x,y:p.y,l:sc.scrollLeft,t:sc.scrollTop};pinch=null}else if(!touch.size){pan=null;pinch=null}};sc.addEventListener('pointerup',end,true);sc.addEventListener('pointercancel',end,true);return apply}
   const applyQ=panZoom('qScroll','qStage','q',.08,4),applyA=panZoom('aScroll','aStage','a',.2,3);
   function qShow(n){const arr=pages(problem?.questionPages);qPage=clamp(Number(n)||0,0,Math.max(0,arr.length-1));$('qBadge').textContent=arr.length?'문제 '+(qPage+1)+'/'+arr.length+'쪽':'문제 없음';ink.q.clear();if(!arr.length){$('qImg').removeAttribute('src');return}const img=$('qImg'),st=$('qStage'),sc=$('qScroll');img.onload=()=>{const w=img.naturalWidth||1,h=img.naturalHeight||1;st.dataset.w=w;st.dataset.h=h;qScale=clamp((sc.clientWidth-8)/w,.08,1.5);applyQ(qScale);ink.q.resize();sc.scrollLeft=0;sc.scrollTop=0};img.src=arr[qPage]}
-  function answerReset(){const st=$('aStage'),sc=$('aScroll'),w=900,h=1300;st.dataset.w=w;st.dataset.h=h;ink.a.clear();aFitScale=clamp((sc.clientWidth-8)/w,.2,1);applyA(aFitScale);ink.a.resize();sc.scrollLeft=0;sc.scrollTop=0}
+  function answerReset(){const st=$('aStage'),sc=$('aScroll'),w=900,h=1300;st.dataset.w=w;st.dataset.h=h;ink.a.clear();ink.correction.clear();aFitScale=clamp((sc.clientWidth-8)/w,.2,1);applyA(aFitScale);ink.a.resize();sc.scrollLeft=0;sc.scrollTop=0}
   let answerView=null;
   function fitScoreAnswer(){
     const width=$('scoreAnswer').clientWidth;
     if(!width)return;
     const paperWidth=Number($('aStage').dataset.w);
     applyA(Math.min(width/paperWidth,1));
+    ink.correction.scheduleResize();
   }
 
   function showScoreAnswer(){
@@ -185,15 +210,18 @@
     answerView={scale:aScale,left:scroll.scrollLeft,top:scroll.scrollTop};
     // The preview displays the same page and ink as the editor.
     preview.appendChild($('aStage'));
+    $('scoreCorrection').classList.remove('hidden');
     fitScoreAnswer();
     $('score').querySelector('.scorebody').scrollTop=0;
     preview.scrollTop=0;
     ink.a.resize();
+    ink.correction.resize();
   }
 
   function restoreAnswer(){
     if(!answerView)return;
     const scroll=$('aScroll');
+    $('scoreCorrection').classList.add('hidden');
     scroll.appendChild($('aStage'));
     applyA(answerView.scale);
     scroll.scrollLeft=answerView.left;
@@ -208,7 +236,7 @@
   function back(){ $('score').classList.add('hidden');$('solve').classList.remove('hidden');restoreAnswer();startedAt=Date.now();clearInterval(timer);timer=setInterval(tick,500);tick() }
   function sendSave(action){parent.postMessage({source:'essay-lite91',type:'save',action,data:{elapsedMs:elapsedBase||elapsed(),score:$('scoreValue').value===''?null:Number($('scoreValue').value),difficulty:$('difficulty').value,needReview:$('review').value,completion:$('completion').value,memo:$('memo').value.trim(),checkedPoints:Array.from(document.querySelectorAll('#checklist input')).map(x=>!!x.checked)}},'*');$('scoreStatus').textContent='저장 중...'}
   window.addEventListener('message',e=>{const m=e.data||{};if(e.source!==parent||m.source!=='essay-lite91-parent')return;if(m.type==='open')open(m);else if(m.type==='saved')$('scoreStatus').textContent='저장 완료'});
-  $('qPen').onclick=()=>setTool('q','pen');$('qErase').onclick=()=>setTool('q','eraser');$('qClear').onclick=()=>ink.q.clear();$('qSize').oninput=e=>qSize=Number(e.target.value||3);$('aPen').onclick=()=>setTool('a','pen');$('aErase').onclick=()=>setTool('a','eraser');$('aClear').onclick=()=>ink.a.clear();$('aSize').oninput=e=>aSize=Number(e.target.value||3);$('prevQ').onclick=()=>qShow(qPage-1);$('nextQ').onclick=()=>qShow(qPage+1);$('fitQ').onclick=()=>{const sc=$('qScroll'),st=$('qStage');qScale=clamp((sc.clientWidth-8)/Number(st.dataset.w||1),.08,1.5);applyQ(qScale);sc.scrollLeft=0;sc.scrollTop=0};$('zoomOutQ').onclick=()=>applyQ(qScale-.15);$('zoomInQ').onclick=()=>applyQ(qScale+.15);$('fitA').onclick=()=>{const sc=$('aScroll'),st=$('aStage');aScale=clamp((sc.clientWidth-8)/Number(st.dataset.w||900),.2,1);applyA(aScale);sc.scrollLeft=0;sc.scrollTop=0};$('zoomOutA').onclick=()=>applyA(aScale-.15);$('zoomInA').onclick=()=>applyA(aScale+.15);$('submit').onclick=submit;$('exit').onclick=()=>parent.postMessage({source:'essay-lite91',type:'exit'},'*');$('back').onclick=back;$('prevExp').onclick=()=>expShow(expPage-1);$('nextExp').onclick=()=>expShow(expPage+1);$('save').onclick=()=>sendSave('stay');$('saveNext').onclick=()=>sendSave('next');$('saveFinish').onclick=()=>sendSave('finish');
+  $('prevQ').onclick=()=>qShow(qPage-1);$('nextQ').onclick=()=>qShow(qPage+1);$('fitQ').onclick=()=>{const sc=$('qScroll'),st=$('qStage');qScale=clamp((sc.clientWidth-8)/Number(st.dataset.w||1),.08,1.5);applyQ(qScale);sc.scrollLeft=0;sc.scrollTop=0};$('zoomOutQ').onclick=()=>applyQ(qScale-.15);$('zoomInQ').onclick=()=>applyQ(qScale+.15);$('fitA').onclick=()=>{const sc=$('aScroll'),st=$('aStage');aScale=clamp((sc.clientWidth-8)/Number(st.dataset.w||900),.2,1);applyA(aScale);sc.scrollLeft=0;sc.scrollTop=0};$('zoomOutA').onclick=()=>applyA(aScale-.15);$('zoomInA').onclick=()=>applyA(aScale+.15);$('submit').onclick=submit;$('exit').onclick=()=>parent.postMessage({source:'essay-lite91',type:'exit'},'*');$('back').onclick=back;$('prevExp').onclick=()=>expShow(expPage-1);$('nextExp').onclick=()=>expShow(expPage+1);$('save').onclick=()=>sendSave('stay');$('saveNext').onclick=()=>sendSave('next');$('saveFinish').onclick=()=>sendSave('finish');
   parent.postMessage({source:'essay-lite91',type:'ready'},'*');})();
   </script></body></html>`}
 
