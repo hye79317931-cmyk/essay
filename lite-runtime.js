@@ -18,7 +18,7 @@
 
   function frameHTML(){return String.raw`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><style>
   *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;font-family:system-ui,-apple-system,sans-serif;background:#f5f7fb;color:#111827}button,input,select,textarea{font:inherit}button{border:1px solid #cfd5df;background:#fff;border-radius:8px;padding:6px 10px;min-height:34px}button.on{outline:2px solid #111827}.hidden{display:none!important}
-  #solve,#score{position:fixed;inset:0;display:flex;flex-direction:column;background:#f5f7fb}.bar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:7px;background:#fff;border-bottom:1px solid #d7dce5;flex:0 0 auto}.badge{font-size:12px;font-weight:700;padding:4px 7px;border:1px solid #d7dce5;border-radius:999px;background:#fff}.body{display:grid;grid-template-rows:minmax(0,52%) 8px minmax(0,48%);grid-template-columns:minmax(0,1fr);flex:1;min-height:0}.pane{display:flex;flex-direction:column;min-height:0;background:#fff}.divider{background:#d7dce5}.scroll{position:relative;flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;touch-action:none;background:#eef1f5}.stage{position:relative;background:#fff}.stage img,.stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block}.stage img{pointer-events:none;user-select:none;-webkit-user-drag:none}.stage canvas{touch-action:none}.tools{display:flex;gap:6px;align-items:center;padding:5px 7px;overflow-x:auto;background:#fff;border-top:1px solid #e1e5eb;flex:0 0 auto}.tools>*{white-space:nowrap}.scorebody{overflow:auto;padding:10px;flex:1}.card{background:#fff;border:1px solid #d8dee8;border-radius:12px;padding:10px;margin-bottom:10px}.exp{height:min(52vh,620px);overflow:auto;background:#eef1f5}.exp img{display:block;max-width:100%;height:auto;margin:auto}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.grid label{display:flex;flex-direction:column;gap:4px;font-size:13px}.grid input,.grid select,textarea{width:100%}.check{display:flex;gap:6px;margin:5px 0}.status{margin-left:auto;font-size:12px;font-weight:700}
+  #solve,#score{position:fixed;inset:0;display:flex;flex-direction:column;background:#f5f7fb}.bar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:7px;background:#fff;border-bottom:1px solid #d7dce5;flex:0 0 auto}.badge{font-size:12px;font-weight:700;padding:4px 7px;border:1px solid #d7dce5;border-radius:999px;background:#fff}.body{display:grid;grid-template-rows:minmax(0,52%) 8px minmax(0,48%);grid-template-columns:minmax(0,1fr);flex:1;min-height:0}.pane{display:flex;flex-direction:column;min-height:0;background:#fff}.divider{background:#d7dce5}.scroll{position:relative;flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;touch-action:none;background:#eef1f5}.stage{position:relative;background:#fff}.stage img,.stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block}.stage img{pointer-events:none;user-select:none;-webkit-user-drag:none}.stage canvas{touch-action:none}.tools{display:flex;gap:6px;align-items:center;padding:5px 7px;overflow-x:auto;background:#fff;border-top:1px solid #e1e5eb;flex:0 0 auto}.tools>*{white-space:nowrap}.scorebody{overflow:auto;padding:10px;flex:1}.card{background:#fff;border:1px solid #d8dee8;border-radius:12px;padding:10px;margin-bottom:10px}.exp img{display:block;max-width:100%;height:auto;margin:auto}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.grid label{display:flex;flex-direction:column;gap:4px;font-size:13px}.grid input,.grid select,textarea{width:100%}.check{display:flex;gap:6px;margin:5px 0}.status{margin-left:auto;font-size:12px;font-weight:700}
   .answerCanvas{
     --answer-zoom:1;
     background:
@@ -26,10 +26,30 @@
       0 calc(28px * var(--answer-zoom))/100% calc(32px * var(--answer-zoom)),
       #fff;
   }
+  .score-comparison{display:grid;grid-template-columns:minmax(0,1fr);gap:8px}
+  .score-paper{height:min(40vh,620px);overflow:auto;background:#eef1f5}
+  .score-paper .stage{margin-inline:auto;pointer-events:none}
+  .score-comparison #model{margin:0;padding:8px;white-space:pre-wrap;overflow-wrap:anywhere}
+  .score-comparison #model:empty{display:none}
+  @media(min-width:821px){
+    .score-comparison{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .score-comparison .score-paper{height:min(52vh,620px)}
+  }
   @media(min-width:900px){.grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
   </style></head><body>
   <section id="solve" class="hidden"><div class="bar"><strong id="title">문제</strong><span id="setBadge" class="badge"></span><span id="qBadge" class="badge"></span><span id="timer" class="badge">00:00</span><span id="limit" class="badge"></span><button id="prevQ">이전쪽</button><button id="nextQ">다음쪽</button><button id="fitQ">맞춤</button><button id="zoomOutQ">−</button><button id="zoomInQ">＋</button><button id="submit">제출</button><button id="exit">끝내기</button><span id="status" class="status"></span></div><div class="body"><div class="pane"><div id="qScroll" class="scroll"><div id="qStage" class="stage"><img id="qImg"><canvas id="qCanvas"></canvas></div></div><div class="tools"><button id="qPen" class="on">문제펜</button><button id="qErase">지우개</button><button id="qClear">필기삭제</button><label>굵기 <input id="qSize" type="range" min="1" max="14" value="3"></label></div></div><div class="divider"></div><div class="pane"><div id="aScroll" class="scroll"><div id="aStage" class="stage"><canvas id="aCanvas" class="answerCanvas"></canvas></div></div><div class="tools"><button id="aPen" class="on">답안펜</button><button id="aErase">지우개</button><button id="aClear">필기삭제</button><button id="fitA">맞춤</button><button id="zoomOutA">−</button><button id="zoomInA">＋</button><label>굵기 <input id="aSize" type="range" min="1" max="14" value="3"></label></div></div></div></section>
-  <section id="score" class="hidden"><div class="bar"><strong>자가채점</strong><span id="scoreMeta" class="badge"></span><button id="back">답안으로</button><span id="scoreStatus" class="status"></span></div><div class="scorebody"><div class="card"><div class="bar" style="padding:0;border:0"><strong>해설 / 모범답안</strong><span id="expBadge" class="badge"></span><button id="prevExp">이전</button><button id="nextExp">다음</button></div><div class="exp"><img id="expImg"></div><pre id="model" style="white-space:pre-wrap"></pre></div><div class="card"><strong>채점포인트</strong><div id="checklist"></div></div><div class="card"><div class="grid"><label>점수<input id="scoreValue" type="number" min="0" step="0.5"></label><label>난이도<select id="difficulty"><option value="중">중</option><option value="상">상</option><option value="하">하</option></select></label><label>복습필요<select id="review"><option value="true">예</option><option value="false">아니오</option></select></label><label>완성도<select id="completion"><option value="목차만">목차만</option><option value="불완전">불완전</option><option value="완성">완성</option></select></label></div><label>메모<textarea id="memo" rows="3"></textarea></label><div class="bar" style="padding:8px 0 0;border:0"><button id="save">기록 저장</button><button id="saveNext">저장 후 다음</button><button id="saveFinish">저장 후 끝내기</button></div></div></div></section>
+  <section id="score" class="hidden"><div class="bar"><strong>자가채점</strong><span id="scoreMeta" class="badge"></span><button id="back">답안으로</button><span id="scoreStatus" class="status"></span></div><div class="scorebody">
+    <div class="score-comparison">
+      <section class="card" aria-labelledby="scoreAnswerTitle">
+        <div class="bar" style="padding:0;border:0"><strong id="scoreAnswerTitle">내 답안</strong></div>
+        <div id="scoreAnswer" class="score-paper" role="region" tabindex="0" aria-label="내 손글씨 답안"></div>
+      </section>
+      <section class="card" aria-labelledby="scoreExplanationTitle">
+        <div class="bar" style="padding:0;border:0"><strong id="scoreExplanationTitle">해설 / 모범답안</strong><span id="expBadge" class="badge"></span><button id="prevExp">이전</button><button id="nextExp">다음</button></div>
+        <div class="score-paper exp" role="region" tabindex="0" aria-label="해설 / 모범답안"><img id="expImg" alt="해설 이미지"><pre id="model"></pre></div>
+      </section>
+    </div>
+    <div class="card"><strong>채점포인트</strong><div id="checklist"></div></div><div class="card"><div class="grid"><label>점수<input id="scoreValue" type="number" min="0" step="0.5"></label><label>난이도<select id="difficulty"><option value="중">중</option><option value="상">상</option><option value="하">하</option></select></label><label>복습필요<select id="review"><option value="true">예</option><option value="false">아니오</option></select></label><label>완성도<select id="completion"><option value="목차만">목차만</option><option value="불완전">불완전</option><option value="완성">완성</option></select></label></div><label>메모<textarea id="memo" rows="3"></textarea></label><div class="bar" style="padding:8px 0 0;border:0"><button id="save">기록 저장</button><button id="saveNext">저장 후 다음</button><button id="saveFinish">저장 후 끝내기</button></div></div></div></section>
   <script>
   (()=>{const $=id=>document.getElementById(id),clamp=(v,a,b)=>Math.max(a,Math.min(b,v));let problem=null,index=0,total=1,mode='outline',qPage=0,expPage=0,qScale=1,aScale=1,aFitScale=1,startedAt=0,elapsedBase=0,timer=null,qTool='pen',aTool='pen',qSize=3,aSize=3;
   const pages=v=>Array.isArray(v)?v.filter(Boolean):[];const fmt=ms=>{const s=Math.floor(Math.max(0,ms)/1000);return Math.floor(s/60).toString().padStart(2,'0')+':'+(s%60).toString().padStart(2,'0')};const elapsed=()=>elapsedBase+(Date.now()-startedAt);
@@ -139,7 +159,11 @@
     };
   }
   const ink={q:bindInk('qCanvas','q'),a:bindInk('aCanvas','a')};
-  window.addEventListener('resize',()=>{ink.q.scheduleResize();ink.a.scheduleResize()});
+  window.addEventListener('resize',()=>{
+    if(answerView)fitScoreAnswer();
+    ink.q.scheduleResize();
+    ink.a.scheduleResize();
+  });
   function panZoom(scroll,stage,key,min,max){const sc=$(scroll),st=$(stage),touch=new Map();let pan=null,pinch=null;const ls=()=>[...touch.values()],dist=()=>{const p=ls();return p.length<2?1:Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y)||1},mid=()=>{const p=ls();return p.length<2?{x:0,y:0}:{x:(p[0].x+p[1].x)/2,y:(p[0].y+p[1].y)/2}};const apply=v=>{if(key==='q')qScale=clamp(v,min,max);else {
       aScale=clamp(v,min,max);
       $('aCanvas').style.setProperty('--answer-zoom',aScale/aFitScale);
@@ -148,10 +172,40 @@
   const applyQ=panZoom('qScroll','qStage','q',.08,4),applyA=panZoom('aScroll','aStage','a',.2,3);
   function qShow(n){const arr=pages(problem?.questionPages);qPage=clamp(Number(n)||0,0,Math.max(0,arr.length-1));$('qBadge').textContent=arr.length?'문제 '+(qPage+1)+'/'+arr.length+'쪽':'문제 없음';ink.q.clear();if(!arr.length){$('qImg').removeAttribute('src');return}const img=$('qImg'),st=$('qStage'),sc=$('qScroll');img.onload=()=>{const w=img.naturalWidth||1,h=img.naturalHeight||1;st.dataset.w=w;st.dataset.h=h;qScale=clamp((sc.clientWidth-8)/w,.08,1.5);applyQ(qScale);ink.q.resize();sc.scrollLeft=0;sc.scrollTop=0};img.src=arr[qPage]}
   function answerReset(){const st=$('aStage'),sc=$('aScroll'),w=900,h=1300;st.dataset.w=w;st.dataset.h=h;ink.a.clear();aFitScale=clamp((sc.clientWidth-8)/w,.2,1);applyA(aFitScale);ink.a.resize();sc.scrollLeft=0;sc.scrollTop=0}
-  function open(data){problem=data.problem;index=data.index;total=data.total;mode=data.mode;elapsedBase=0;startedAt=Date.now();$('solve').classList.remove('hidden');$('score').classList.add('hidden');$('title').textContent=problem.title||((problem.session?problem.session+' ':'')+(problem.subject||'')+' 문제');$('setBadge').textContent=(index+1)+'/'+total+' · '+(mode==='outline'?'목차연습':'실전답안');qShow(0);answerReset();clearInterval(timer);timer=setInterval(tick,500);tick();$('status').textContent=''}
-  function submit(){elapsedBase=elapsed();clearInterval(timer);timer=null;$('solve').classList.add('hidden');$('score').classList.remove('hidden');$('scoreMeta').textContent=(problem.title||'문제')+' · '+fmt(elapsedBase);$('scoreValue').value='';$('scoreValue').max=problem.maxScore||'';$('review').value='true';$('completion').value=mode==='outline'?'목차만':'완성';$('memo').value='';const box=$('checklist');box.innerHTML='';const pts=Array.isArray(problem.points)&&problem.points.length?problem.points:String(problem.pointsText||'').split(/\n+/).map(x=>x.trim()).filter(Boolean);if(!pts.length)box.textContent='채점포인트 없음';else pts.forEach((x,i)=>{const l=document.createElement('label');l.className='check';l.innerHTML='<input type="checkbox"><span></span>';l.querySelector('span').textContent=x;box.appendChild(l)});expShow(0)}
-  function expShow(n){const arr=pages(problem?.explanationPages);expPage=clamp(Number(n)||0,0,Math.max(0,arr.length-1));$('expBadge').textContent=arr.length?'해설 '+(expPage+1)+'/'+arr.length+'쪽':'해설 이미지 없음';if(arr.length){$('expImg').src=arr[expPage];$('expImg').style.display='block'}else{$('expImg').removeAttribute('src');$('expImg').style.display='none'}$('model').textContent=problem.modelText||''}
-  function back(){ $('score').classList.add('hidden');$('solve').classList.remove('hidden');startedAt=Date.now();clearInterval(timer);timer=setInterval(tick,500);tick() }
+  let answerView=null;
+  function fitScoreAnswer(){
+    const width=$('scoreAnswer').clientWidth;
+    if(!width)return;
+    const paperWidth=Number($('aStage').dataset.w);
+    applyA(Math.min(width/paperWidth,1));
+  }
+
+  function showScoreAnswer(){
+    const scroll=$('aScroll'),preview=$('scoreAnswer');
+    answerView={scale:aScale,left:scroll.scrollLeft,top:scroll.scrollTop};
+    // The preview displays the same page and ink as the editor.
+    preview.appendChild($('aStage'));
+    fitScoreAnswer();
+    $('score').querySelector('.scorebody').scrollTop=0;
+    preview.scrollTop=0;
+    ink.a.resize();
+  }
+
+  function restoreAnswer(){
+    if(!answerView)return;
+    const scroll=$('aScroll');
+    scroll.appendChild($('aStage'));
+    applyA(answerView.scale);
+    scroll.scrollLeft=answerView.left;
+    scroll.scrollTop=answerView.top;
+    answerView=null;
+    ink.a.resize();
+  }
+
+  function open(data){problem=data.problem;index=data.index;total=data.total;mode=data.mode;elapsedBase=0;startedAt=Date.now();$('solve').classList.remove('hidden');$('score').classList.add('hidden');restoreAnswer();$('title').textContent=problem.title||((problem.session?problem.session+' ':'')+(problem.subject||'')+' 문제');$('setBadge').textContent=(index+1)+'/'+total+' · '+(mode==='outline'?'목차연습':'실전답안');qShow(0);answerReset();clearInterval(timer);timer=setInterval(tick,500);tick();$('status').textContent=''}
+  function submit(){elapsedBase=elapsed();clearInterval(timer);timer=null;$('score').classList.remove('hidden');showScoreAnswer();$('solve').classList.add('hidden');$('scoreMeta').textContent=(problem.title||'문제')+' · '+fmt(elapsedBase);$('scoreValue').value='';$('scoreValue').max=problem.maxScore||'';$('review').value='true';$('completion').value=mode==='outline'?'목차만':'완성';$('memo').value='';const box=$('checklist');box.innerHTML='';const pts=Array.isArray(problem.points)&&problem.points.length?problem.points:String(problem.pointsText||'').split(/\n+/).map(x=>x.trim()).filter(Boolean);if(!pts.length)box.textContent='채점포인트 없음';else pts.forEach((x,i)=>{const l=document.createElement('label');l.className='check';l.innerHTML='<input type="checkbox"><span></span>';l.querySelector('span').textContent=x;box.appendChild(l)});expShow(0)}
+  function expShow(n){const arr=pages(problem?.explanationPages);expPage=clamp(Number(n)||0,0,Math.max(0,arr.length-1));$('expBadge').textContent=arr.length?'해설 '+(expPage+1)+'/'+arr.length+'쪽':'해설 이미지 없음';$('prevExp').disabled=expPage===0;$('nextExp').disabled=expPage>=arr.length-1;if(arr.length){$('expImg').src=arr[expPage];$('expImg').style.display='block'}else{$('expImg').removeAttribute('src');$('expImg').style.display='none'}$('model').textContent=problem.modelText||'';const viewer=$('expImg').parentElement;viewer.classList.toggle('hidden',!arr.length&&!problem.modelText);viewer.scrollTop=0}
+  function back(){ $('score').classList.add('hidden');$('solve').classList.remove('hidden');restoreAnswer();startedAt=Date.now();clearInterval(timer);timer=setInterval(tick,500);tick() }
   function sendSave(action){parent.postMessage({source:'essay-lite91',type:'save',action,data:{elapsedMs:elapsedBase||elapsed(),score:$('scoreValue').value===''?null:Number($('scoreValue').value),difficulty:$('difficulty').value,needReview:$('review').value,completion:$('completion').value,memo:$('memo').value.trim(),checkedPoints:Array.from(document.querySelectorAll('#checklist input')).map(x=>!!x.checked)}},'*');$('scoreStatus').textContent='저장 중...'}
   window.addEventListener('message',e=>{const m=e.data||{};if(e.source!==parent||m.source!=='essay-lite91-parent')return;if(m.type==='open')open(m);else if(m.type==='saved')$('scoreStatus').textContent='저장 완료'});
   $('qPen').onclick=()=>setTool('q','pen');$('qErase').onclick=()=>setTool('q','eraser');$('qClear').onclick=()=>ink.q.clear();$('qSize').oninput=e=>qSize=Number(e.target.value||3);$('aPen').onclick=()=>setTool('a','pen');$('aErase').onclick=()=>setTool('a','eraser');$('aClear').onclick=()=>ink.a.clear();$('aSize').oninput=e=>aSize=Number(e.target.value||3);$('prevQ').onclick=()=>qShow(qPage-1);$('nextQ').onclick=()=>qShow(qPage+1);$('fitQ').onclick=()=>{const sc=$('qScroll'),st=$('qStage');qScale=clamp((sc.clientWidth-8)/Number(st.dataset.w||1),.08,1.5);applyQ(qScale);sc.scrollLeft=0;sc.scrollTop=0};$('zoomOutQ').onclick=()=>applyQ(qScale-.15);$('zoomInQ').onclick=()=>applyQ(qScale+.15);$('fitA').onclick=()=>{const sc=$('aScroll'),st=$('aStage');aScale=clamp((sc.clientWidth-8)/Number(st.dataset.w||900),.2,1);applyA(aScale);sc.scrollLeft=0;sc.scrollTop=0};$('zoomOutA').onclick=()=>applyA(aScale-.15);$('zoomInA').onclick=()=>applyA(aScale+.15);$('submit').onclick=submit;$('exit').onclick=()=>parent.postMessage({source:'essay-lite91',type:'exit'},'*');$('back').onclick=back;$('prevExp').onclick=()=>expShow(expPage-1);$('nextExp').onclick=()=>expShow(expPage+1);$('save').onclick=()=>sendSave('stay');$('saveNext').onclick=()=>sendSave('next');$('saveFinish').onclick=()=>sendSave('finish');
