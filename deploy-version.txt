@@ -1,6 +1,7 @@
-Essay v96 ISOLATED LITE RUNTIME: existing app.js is retained only for problem/list/review/IndexedDB management; all solve handwriting, touch pan/pinch, answer canvas, submit, explanation, and attempt-save interactions run inside a separate iframe so legacy document-level pointer/touch handlers cannot receive pen events. Continue/draft, Firebase/cloud sync, persistent ink, and answer-ink history are removed. Attempt records keep metadata only for solved/unseen/review status.
+Essay v97 ISOLATED LITE RUNTIME: existing app.js is retained only for problem/list/review/IndexedDB management; all solve handwriting, touch pan/pinch, answer canvas, submit, explanation, and attempt-save interactions run inside a separate iframe so legacy document-level pointer/touch handlers cannot receive pen events. Continue/draft, Firebase/cloud sync, persistent ink, and answer-ink history are removed. Attempt records keep metadata only for solved/unseen/review status.
 
 Restores the ruled answer paper, with lines that scale with handwriting when zooming.
 Renders pen strokes at screen resolution and redraws them sharply after zooming.
 Shows the handwritten answer alongside the explanation after submitting.
 Restores red answer corrections and independent scrolling in each scoring pane, with vertical comparison in narrow or portrait windows.
+Accepts stylus input only for ink, locks touch navigation during strokes, and captures the stroke endpoint.

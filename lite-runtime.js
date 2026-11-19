@@ -30,7 +30,9 @@
   .score-paper{height:min(40vh,620px);overflow:auto;overscroll-behavior:contain;background:#eef1f5}
   .score-paper .stage{margin-inline:auto}
   .score-paper #aCanvas{pointer-events:none}
-  #scoreCorrection{touch-action:pan-x pan-y}
+  #scoreAnswer{touch-action:none}
+  .scorebody,.score-paper.exp{scrollbar-gutter:stable}
+  .writing .scorebody,.writing .score-paper.exp{overflow:hidden}
   .score-edit-tools{padding:3px 0;border:0}
   .score-comparison #model{margin:0;padding:8px;white-space:pre-wrap;overflow-wrap:anywhere}
   .score-comparison #model:empty{display:none}
@@ -63,6 +65,23 @@
   (()=>{const $=id=>document.getElementById(id),clamp=(v,a,b)=>Math.max(a,Math.min(b,v));let problem=null,index=0,total=1,mode='outline',qPage=0,expPage=0,qScale=1,aScale=1,aFitScale=1,startedAt=0,elapsedBase=0,timer=null;
   const pages=v=>Array.isArray(v)?v.filter(Boolean):[];const fmt=ms=>{const s=Math.floor(Math.max(0,ms)/1000);return Math.floor(s/60).toString().padStart(2,'0')+':'+(s%60).toString().padStart(2,'0')};const elapsed=()=>elapsedBase+(Date.now()-startedAt);
   function tick(){const e=elapsed();$('timer').textContent=fmt(e);const lim=Number(problem?.timeLimit||0)*60000;$('limit').textContent=lim?(e<=lim?'남은 '+fmt(lim-e):'초과 '+fmt(e-lim)):''}
+  let writing=false;
+  const resetTouchGestures=[];
+  function setWriting(value){
+    writing=value;
+    document.documentElement.classList.toggle('writing',value);
+    if(value)resetTouchGestures.forEach(reset=>reset());
+  }
+
+  function blockHandTouch(event){
+    if(writing&&event.cancelable&&Array.from(event.changedTouches).some(touch=>touch.touchType!=='stylus')){
+      event.preventDefault();
+    }
+  }
+  for(const type of ['touchstart','touchmove','touchend']){
+    document.addEventListener(type,blockHandTouch,{capture:true,passive:false});
+  }
+
   function bindInk(id,prefix,color){
     const canvas=$(id),stage=canvas.parentElement,ctx=canvas.getContext('2d');
     const strokes=[];
@@ -132,7 +151,7 @@
     }
 
     canvas.addEventListener('pointerdown',event=>{
-      if(event.pointerType==='touch'||active||(prefix==='c'&&event.pointerType!=='pen'))return;
+      if(event.pointerType!=='pen'||writing)return;
       const rect=canvas.getBoundingClientRect();
       if(rect.width<2||rect.height<2||!Number(stage.dataset.w))return;
       event.preventDefault();
@@ -143,35 +162,46 @@
       const stroke={eraser:erasing,size,points:[point(event,rect)]};
       strokes.push(stroke);
       active={id:event.pointerId,stroke};
+      setWriting(true);
       paint(stroke);
     },true);
+
+    function extendStroke(event,samples=[]){
+      const rect=canvas.getBoundingClientRect();
+      if(!rect.width||!rect.height)return;
+      const stroke=active.stroke,start=stroke.points.length;
+      for(const sample of [...samples,event]){
+        const next=point(sample,rect),previous=stroke.points[stroke.points.length-1];
+        if(next.x!==previous.x||next.y!==previous.y)stroke.points.push(next);
+      }
+      if(stroke.points.length>start)paint(stroke,start);
+    }
 
     canvas.addEventListener('pointermove',event=>{
       if(event.pointerId!==active?.id)return;
       event.preventDefault();
       event.stopPropagation();
-      const rect=canvas.getBoundingClientRect();
-      if(!rect.width||!rect.height)return;
-      let samples;
-      try{samples=event.getCoalescedEvents?.()}catch{}
-      const stroke=active.stroke,start=stroke.points.length;
-      for(const sample of samples?.length?samples:[event]){
-        const next=point(sample,rect),previous=stroke.points[stroke.points.length-1];
-        if(next.x!==previous.x||next.y!==previous.y)stroke.points.push(next);
-      }
-      if(stroke.points.length>start)paint(stroke,start);
+      extendStroke(event,event.getCoalescedEvents?.());
     },true);
+
+    function finishStroke(){
+      if(!active)return;
+      active=null;
+      setWriting(false);
+    }
 
     function end(event){
       if(event.pointerId!==active?.id)return;
       event.preventDefault();
       event.stopPropagation();
-      active=null;
+      if(event.type==='pointerup')extendStroke(event);
+      finishStroke();
     }
     for(const type of ['pointerup','pointercancel','lostpointercapture'])canvas.addEventListener(type,end,true);
+    window.addEventListener('blur',finishStroke);
 
     function clear(){
-      active=null;
+      finishStroke();
       strokes.length=0;
       ctx.resetTransform();
       ctx.clearRect(0,0,canvas.width,canvas.height);
@@ -188,12 +218,96 @@
     ink.q.scheduleResize();
     ink.a.scheduleResize();
   });
-  function panZoom(scroll,stage,key,min,max){const sc=$(scroll),st=$(stage),touch=new Map();let pan=null,pinch=null;const ls=()=>[...touch.values()],dist=()=>{const p=ls();return p.length<2?1:Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y)||1},mid=()=>{const p=ls();return p.length<2?{x:0,y:0}:{x:(p[0].x+p[1].x)/2,y:(p[0].y+p[1].y)/2}};const apply=v=>{if(key==='q')qScale=clamp(v,min,max);else {
-      aScale=clamp(v,min,max);
-      $('aCanvas').style.setProperty('--answer-zoom',aScale/aFitScale);
+  function bindTouchNavigation(scroll,zoom){
+    const touches=new Map();
+    let pan=null,pinch=null;
+
+    function reset(){
+      touches.clear();
+      pan=null;
+      pinch=null;
     }
-    const z=key==='q'?qScale:aScale,w=Number(st.dataset.w||1),h=Number(st.dataset.h||1);st.style.width=Math.round(w*z)+'px';st.style.height=Math.round(h*z)+'px';ink[key].scheduleResize()};sc.addEventListener('pointerdown',e=>{if(e.pointerType!=='touch')return;e.preventDefault();try{sc.setPointerCapture(e.pointerId)}catch{};touch.set(e.pointerId,{x:e.clientX,y:e.clientY});if(touch.size>=2){const m=mid(),r=sc.getBoundingClientRect(),z=key==='q'?qScale:aScale;pinch={d:dist(),z,cx:(sc.scrollLeft+m.x-r.left)/z,cy:(sc.scrollTop+m.y-r.top)/z};pan=null}else pan={id:e.pointerId,x:e.clientX,y:e.clientY,l:sc.scrollLeft,t:sc.scrollTop}},true);sc.addEventListener('pointermove',e=>{if(e.pointerType!=='touch'||!touch.has(e.pointerId))return;e.preventDefault();touch.set(e.pointerId,{x:e.clientX,y:e.clientY});if(touch.size>=2&&pinch){const m=mid(),r=sc.getBoundingClientRect(),z=clamp(pinch.z*dist()/Math.max(1,pinch.d),min,max);apply(z);sc.scrollLeft=Math.max(0,pinch.cx*z-(m.x-r.left));sc.scrollTop=Math.max(0,pinch.cy*z-(m.y-r.top))}else if(pan&&pan.id===e.pointerId){sc.scrollLeft=pan.l-(e.clientX-pan.x);sc.scrollTop=pan.t-(e.clientY-pan.y)}},true);const end=e=>{if(e.pointerType!=='touch'||!touch.has(e.pointerId))return;touch.delete(e.pointerId);if(touch.size===1){const [id,p]=[...touch.entries()][0];pan={id,x:p.x,y:p.y,l:sc.scrollLeft,t:sc.scrollTop};pinch=null}else if(!touch.size){pan=null;pinch=null}};sc.addEventListener('pointerup',end,true);sc.addEventListener('pointercancel',end,true);return apply}
+    resetTouchGestures.push(reset);
+
+    function remember(event){
+      touches.set(event.pointerId,{x:event.clientX,y:event.clientY});
+    }
+
+    function beginPan(id,point){
+      pan={id,x:point.x,y:point.y,left:scroll.scrollLeft,top:scroll.scrollTop};
+    }
+
+    function measurePinch(){
+      const [a,b]=touches.values();
+      const rect=scroll.getBoundingClientRect();
+      return {
+        distance:Math.max(1,Math.hypot(a.x-b.x,a.y-b.y)),
+        x:(a.x+b.x)/2-rect.left,
+        y:(a.y+b.y)/2-rect.top
+      };
+    }
+
+    scroll.addEventListener('pointerdown',event=>{
+      if(event.pointerType!=='touch'||writing)return;
+      event.preventDefault();
+      try{scroll.setPointerCapture(event.pointerId)}catch{}
+      remember(event);
+      if(zoom&&touches.size===2){
+        const {distance,x,y}=measurePinch(),scale=zoom.getScale();
+        pinch={distance,scale,left:(scroll.scrollLeft+x)/scale,top:(scroll.scrollTop+y)/scale};
+        pan=null;
+      }else if(!pan&&!pinch){
+        beginPan(event.pointerId,touches.get(event.pointerId));
+      }
+    },true);
+
+    scroll.addEventListener('pointermove',event=>{
+      if(writing||!touches.has(event.pointerId))return;
+      event.preventDefault();
+      remember(event);
+      if(pinch){
+        const {distance,x,y}=measurePinch();
+        const scale=zoom.apply(pinch.scale*distance/pinch.distance);
+        scroll.scrollLeft=pinch.left*scale-x;
+        scroll.scrollTop=pinch.top*scale-y;
+      }else if(pan?.id===event.pointerId){
+        scroll.scrollLeft=pan.left-(event.clientX-pan.x);
+        scroll.scrollTop=pan.top-(event.clientY-pan.y);
+      }
+    },true);
+
+    function end(event){
+      if(!touches.delete(event.pointerId))return;
+      if(!touches.size){
+        reset();
+      }else if((pinch&&touches.size===1)||pan?.id===event.pointerId){
+        pinch=null;
+        beginPan(...touches.entries().next().value);
+      }
+    }
+    for(const type of ['pointerup','pointercancel','lostpointercapture'])scroll.addEventListener(type,end,true);
+  }
+
+  function panZoom(scroll,stage,key,min,max){
+    const st=$(stage);
+    function apply(value){
+      const scale=clamp(value,min,max);
+      if(key==='q'){
+        qScale=scale;
+      }else{
+        aScale=scale;
+        $('aCanvas').style.setProperty('--answer-zoom',aScale/aFitScale);
+      }
+      st.style.width=Math.round(Number(st.dataset.w||1)*scale)+'px';
+      st.style.height=Math.round(Number(st.dataset.h||1)*scale)+'px';
+      ink[key].scheduleResize();
+      return scale;
+    }
+    bindTouchNavigation($(scroll),{getScale:()=>key==='q'?qScale:aScale,apply});
+    return apply;
+  }
   const applyQ=panZoom('qScroll','qStage','q',.08,4),applyA=panZoom('aScroll','aStage','a',.2,3);
+  bindTouchNavigation($('scoreAnswer'));
   function qShow(n){const arr=pages(problem?.questionPages);qPage=clamp(Number(n)||0,0,Math.max(0,arr.length-1));$('qBadge').textContent=arr.length?'문제 '+(qPage+1)+'/'+arr.length+'쪽':'문제 없음';ink.q.clear();if(!arr.length){$('qImg').removeAttribute('src');return}const img=$('qImg'),st=$('qStage'),sc=$('qScroll');img.onload=()=>{const w=img.naturalWidth||1,h=img.naturalHeight||1;st.dataset.w=w;st.dataset.h=h;qScale=clamp((sc.clientWidth-8)/w,.08,1.5);applyQ(qScale);ink.q.resize();sc.scrollLeft=0;sc.scrollTop=0};img.src=arr[qPage]}
   function answerReset(){const st=$('aStage'),sc=$('aScroll'),w=900,h=1300;st.dataset.w=w;st.dataset.h=h;ink.a.clear();ink.correction.clear();aFitScale=clamp((sc.clientWidth-8)/w,.2,1);applyA(aFitScale);ink.a.resize();sc.scrollLeft=0;sc.scrollTop=0}
   let answerView=null;

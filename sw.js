@@ -1,6 +1,6 @@
 'use strict';
-const CACHE_NAME='essay-pwa-v96';
-const APP_SHELL=['./?v=96','./index.html','./styles.css?v=96','./app.js?v=96','./lite-runtime.js?v=96','./manifest.webmanifest?v=96','./icon-192.png','./icon-512.png'];
+const CACHE_NAME='essay-pwa-v97';
+const APP_SHELL=['./?v=97','./index.html','./styles.css?v=97','./app.js?v=97','./lite-runtime.js?v=97','./manifest.webmanifest?v=97','./icon-192.png','./icon-512.png'];
 self.addEventListener('install',event=>{event.waitUntil(caches.open(CACHE_NAME).then(c=>c.addAll(APP_SHELL)));self.skipWaiting();});
 self.addEventListener('activate',event=>{event.waitUntil((async()=>{const keys=await caches.keys();await Promise.all(keys.filter(k=>k.startsWith('essay-pwa-')&&k!==CACHE_NAME).map(k=>caches.delete(k)));await self.clients.claim();})());});
 self.addEventListener('fetch',event=>{if(event.request.method!=='GET')return;const u=new URL(event.request.url);if(u.origin!==self.location.origin)return;const code=event.request.mode==='navigate'||/\.(?:js|css|webmanifest)$/.test(u.pathname);if(code){event.respondWith((async()=>{try{const r=await fetch(event.request,{cache:'no-store'});if(!r||!r.ok)throw new Error('http '+(r?.status||0));const c=await caches.open(CACHE_NAME);c.put(event.request,r.clone()).catch(()=>{});if(event.request.mode==='navigate')c.put('./index.html',r.clone()).catch(()=>{});return r}catch{return (await caches.match(event.request))||(await caches.match('./index.html'))||Response.error()}})());return}event.respondWith(caches.match(event.request).then(hit=>hit||fetch(event.request)));});
