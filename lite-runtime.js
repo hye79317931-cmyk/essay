@@ -34,6 +34,7 @@
   .scorebody,.score-paper.exp{scrollbar-gutter:stable}
   .writing .scorebody,.writing .score-paper.exp{overflow:hidden}
   .score-edit-tools{padding:3px 0;border:0}
+  .answer-pages button:disabled{opacity:.45}
   .score-comparison #model{margin:0;padding:8px;white-space:pre-wrap;overflow-wrap:anywhere}
   .score-comparison #model:empty{display:none}
   @media(min-width:821px) and (orientation:landscape){
@@ -42,11 +43,23 @@
   }
   @media(min-width:900px){.grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
   </style></head><body>
-  <section id="solve" class="hidden"><div class="bar"><strong id="title">문제</strong><span id="setBadge" class="badge"></span><span id="qBadge" class="badge"></span><span id="timer" class="badge">00:00</span><span id="limit" class="badge"></span><button id="prevQ">이전쪽</button><button id="nextQ">다음쪽</button><button id="fitQ">맞춤</button><button id="zoomOutQ">−</button><button id="zoomInQ">＋</button><button id="submit">제출</button><button id="exit">끝내기</button><span id="status" class="status"></span></div><div class="body"><div class="pane"><div id="qScroll" class="scroll"><div id="qStage" class="stage"><img id="qImg"><canvas id="qCanvas"></canvas></div></div><div class="tools"><button id="qPen" class="on">문제펜</button><button id="qErase">지우개</button><button id="qClear">필기삭제</button><label>굵기 <input id="qSize" type="range" min="1" max="14" value="3"></label></div></div><div class="divider"></div><div class="pane"><div id="aScroll" class="scroll"><div id="aStage" class="stage"><canvas id="aCanvas" class="answerCanvas"></canvas><canvas id="scoreCorrection" class="hidden" aria-label="답안 수정 필기"></canvas></div></div><div class="tools"><button id="aPen" class="on">답안펜</button><button id="aErase">지우개</button><button id="aClear">필기삭제</button><button id="fitA">맞춤</button><button id="zoomOutA">−</button><button id="zoomInA">＋</button><label>굵기 <input id="aSize" type="range" min="1" max="14" value="3"></label></div></div></div></section>
+  <section id="solve" class="hidden"><div class="bar"><strong id="title">문제</strong><span id="setBadge" class="badge"></span><span id="qBadge" class="badge"></span><span id="timer" class="badge">00:00</span><span id="limit" class="badge"></span><button id="prevQ">이전쪽</button><button id="nextQ">다음쪽</button><button id="fitQ">맞춤</button><button id="zoomOutQ">−</button><button id="zoomInQ">＋</button><button id="submit">제출</button><button id="exit">끝내기</button><span id="status" class="status"></span></div><div class="body"><div class="pane"><div id="qScroll" class="scroll"><div id="qStage" class="stage"><img id="qImg"><canvas id="qCanvas"></canvas></div></div><div class="tools"><button id="qPen" class="on">문제펜</button><button id="qErase">지우개</button><button id="qClear">필기삭제</button><label>굵기 <input id="qSize" type="range" min="1" max="14" value="3"></label></div></div><div class="divider"></div><div class="pane">
+      <div class="bar answer-pages" role="group" aria-label="답안 페이지">
+        <button id="prevA" aria-label="이전 답안">이전</button>
+        <span id="aBadge" class="badge" aria-live="polite"></span>
+        <button id="nextA" aria-label="다음 답안">다음</button>
+        <button id="addA">페이지 추가</button>
+      </div>
+      <div id="aScroll" class="scroll"><div id="aStage" class="stage"><canvas id="aCanvas" class="answerCanvas"></canvas><canvas id="scoreCorrection" class="hidden" aria-label="답안 수정 필기"></canvas></div></div><div class="tools"><button id="aPen" class="on">답안펜</button><button id="aErase">지우개</button><button id="aClear">필기삭제</button><button id="fitA">맞춤</button><button id="zoomOutA">−</button><button id="zoomInA">＋</button><label>굵기 <input id="aSize" type="range" min="1" max="14" value="3"></label></div></div></div></section>
   <section id="score" class="hidden"><div class="bar"><strong>자가채점</strong><span id="scoreMeta" class="badge"></span><button id="back">답안으로</button><span id="scoreStatus" class="status"></span></div><div class="scorebody">
     <div class="score-comparison">
       <section class="card" aria-labelledby="scoreAnswerTitle">
-        <div class="bar" style="padding:0;border:0"><strong id="scoreAnswerTitle">내 답안</strong></div>
+        <div class="bar answer-pages" style="padding:0;border:0">
+          <strong id="scoreAnswerTitle">내 답안</strong>
+          <button id="prevScoreA" aria-label="이전 답안">이전</button>
+          <span id="scoreABadge" class="badge" aria-live="polite"></span>
+          <button id="nextScoreA" aria-label="다음 답안">다음</button>
+        </div>
         <div class="bar score-edit-tools" role="group" aria-label="답안 수정 도구">
           <button id="cPen">수정펜</button>
           <button id="cErase">수정 지우개</button>
@@ -84,7 +97,7 @@
 
   function bindInk(id,prefix,color){
     const canvas=$(id),stage=canvas.parentElement,ctx=canvas.getContext('2d');
-    const strokes=[];
+    let strokes=[],needsRedraw=false;
     const pen=$(prefix+'Pen'),erase=$(prefix+'Erase'),sizeInput=$(prefix+'Size');
     let active=null,resizeTimer,erasing=false;
 
@@ -123,6 +136,20 @@
       ctx.stroke();
     }
 
+    function redraw(){
+      ctx.resetTransform();
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      for(const stroke of strokes)paint(stroke);
+      needsRedraw=false;
+    }
+
+    function setStrokes(next){
+      finishStroke();
+      strokes=next;
+      needsRedraw=true;
+      resize();
+    }
+
     function resize(){
       clearTimeout(resizeTimer);
       const width=canvas.clientWidth,height=canvas.clientHeight;
@@ -131,10 +158,12 @@
       const density=Math.min(window.devicePixelRatio||1,4096/width,4096/height,Math.sqrt((8*1024*1024)/(width*height)));
       const pixelsWide=Math.max(1,Math.floor(width*density));
       const pixelsHigh=Math.max(1,Math.floor(height*density));
-      if(canvas.width===pixelsWide&&canvas.height===pixelsHigh)return;
-      canvas.width=pixelsWide;
-      canvas.height=pixelsHigh;
-      for(const stroke of strokes)paint(stroke);
+      if(canvas.width!==pixelsWide||canvas.height!==pixelsHigh){
+        canvas.width=pixelsWide;
+        canvas.height=pixelsHigh;
+        needsRedraw=true;
+      }
+      if(needsRedraw)redraw();
     }
 
     function scheduleResize(){
@@ -203,10 +232,9 @@
     function clear(){
       finishStroke();
       strokes.length=0;
-      ctx.resetTransform();
-      ctx.clearRect(0,0,canvas.width,canvas.height);
+      redraw();
     }
-    return {resize,scheduleResize,clear};
+    return {resize,scheduleResize,setStrokes,clear};
   }
   const ink={
     q:bindInk('qCanvas','q','#0ea5e9'),
@@ -309,8 +337,43 @@
   const applyQ=panZoom('qScroll','qStage','q',.08,4),applyA=panZoom('aScroll','aStage','a',.2,3);
   bindTouchNavigation($('scoreAnswer'));
   function qShow(n){const arr=pages(problem?.questionPages);qPage=clamp(Number(n)||0,0,Math.max(0,arr.length-1));$('qBadge').textContent=arr.length?'문제 '+(qPage+1)+'/'+arr.length+'쪽':'문제 없음';ink.q.clear();if(!arr.length){$('qImg').removeAttribute('src');return}const img=$('qImg'),st=$('qStage'),sc=$('qScroll');img.onload=()=>{const w=img.naturalWidth||1,h=img.naturalHeight||1;st.dataset.w=w;st.dataset.h=h;qScale=clamp((sc.clientWidth-8)/w,.08,1.5);applyQ(qScale);ink.q.resize();sc.scrollLeft=0;sc.scrollTop=0};img.src=arr[qPage]}
-  function answerReset(){const st=$('aStage'),sc=$('aScroll'),w=900,h=1300;st.dataset.w=w;st.dataset.h=h;ink.a.clear();ink.correction.clear();aFitScale=clamp((sc.clientWidth-8)/w,.2,1);applyA(aFitScale);ink.a.resize();sc.scrollLeft=0;sc.scrollTop=0}
-  let answerView=null;
+  let answerView=null,answerPages=[],answerPage=0;
+  function blankAnswerPage(){
+    return {strokes:[],corrections:[]};
+  }
+
+  function showAnswerPage(index){
+    answerPage=clamp(index,0,answerPages.length-1);
+    const page=answerPages[answerPage];
+    ink.a.setStrokes(page.strokes);
+    ink.correction.setStrokes(page.corrections);
+
+    $('aBadge').textContent=$('scoreABadge').textContent='답안 '+(answerPage+1)+'/'+answerPages.length+'쪽';
+    $('prevA').disabled=$('prevScoreA').disabled=answerPage===0;
+    $('nextA').disabled=$('nextScoreA').disabled=answerPage===answerPages.length-1;
+
+    const scroll=$(answerView?'scoreAnswer':'aScroll');
+    scroll.scrollTop=0;
+    scroll.scrollLeft=0;
+  }
+
+  function answerReset(){
+    const stage=$('aStage'),width=900,height=1300;
+    stage.dataset.w=width;
+    stage.dataset.h=height;
+    answerPages=[blankAnswerPage()];
+    aFitScale=clamp(($('aScroll').clientWidth-8)/width,.2,1);
+    applyA(aFitScale);
+    showAnswerPage(0);
+  }
+
+  $('addA').onclick=()=>{
+    answerPages.push(blankAnswerPage());
+    showAnswerPage(answerPages.length-1);
+  };
+  $('prevA').onclick=$('prevScoreA').onclick=()=>showAnswerPage(answerPage-1);
+  $('nextA').onclick=$('nextScoreA').onclick=()=>showAnswerPage(answerPage+1);
+
   function fitScoreAnswer(){
     const width=$('scoreAnswer').clientWidth;
     if(!width)return;
@@ -321,15 +384,13 @@
 
   function showScoreAnswer(){
     const scroll=$('aScroll'),preview=$('scoreAnswer');
-    answerView={scale:aScale,left:scroll.scrollLeft,top:scroll.scrollTop};
+    answerView={page:answerPage,scale:aScale,left:scroll.scrollLeft,top:scroll.scrollTop};
     // The preview displays the same page and ink as the editor.
     preview.appendChild($('aStage'));
     $('scoreCorrection').classList.remove('hidden');
     fitScoreAnswer();
     $('score').querySelector('.scorebody').scrollTop=0;
-    preview.scrollTop=0;
-    ink.a.resize();
-    ink.correction.resize();
+    showAnswerPage(0);
   }
 
   function restoreAnswer(){
@@ -337,11 +398,12 @@
     const scroll=$('aScroll');
     $('scoreCorrection').classList.add('hidden');
     scroll.appendChild($('aStage'));
-    applyA(answerView.scale);
-    scroll.scrollLeft=answerView.left;
-    scroll.scrollTop=answerView.top;
+    const {page,scale,left,top}=answerView;
     answerView=null;
-    ink.a.resize();
+    applyA(scale);
+    showAnswerPage(page);
+    scroll.scrollLeft=left;
+    scroll.scrollTop=top;
   }
 
   function open(data){problem=data.problem;index=data.index;total=data.total;mode=data.mode;elapsedBase=0;startedAt=Date.now();$('solve').classList.remove('hidden');$('score').classList.add('hidden');restoreAnswer();$('title').textContent=problem.title||((problem.session?problem.session+' ':'')+(problem.subject||'')+' 문제');$('setBadge').textContent=(index+1)+'/'+total+' · '+(mode==='outline'?'목차연습':'실전답안');qShow(0);answerReset();clearInterval(timer);timer=setInterval(tick,500);tick();$('status').textContent=''}
