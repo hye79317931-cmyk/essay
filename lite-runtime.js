@@ -5,7 +5,7 @@
 */
 (function essayLiteRuntimeV91(){
   if(window.__essayLiteRuntimeV91)return;window.__essayLiteRuntimeV91=true;
-  const lite={session:null,frame:null,attemptIds:new Map()};
+  const lite={session:null,frame:null,frameTimeout:null,attemptIds:new Map()};
   const problemById=id=>(state.problems||[]).find(p=>String(p.id)===String(id))||null;
   const current=()=>lite.session?problemById(lite.session.ids[lite.session.index]):null;
 
@@ -16,7 +16,7 @@
   document.getElementById('continueBtn')?.classList.add('hidden');
   document.getElementById('essayFirebaseSyncCardV36')?.remove();
 
-  function frameHTML(){return `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><style>
+  function frameHTML(){return String.raw`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><style>
   *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;font-family:system-ui,-apple-system,sans-serif;background:#f5f7fb;color:#111827}button,input,select,textarea{font:inherit}button{border:1px solid #cfd5df;background:#fff;border-radius:8px;padding:6px 10px;min-height:34px}button.on{outline:2px solid #111827}.hidden{display:none!important}
   #solve,#score{position:fixed;inset:0;display:flex;flex-direction:column;background:#f5f7fb}.bar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:7px;background:#fff;border-bottom:1px solid #d7dce5;flex:0 0 auto}.badge{font-size:12px;font-weight:700;padding:4px 7px;border:1px solid #d7dce5;border-radius:999px;background:#fff}.body{display:grid;grid-template-rows:minmax(0,52%) 8px minmax(0,48%);flex:1;min-height:0}.pane{display:flex;flex-direction:column;min-height:0;background:#fff}.divider{background:#d7dce5}.scroll{position:relative;flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;touch-action:none;background:#eef1f5}.stage{position:relative;background:#fff}.stage img,.stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block}.stage img{pointer-events:none;user-select:none;-webkit-user-drag:none}.stage canvas{touch-action:none}.tools{display:flex;gap:6px;align-items:center;padding:5px 7px;overflow-x:auto;background:#fff;border-top:1px solid #e1e5eb;flex:0 0 auto}.tools>*{white-space:nowrap}.scorebody{overflow:auto;padding:10px;flex:1}.card{background:#fff;border:1px solid #d8dee8;border-radius:12px;padding:10px;margin-bottom:10px}.exp{height:min(52vh,620px);overflow:auto;background:#eef1f5}.exp img{display:block;max-width:100%;height:auto;margin:auto}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.grid label{display:flex;flex-direction:column;gap:4px;font-size:13px}.grid input,.grid select,textarea{width:100%}.check{display:flex;gap:6px;margin:5px 0}.status{margin-left:auto;font-size:12px;font-weight:700}.answerCanvas{background:#fff}
   @media(min-width:900px){.grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
@@ -39,20 +39,86 @@
   function expShow(n){const arr=pages(problem?.explanationPages);expPage=clamp(Number(n)||0,0,Math.max(0,arr.length-1));$('expBadge').textContent=arr.length?'해설 '+(expPage+1)+'/'+arr.length+'쪽':'해설 이미지 없음';if(arr.length){$('expImg').src=arr[expPage];$('expImg').style.display='block'}else{$('expImg').removeAttribute('src');$('expImg').style.display='none'}$('model').textContent=problem.modelText||''}
   function back(){ $('score').classList.add('hidden');$('solve').classList.remove('hidden');startedAt=Date.now();clearInterval(timer);timer=setInterval(tick,500);tick() }
   function sendSave(action){parent.postMessage({source:'essay-lite91',type:'save',action,data:{elapsedMs:elapsedBase||elapsed(),score:$('scoreValue').value===''?null:Number($('scoreValue').value),difficulty:$('difficulty').value,needReview:$('review').value,completion:$('completion').value,memo:$('memo').value.trim(),checkedPoints:Array.from(document.querySelectorAll('#checklist input')).map(x=>!!x.checked)}},'*');$('scoreStatus').textContent='저장 중...'}
-  window.addEventListener('message',e=>{const m=e.data||{};if(m.source!=='essay-lite91-parent')return;if(m.type==='open')open(m);else if(m.type==='saved')$('scoreStatus').textContent='저장 완료';else if(m.type==='close'){clearInterval(timer);$('solve').classList.add('hidden');$('score').classList.add('hidden')}});
+  window.addEventListener('message',e=>{const m=e.data||{};if(e.source!==parent||m.source!=='essay-lite91-parent')return;if(m.type==='open')open(m);else if(m.type==='saved')$('scoreStatus').textContent='저장 완료'});
   drawBind('qCanvas','q');drawBind('aCanvas','a');$('qPen').onclick=()=>setTool('q','pen');$('qErase').onclick=()=>setTool('q','eraser');$('qClear').onclick=()=>clear('qCanvas');$('qSize').oninput=e=>qSize=Number(e.target.value||3);$('aPen').onclick=()=>setTool('a','pen');$('aErase').onclick=()=>setTool('a','eraser');$('aClear').onclick=()=>clear('aCanvas');$('aSize').oninput=e=>aSize=Number(e.target.value||3);$('prevQ').onclick=()=>qShow(qPage-1);$('nextQ').onclick=()=>qShow(qPage+1);$('fitQ').onclick=()=>{const sc=$('qScroll'),st=$('qStage');qScale=clamp((sc.clientWidth-8)/Number(st.dataset.w||1),.08,1.5);applyQ(qScale);sc.scrollLeft=0;sc.scrollTop=0};$('zoomOutQ').onclick=()=>applyQ(qScale-.15);$('zoomInQ').onclick=()=>applyQ(qScale+.15);$('fitA').onclick=()=>{const sc=$('aScroll'),st=$('aStage');aScale=clamp((sc.clientWidth-8)/Number(st.dataset.w||900),.2,1);applyA(aScale);sc.scrollLeft=0;sc.scrollTop=0};$('zoomOutA').onclick=()=>applyA(aScale-.15);$('zoomInA').onclick=()=>applyA(aScale+.15);$('submit').onclick=submit;$('exit').onclick=()=>parent.postMessage({source:'essay-lite91',type:'exit'},'*');$('back').onclick=back;$('prevExp').onclick=()=>expShow(expPage-1);$('nextExp').onclick=()=>expShow(expPage+1);$('save').onclick=()=>sendSave('stay');$('saveNext').onclick=()=>sendSave('next');$('saveFinish').onclick=()=>sendSave('finish');
   parent.postMessage({source:'essay-lite91',type:'ready'},'*');})();
-  <\/script></body></html>`}
+  </script></body></html>`}
 
-  function ensureFrame(){
-    if(lite.frame)return lite.frame;
-    const f=document.createElement('iframe');f.id='essayLiteFrameV91';f.setAttribute('title','경량 문제풀이');f.style.cssText='position:fixed;inset:0;width:100%;height:100%;border:0;z-index:2147483000;background:#f5f7fb;display:none';f.srcdoc=frameHTML();document.body.appendChild(f);lite.frame=f;return f;
+  function openFrame(){
+    const frame=document.createElement('iframe');
+    frame.id='essayLiteFrameV91';
+    frame.title='경량 문제풀이';
+    frame.style.cssText='position:fixed;inset:0;width:100%;height:100%;border:0;z-index:2147483000;background:#f5f7fb;display:none';
+    frame.srcdoc=frameHTML();
+    lite.frame=frame;
+    lite.frameTimeout=setTimeout(()=>{
+      close();
+      toast('문제풀이 화면을 열지 못했어요. 다시 시도해 주세요.');
+    },5000);
+    document.body.appendChild(frame);
   }
-  function postOpen(){const p=current();if(!p)return;const f=ensureFrame();f.style.display='block';f.contentWindow?.postMessage({source:'essay-lite91-parent',type:'open',problem:p,index:lite.session.index,total:lite.session.ids.length,mode:lite.session.mode},'*')}
-  function startLite(ids,mode){if(!Array.isArray(ids)||!ids.length)return;lite.session={ids:[...ids],index:0,mode:mode||'outline'};lite.attemptIds.clear();state.solve=lite.session;ensureFrame();setTimeout(postOpen,0)}
-  function close(){lite.frame&&(lite.frame.style.display='none');lite.session=null;state.solve=null;try{renderAll()}catch{}}
+
+  function postOpen(){
+    const problem=current();
+    if(!problem||!lite.frame)return;
+    lite.frame.style.display='block';
+    lite.frame.contentWindow.postMessage({
+      source:'essay-lite91-parent',
+      type:'open',
+      problem,
+      index:lite.session.index,
+      total:lite.session.ids.length,
+      mode:lite.session.mode
+    },'*');
+  }
+
+  function startLite(ids,mode){
+    if(!Array.isArray(ids)||!ids.length||!problemById(ids[0])||lite.frame)return;
+    lite.session={ids:[...ids],index:0,mode:mode||'outline'};
+    lite.attemptIds.clear();
+    state.solve=lite.session;
+    openFrame();
+  }
+
+  function close(){
+    clearTimeout(lite.frameTimeout);
+    lite.frame?.remove();
+    lite.frame=null;
+    lite.session=null;
+    state.solve=null;
+    renderAll();
+  }
   async function saveMeta(data){const p=current();if(!p||!lite.session)return null;const idx=lite.session.index;let id=lite.attemptIds.get(idx);if(!id){id=typeof uuid==='function'?uuid():`id_${Date.now()}`;lite.attemptIds.set(idx,id)}const row={id,problemId:p.id,subject:p.subject,session:p.session,mode:lite.session.mode,answer:'',elapsedMs:Number(data.elapsedMs||0),score:data.score,maxScore:p.maxScore||0,difficulty:data.difficulty||'중',needReview:data.needReview||'true',completion:data.completion||(lite.session.mode==='outline'?'목차만':'완성'),memo:data.memo||'',checkedPoints:Array.isArray(data.checkedPoints)?data.checkedPoints:[],completedAt:typeof nowIso==='function'?nowIso():new Date().toISOString()};await put(STORE_ATTEMPTS,row);const i=(state.attempts||[]).findIndex(a=>String(a.id)===String(id));if(i>=0)state.attempts[i]=row;else state.attempts.unshift(row);state.attempts.sort((a,b)=>String(b.completedAt||'').localeCompare(String(a.completedAt||'')));if(p.manualUnseenV78===true){p.manualUnseenV78=false;try{await put(STORE_PROBLEMS,p)}catch{}}return row}
-  window.addEventListener('message',async e=>{const m=e.data||{};if(m.source!=='essay-lite91')return;if(m.type==='ready'){if(lite.session)postOpen();return}if(m.type==='exit'){close();return}if(m.type==='save'){try{await saveMeta(m.data||{});lite.frame?.contentWindow?.postMessage({source:'essay-lite91-parent',type:'saved'},'*');if(m.action==='next'){if(lite.session.index>=lite.session.ids.length-1){close()}else{lite.session.index++;postOpen()}}else if(m.action==='finish')close()}catch(err){console.error('e91 save',err);try{toast('기록 저장 실패')}catch{}}}},false);
+  window.addEventListener('message',async event=>{
+    const message=event.data||{};
+    const {frame,session}=lite;
+    if(!frame||event.source!==frame.contentWindow||message.source!=='essay-lite91')return;
+    if(message.type==='ready'){
+      clearTimeout(lite.frameTimeout);
+      postOpen();
+      return;
+    }
+    if(message.type==='exit'){
+      close();
+      return;
+    }
+    if(message.type!=='save')return;
+
+    try{
+      await saveMeta(message.data||{});
+      if(lite.session!==session)return;
+      frame.contentWindow.postMessage({source:'essay-lite91-parent',type:'saved'},'*');
+      if(message.action==='finish'||(message.action==='next'&&session.index>=session.ids.length-1)){
+        close();
+      }else if(message.action==='next'){
+        session.index++;
+        postOpen();
+      }
+    }catch(error){
+      console.error('e91 save',error);
+      toast('기록 저장 실패');
+    }
+  });
 
   // Problem-solve filters: stop the legacy renderAll() fan-out and render only 50 solve cards.
   let solveLimitV91=50;
